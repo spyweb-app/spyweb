@@ -1,0 +1,28 @@
+name = "Custom Filter Example"
+url = "https://example-jobs.com/listings"
+selector = ".job-card"
+interval = 60
+
+fields = [
+  "title:h3.job-title",
+  "company:.company-name",
+  "salary:.salary-range",
+  "link:a.apply-link@href",
+  { name = "tags", selector = ".tags", att = "text" },
+]
+
+# No keywords here — the Lua hook handles all filtering logic
+# This means filter_item() in hook.lua takes over entirely
+
+[notification]
+enabled = true
+title = "💼 {item_count} matching jobs found"
+body = """
+{title} at {company}
+Salary: {salary}
+{link}
+"""
+
+[webhook]
+enabled = false
+url = "https://discord.com/api/webhooks/your-webhook-id"

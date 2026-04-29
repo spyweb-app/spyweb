@@ -1,0 +1,16 @@
+name = "VPS Sentinel"
+url = "https://news.ycombinator.com"
+selector = ".athing"
+interval = 300 # 5 minutes
+
+fields = [
+    "title:.titleline > a",
+    "link:.titleline > a@href"
+]
+
+# Standard desktop notifications are usually disabled on VPS
+[notification]
+enabled = false
+
+# hooks.lua persists failure state with job-scoped Lua storage so the circuit
+# breaker still works after restart or hot-reload.

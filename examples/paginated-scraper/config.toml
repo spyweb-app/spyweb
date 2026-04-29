@@ -1,0 +1,19 @@
+name = "Paginated Listings"
+url = "https://example-listings.com/search"
+selector = ".listing-item"
+interval = 120
+
+fields = [
+  "title:h3",
+  "price:.price",
+  "link:a@href",
+  { name = "location", selector = ".location", att = "text" },
+  { name = "posted", selector = "time", att = "datetime" },
+]
+
+# No keywords — the Lua hook does all filtering
+# keywords = []
+
+[notification]
+enabled = true
+title = "📋 {item_count} new listings (page {page})"

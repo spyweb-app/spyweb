@@ -1,0 +1,53 @@
+[package]
+name = "spyweb"
+version = "1.0.0"
+edition = "2024"
+authors = ["Kosher Kenn <kosherkenn12@gmail.com>"]
+description = "A lightweight, configurable scraper with Lua customization support"
+license = "MIT OR Apache-2.0"       
+repository = "https://github.com/spyweb-rs/spyweb"   
+readme = "README.md"
+keywords = ["scraper", "web-scraping", "list-scraper", "job-scraper", "lua"]
+categories = ["command-line-utilities", "web-programming"]
+rust-version = "1.94.1"
+exclude = ["tests/", "jobs/", "logs/"]
+
+[dependencies]
+anyhow = "1.0.102"
+# features = "0.10.0"
+# futures = "0.3.32"
+mlua = { version = "0.11.6", features = ["vendored", "send", "async", "serialize"] }
+notify = "8.2.0"
+notify-rust = {version = "4.15.0"}
+redb = "4.0.0"
+rouille = "3.6.2"
+scraper = "0.24.0"
+serde = { version = "1.0.228", features = ["derive"]}
+serde_json = "1.0.145"
+# smallvec = "1.15.1"
+smol = "2.0.2"
+toml = "1.1.2"
+ureq = { version = "3.3.0", default-features = false, features = ["rustls", "gzip", "socks-proxy", "brotli", "json"] }
+xxhash-rust = { version = "0.8", features = ["xxh3"] } 
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"], optional = true}
+open = {version = "5.3.4", optional = true}
+# winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
+tray-icon = {version = "0.22.0", optional=true}
+
+[features]
+luau = ["mlua/luau"]
+lua54 = ["mlua/lua54"]
+tray = ["tray-icon", "winit", "open"]
+default = ["luau"]
+
+[dev-dependencies]
+tempfile = "3.17"
+
+[profile.release]
+opt-level = "z"     
+lto = true          
+codegen-units = 1   
+panic = "abort"     
+strip = true        

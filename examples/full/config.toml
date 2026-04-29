@@ -1,0 +1,36 @@
+name = "Full Featured Job Example"
+enabled = false
+interval = 300
+debug = true
+url = "https://news.ycombinator.com"
+selector = ".athing"
+
+# 1. Fields: Mix of shorthand (name:selector@attr) and full object syntax
+fields = [
+  "title:.titleline > a",                                     # shorthand (defaults to @text)
+  { name = "link", selector = ".titleline > a", att = "href" }, # full object syntax
+  "score:+ .subline .score"                                   # shorthand with sibling selector
+]
+
+# 2. Filtering: Only items containing these keywords will be processed
+keywords = ["rust", "python", "ai", "zig"]
+search_fields = ["title"] # Optional: Only check these specific fields for keywords
+
+# 3. Request Customization: Custom headers for this specific job
+headers = { "User-Agent" = "SpyWeb/1.0 (Scraper)", "Accept-Language" = "en-US" }
+
+# 4. Proxy Configuration: Rotate through multiple proxies
+proxy = { enabled = false, rotate = "RoundRobin", urls = ["http://proxy1:8080", "http://proxy2:8080"] }
+
+# 5. Desktop Notifications: Customize the message shown on your desktop
+notification = { enabled = true, timeout = 5000, title = "HN Discovery: {job_name}", body = "Found {item_count} interesting threads!" }
+
+# 6. Webhooks: POST the JSON payload to your server
+webhook = { enabled = false, url = "https://api.example.com/webhook", headers = { "X-Api-Key" = "secret-123" } }
+
+# 7. Deduplication: Which fields determine if an item is "new"?
+# If any of these fields change, SpyWeb considers it a new item and notifies you.
+hash_fields = ["title", "link"]
+
+# hooks.lua uses plain Lua state for simple per-process counters.
+# Swap to store_* if you want that state to survive restart.

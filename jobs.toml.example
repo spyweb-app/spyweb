@@ -1,0 +1,49 @@
+# ==============================================================================
+# SpyWeb Main Jobs Configuration
+# ------------------------------------------------------------------------------
+# Use this file for simple jobs that don't require their own directory.
+# For advanced jobs with Lua hooks, place them in the 'jobs/' folder.
+# ==============================================================================
+
+[[jobs]]
+name = "Hacker News: Rust"
+enabled = true
+interval = 300
+url = "https://news.ycombinator.com"
+selector = ".athing"
+fields = [
+  "title:.titleline > a",
+  "link:.titleline > a@href",
+  "score:+ .subline .score"
+]
+keywords = ["rust", "wasm", "async"]
+notification = { title = "🦀 HN Rust Alert", body = "{title}\nScore: {score}" }
+
+[[jobs]]
+name = "GitHub: Trending Rust"
+enabled = true
+interval = 3600
+url = "https://github.com/trending/rust?since=daily"
+selector = "article.Box-row"
+fields = [
+  "repo:h2 a",
+  "link:h2 a@href",
+  "stars:div.f6 span.d-inline-block.float-sm-right"
+]
+# We don't use keywords here, we want to see everything that's trending!
+notification = { title = "⭐ Trending: {repo}", body = "Current Stars: {stars}" }
+
+[[jobs]]
+name = "Lobsters: Tech"
+enabled = false
+interval = 600
+url = "https://lobste.rs"
+selector = ".story"
+fields = [
+  "title:.u-url",
+  "link:.u-url@href",
+  "tags:.tags"
+]
+keywords = ["linux", "kernel", "security"]
+# No notifications, just print to console (debug=true)
+debug = true

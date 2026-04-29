@@ -1,0 +1,9 @@
+/target
+/jobs
+data
+jobs.toml
+test-*
+*.zip
+*.html
+*.json
+/docs/test*

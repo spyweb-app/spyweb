@@ -1,0 +1,29 @@
+name = "Job Board Monitor"
+url = "https://news.ycombinator.com/jobs"
+selector = ".athing"
+interval = 300
+
+fields = [
+  "title:.titleline > a",
+  "link:.titleline > a@href",
+]
+
+# Only match items containing these keywords (case-insensitive)
+# Remove or leave empty to capture all items
+keywords = ["rust", "go", "backend", "infrastructure"]
+
+# Limit keyword matching to specific fields only
+# search_fields = ["title"]
+
+[notification]
+enabled = true
+title = "🔍 {item_count} new jobs from {job_name}"
+body = """
+{title}
+{link}
+"""
+
+[webhook]
+enabled = false
+url = "https://your-webhook.example.com/jobs"
+# headers = { "Authorization" = "Bearer your-token" }

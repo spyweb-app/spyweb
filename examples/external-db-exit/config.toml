@@ -1,0 +1,9 @@
+name = "External DB Exit Pipeline"
+url = "https://news.ycombinator.com"
+selector = ".athing"
+fields = [
+  "title:.titleline > a",
+  "link:.titleline > a@href"
+]
+enabled = false
+interval = 300

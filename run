@@ -1,0 +1,150 @@
+#!/bin/bash
+
+# SpyWeb Dev Helper
+# Born from the pure frustration of typing long commands.
+
+set -e
+
+# Automatically move to the project root regardless of where the script is called from
+cd "$(dirname "$0")"
+
+# The one and only binary name
+BIN_NAME="spyweb"
+
+show_help() {
+    echo "Usage: ./run [option] [feature]"
+    echo ""
+    echo "Full options:"
+    echo "  win-debug       Build (debug) for Windows and run the .exe"
+    echo "  win-release     Build (release) for Windows"
+    echo "  win-release-all Build both binaries for Windows (release)"
+    echo "  linux-debug     Build (debug) for Linux and run"
+    echo "  linux-release   Build (release) for Linux"
+    echo "  win-tray-debug  Build (debug) for Windows Tray and run"
+    echo "  win-tray-release Build (release) for Windows Tray"
+    echo "  linux-tray-debug Build (debug) for Linux Tray and run"
+    echo "  watch           Use cargo-watch (auto-runs on save)"
+    echo ""
+    echo "Feature options:"
+    echo "  tray            Enable desktop-only features (tray icon, notifications)"
+    echo ""
+    echo "Short aliases (for the lazy):"
+    echo "  wd  = win-debug"
+    echo "  wr  = win-release"
+    echo "  wra = win-release-all"
+    echo "  ld  = linux-debug"
+    echo "  lr  = linux-release"
+    echo "  wtd = win-tray-debug"
+    echo "  wtr = win-tray-release"
+    echo "  ltd = linux-tray-debug"
+    echo "  w   = watch"
+    exit 1
+}
+
+CMD="$1"
+FEATURE="${2:-}"
+FEATURE_ARGS=()
+
+# Normalize short aliases
+case "$CMD" in
+    wd)  CMD="win-debug" ;;
+    wr)  CMD="win-release" ;;
+    wra) CMD="win-release-all" ;;
+    ld)  CMD="linux-debug" ;;
+    lr)  CMD="linux-release" ;;
+    wtd) CMD="win-tray-debug" ;;
+    wtr) CMD="win-tray-release" ;;
+    ltd) CMD="linux-tray-debug" ;;
+    w)   CMD="watch" ;;
+esac
+
+case "$FEATURE" in
+    "")
+        ;;
+    tray)
+        FEATURE_ARGS=(--features tray)
+        ;;
+    *)
+        echo "[!] Unknown feature: $FEATURE"
+        show_help
+        ;;
+esac
+
+describe_features() {
+    if [ "${#FEATURE_ARGS[@]}" -eq 0 ]; then
+        echo "default/headless"
+    else
+        echo "${FEATURE_ARGS[*]}"
+    fi
+}
+
+case "$CMD" in
+    win-debug)
+        echo "[*] Compiling (debug) for Windows [$(describe_features)]..."
+        cargo build --target x86_64-pc-windows-gnu "${FEATURE_ARGS[@]}"
+        EXE_PATH="./target/x86_64-pc-windows-gnu/debug/${BIN_NAME}.exe"
+        if [ -f "$EXE_PATH" ]; then
+            WIN_EXE_PATH=$(wslpath -w "$EXE_PATH")
+            echo "[*] Running: $WIN_EXE_PATH"
+            /mnt/c/Windows/System32/cmd.exe /C "\"$WIN_EXE_PATH\" start"
+        fi
+        ;;
+
+    win-release)
+        echo "[*] Compiling (release) for Windows [$(describe_features)]..."
+        cargo build --release --target x86_64-pc-windows-gnu "${FEATURE_ARGS[@]}"
+        ;;
+
+    win-release-all)
+        echo "[*] Compiling both binaries for Windows (release)..."
+        cargo build --release --target x86_64-pc-windows-gnu
+        cargo build --release --target x86_64-pc-windows-gnu --bin spyweb-tray --features tray
+        ;;
+
+    linux-debug)
+        echo "[*] Compiling & Running (debug) for Linux..."
+        cargo run "${FEATURE_ARGS[@]}" -- start
+        ;;
+        
+    linux-release)
+        echo "[*] Compiling (release) for Linux..."
+        cargo build --release "${FEATURE_ARGS[@]}"
+        ;;
+
+    watch)
+        if ! command -v cargo-watch >/dev/null 2>&1; then
+            echo "[!] Install cargo-watch first: cargo install cargo-watch"
+            exit 1
+        fi
+        echo "[*] Watching for changes..."
+        if [ "${#FEATURE_ARGS[@]}" -eq 0 ]; then
+            cargo watch -c -w src -x "run -- start"
+        else
+            cargo watch -c -w src -x "run ${FEATURE_ARGS[*]} -- start"
+        fi
+        ;;
+
+    win-tray-debug)
+        echo "[*] Compiling Tray (debug) for Windows..."
+        cargo build --target x86_64-pc-windows-gnu --bin spyweb-tray --features tray
+        EXE_PATH="./target/x86_64-pc-windows-gnu/debug/spyweb-tray.exe"
+        if [ -f "$EXE_PATH" ]; then
+            WIN_EXE_PATH=$(wslpath -w "$EXE_PATH")
+            /mnt/c/Windows/System32/cmd.exe /C "\"$WIN_EXE_PATH\""
+        fi
+        ;;
+
+    win-tray-release)
+        echo "[*] Compiling Tray (release) for Windows..."
+        cargo build --release --target x86_64-pc-windows-gnu --bin spyweb-tray --features tray
+        ;;
+
+    linux-tray-debug)
+        echo "[*] Compiling & Running Tray (debug) for Linux..."
+        cargo run --bin spyweb-tray --features tray
+        ;;
+
+    *)
+        show_help
+        ;;
+esac

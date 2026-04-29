@@ -1,0 +1,9 @@
+name = "External JS Rendering Example"
+url = "https://example-spa.com/listings"
+selector = ".js-rendered-item"
+fields = [
+  "title:.item-title",
+  "price:.item-price"
+]
+enabled = false
+interval = 300

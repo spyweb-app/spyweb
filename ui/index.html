@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpyWeb - Admin Panel</title>
+    <link rel="icon" type="image/png" href="/icon.png">
+    <!-- Bulma CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.0/css/bulma.min.css">
+    <!-- Alpine JS -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%);
+            --glass-bg: rgba(20, 22, 31, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --bg-color: #0f111a;
+        }
+        
+        body {
+            background-color: var(--bg-color);
+            color: #e2e8f0;
+            min-height: 100vh;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(58, 123, 213, 0.1), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(0, 210, 255, 0.1), transparent 25%);
+            background-attachment: fixed;
+            overflow: hidden; /* App-like feel, scroll inner containers */
+        }
+
+        .title-gradient {
+            background: var(--primary-gradient);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 800;
+        }
+
+        .glass-sidebar {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-right: 1px solid var(--glass-border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .navbar.is-glass {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .glass-card {
+            background: rgba(30, 32, 45, 0.6);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Menu Styling */
+        .menu-list a {
+            color: #a0aec0;
+            border-radius: 8px;
+            margin-bottom: 4px;
+            transition: all 0.2s ease;
+            font-size: 0.95rem;
+        }
+        .menu-list a:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+            color: #fff;
+        }
+        .menu-list a.is-active {
+            background: var(--primary-gradient);
+            color: #fff;
+            font-weight: 600;
+        }
+        .menu-label {
+            color: #718096;
+            letter-spacing: 0.1em;
+        }
+
+        /* Table Styling */
+        .table-container {
+            border-radius: 12px;
+            overflow: auto;
+            border: 1px solid var(--glass-border);
+            background: rgba(20, 22, 31, 0.5);
+        }
+        
+        .table {
+            background-color: transparent;
+            color: #f1f5f9;
+            margin-bottom: 0;
+        }
+        .table thead th {
+            border-bottom: 1px solid var(--glass-border);
+            color: #00d2ff !important;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-size: 0.8rem;
+            padding: 1rem;
+            background: rgba(15, 17, 26, 0.8);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .table td, .table th {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            padding: 1rem;
+            vertical-align: middle;
+        }
+        .table tbody tr:last-child td {
+            border-bottom: none;
+        }
+        .table.is-hoverable tbody tr:hover {
+            background-color: rgba(0, 210, 255, 0.05);
+        }
+
+        .tag.is-primary-gradient {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+        }
+
+        .scrollable-y {
+            overflow-y: auto;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1); 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1); 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2); 
+        }
+
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div x-data="spywebApp()" x-init="initApp()" x-cloak class="columns is-gapless m-0" style="height: 100vh;">
+    
+    <!-- Sidebar -->
+    <div class="column is-3-tablet is-2-desktop glass-sidebar is-hidden-mobile">
+        <div class="p-5">
+            <h1 class="title is-4 title-gradient mb-5">SpyWeb</h1>
+        </div>
+        
+        <div class="px-3 pb-5 scrollable-y is-flex-grow-1">
+            <aside class="menu">
+                <p class="menu-label">Views</p>
+                <ul class="menu-list">
+                    <li>
+                        <a :class="{'is-active': selectedJob === ''}" @click="selectJob('')">
+                            <span>All Recent Records</span>
+                        </a>
+                    </li>
+                </ul>
+
+                <p class="menu-label mt-5">Jobs</p>
+                <ul class="menu-list">
+                    <template x-show="loadingJobs">
+                        <li><a class="has-text-grey">Loading...</a></li>
+                    </template>
+                    <template x-for="job in jobs" :key="job">
+                        <li>
+                            <a :class="{'is-active': selectedJob === job}" @click="selectJob(job)" x-text="job"></a>
+                        </li>
+                    </template>
+                </ul>
+            </aside>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="column is-12-mobile is-9-tablet is-10-desktop is-flex is-flex-direction-column">
+        
+        <!-- Header Nav -->
+        <nav class="navbar is-glass px-5 is-flex is-align-items-center is-justify-content-space-between" style="min-height: 4.5rem;">
+            <div class="is-flex is-align-items-center">
+                <h2 class="title is-5 has-text-white mb-0" x-text="selectedJob ? selectedJob : 'Recent Records'"></h2>
+                <span class="tag is-primary-gradient is-rounded ml-3" x-show="!loadingRecords && records.length > 0" x-text="records.length + ' Items'"></span>
+            </div>
+            
+            <div class="is-flex is-align-items-center gap-3">
+                <!-- Limit Selector -->
+                <div class="is-flex is-align-items-center mr-4 is-hidden-mobile">
+                    <span class="is-size-7 has-text-grey-light mr-2">Per Page</span>
+                    <div class="select is-small is-dark is-rounded">
+                        <select x-model="limit" @change="changeLimit($event.target.value)">
+                            <option value="20">20</option>
+                            <option value="30">30</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Pagination Buttons -->
+                <div class="buttons are-small mb-0 mr-4" x-show="selectedJob && (pageStack.length > 0 || hasMore)">
+                    <button class="button is-dark is-rounded" @click="prevPage()" :disabled="pageStack.length === 0">
+                        &larr; Prev
+                    </button>
+                    <button class="button is-dark is-rounded" @click="nextPage()" :disabled="!hasMore">
+                        Next &rarr;
+                    </button>
+                </div>
+
+                <div class="select is-small is-rounded is-dark mr-3 is-hidden-tablet">
+                    <select x-model="selectedJob" @change="fetchRecords()">
+                        <option value="">All Recent Records</option>
+                        <template x-for="job in jobs" :key="job">
+                            <option :value="job" x-text="job"></option>
+                        </template>
+                    </select>
+                </div>
+                <button class="button is-small is-outlined is-info is-rounded" @click="fetchRecords()" :class="{'is-loading': loadingRecords}">
+                    Refresh
+                </button>
+            </div>
+        </nav>
+
+        <!-- Content Area -->
+        <div class="p-5 is-flex-grow-1 scrollable-y">
+            
+            <!-- Loading State -->
+            <div x-show="loadingRecords" class="has-text-centered py-6">
+                <div class="loader is-loading is-size-1" style="margin: 0 auto; width: 3rem; height: 3rem; border-width: 3px; border-color: #00d2ff transparent #00d2ff transparent;"></div>
+                <p class="mt-4 has-text-info">Fetching records...</p>
+            </div>
+
+            <!-- Error State -->
+            <div x-show="error" class="notification is-danger is-light glass-card mb-5" style="background: rgba(255, 56, 96, 0.1);">
+                <button class="delete" @click="error = null"></button>
+                <strong>Error:</strong> <span x-text="error"></span>
+            </div>
+
+            <!-- Empty State -->
+            <div x-show="!loadingRecords && records.length === 0 && !error" class="has-text-centered py-6 glass-card">
+                <p class="is-size-4 has-text-grey">No records found.</p>
+                <p class="has-text-grey-dark mt-2">Try selecting a different job or wait for the scraper to run.</p>
+            </div>
+
+            <!-- Table View -->
+            <div class="table-container" x-show="!loadingRecords && records.length > 0">
+                <table class="table is-fullwidth is-hoverable">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th x-show="!selectedJob">Job ID</th>
+                            <template x-for="header in tableHeaders" :key="header">
+                                <th x-text="header"></th>
+                            </template>
+                            <th>Keywords</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="record in records" :key="record.timestamp || Math.random()">
+                            <tr>
+                                <td class="has-text-grey-light is-size-7" style="white-space: nowrap;" x-text="formatDate(record.date_time)"></td>
+                                <td x-show="!selectedJob">
+                                    <span class="tag is-dark is-rounded is-small" x-text="record.job_id || 'Unknown'"></span>
+                                </td>
+                                
+                                <template x-for="header in tableHeaders" :key="header">
+                                    <td class="has-text-white is-size-6">
+                                        <div x-html="formatValue(getFieldValue(record, header))"></div>
+                                    </td>
+                                </template>
+                                
+                                <td>
+                                    <template x-if="record.match_key && record.match_key.length > 0">
+                                        <span class="tag is-warning is-dark is-rounded is-small" title="Matched Keywords" x-text="record.match_key.join(', ')"></span>
+                                    </template>
+                                    <template x-if="!record.match_key || record.match_key.length === 0">
+                                        <span class="has-text-grey-dark">-</span>
+                                    </template>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('alpine:init', () => {
+        Alpine.data('spywebApp', () => ({
+            jobs: [],
+            selectedJob: '',
+            records: [],
+            loadingJobs: false,
+            loadingRecords: false,
+            error: null,
+            limit: 30,
+            currentAfter: null,
+            nextAfter: null,
+            pageStack: [],
+            hasMore: false,
+            
+            initApp() {
+                this.fetchJobs();
+                this.fetchRecords();
+            },
+            
+            selectJob(job) {
+                this.selectedJob = job;
+                this.resetPagination();
+                this.fetchRecords();
+            },
+
+            resetPagination() {
+                this.nextAfter = null;
+                this.pageStack = [];
+            },
+
+            async changeLimit(newLimit) {
+                this.limit = newLimit;
+                this.resetPagination();
+                await this.fetchRecords();
+            },
+
+            async next() {
+                if (!this.nextAfter) return;
+                this.pageStack.push(this.records[0].timestamp); // Store top for "Prev" logic? 
+                // Wait, if we use 'after', we move forward in time (older records).
+                // So the stack should store the current 'after' used to get THIS page.
+                // Actually, let's keep it simple: 
+                // pageStack stores the 'after' value used to fetch the CURRENT page.
+                const currentAfter = this.records[this.records.length - 1].timestamp;
+                this.pageStack.push(this.nextAfter); // This is wrong for back.
+                
+                // Let's use a simple page-based stack for "after" values.
+                // [null, after1, after2]
+                // page 1: after=null
+                // page 2: after=after1
+                // page 3: after=after2
+            },
+            
+            async fetchJobs() {
+                this.loadingJobs = true;
+                try {
+                    const res = await fetch('/api/jobs');
+                    if (!res.ok) throw new Error('Failed to fetch jobs');
+                    this.jobs = await res.json();
+                } catch (err) {
+                    console.error(err);
+                    this.error = "Could not load jobs list.";
+                } finally {
+                    this.loadingJobs = false;
+                }
+            },
+
+            async fetchRecords(after = null) {
+                this.loadingRecords = true;
+                this.error = null;
+                
+                try {
+                    let url = '/api/records';
+                    const params = new URLSearchParams();
+                    params.append('limit', this.limit);
+                    if (this.selectedJob) params.append('job_id', this.selectedJob);
+                    if (after) params.append('after', after);
+                    
+                    url += `?${params.toString()}`;
+                    
+                    const res = await fetch(url);
+                    if (!res.ok) throw new Error('Failed to fetch records');
+                    
+                    const data = await res.json();
+                    
+                    if (this.selectedJob) {
+                        this.records = data.records || [];
+                        this.nextAfter = data.next_after;
+                        this.hasMore = data.has_more;
+                    } else {
+                        // All records view - simple limit
+                        this.hasMore = false;
+                        this.nextAfter = null;
+                        let flattened = [];
+                        for (const [jobId, jobRecords] of Object.entries(data)) {
+                            jobRecords.forEach(r => {
+                                r.job_id = jobId;
+                                if (!r.date_time && r.timestamp) {
+                                    r.date_time = new Date(r.timestamp / 1000000).toISOString();
+                                }
+                                flattened.push(r);
+                            });
+                        }
+                        flattened.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                        this.records = flattened; // server already limited it
+                    }
+                } catch (err) {
+                    console.error(err);
+                    this.error = "Could not load records.";
+                } finally {
+                    this.loadingRecords = false;
+                }
+            },
+
+            async nextPage() {
+                if (!this.nextAfter) return;
+                this.pageStack.push(this.currentAfter);
+                this.currentAfter = this.nextAfter;
+                await this.fetchRecords(this.currentAfter);
+            },
+
+            async prevPage() {
+                if (this.pageStack.length === 0) return;
+                this.currentAfter = this.pageStack.pop();
+                await this.fetchRecords(this.currentAfter);
+            },
+
+            // Compute dynamic headers based on the current records set
+            get tableHeaders() {
+                if (this.records.length === 0) return [];
+                const headers = new Set();
+                const hiddenKeys = ['job_id', 'timestamp', 'date_time', '_keywords', 'match_key'];
+                
+                this.records.forEach(r => {
+                    const fieldsSource = r.fields ? r.fields : r;
+                    for (const k of Object.keys(fieldsSource)) {
+                        if (!hiddenKeys.includes(k) && typeof fieldsSource[k] !== 'object') {
+                            headers.add(k);
+                        }
+                    }
+                });
+                return Array.from(headers);
+            },
+            
+            getFieldValue(record, header) {
+                const fieldsSource = record.fields ? record.fields : record;
+                return fieldsSource[header];
+            },
+            
+            formatDate(dateTimeStr) {
+                if (!dateTimeStr) return '-';
+                try {
+                    return new Date(dateTimeStr).toLocaleString(undefined, {
+                        year: 'numeric', month: 'short', day: 'numeric',
+                        hour: '2-digit', minute: '2-digit', second: '2-digit'
+                    });
+                } catch (e) {
+                    return dateTimeStr;
+                }
+            },
+            
+            formatValue(val) {
+                if (val === undefined || val === null || val === '') return '<span class="has-text-grey-dark">-</span>';
+                const str = String(val);
+                
+                // Escape function for basic HTML entities
+                const escape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+
+                if (str.startsWith('http://') || str.startsWith('https://')) {
+                    const safeUrl = str.split(' ')[0].replace(/"/g, '%22').replace(/'/g, '%27'); // Very basic URL safety
+                    return `<a href="${safeUrl}" target="_blank" class="has-text-info" style="text-decoration: underline; text-underline-offset: 3px;" rel="noopener noreferrer">${escape(str)}</a>`;
+                }
+                
+                let displayStr = escape(str);
+                if (displayStr.length > 200) {
+                    displayStr = displayStr.substring(0, 200) + '...';
+                }
+                return displayStr;
+            }
+        }));
+    });
+</script>
+</body>
+</html>
