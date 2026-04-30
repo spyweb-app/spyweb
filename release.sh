@@ -84,21 +84,43 @@ if [ -d "ui" ]; then cp -r ui "$DIST_DIR/$PACKAGE_DIR/"; fi
 # No README in the release ZIP - keep it on GitHub only
 
 # 5. Create the Final Archive
-echo "[*] Creating archive..."
-ARCHIVE_FILE="${NAME}-v${VERSION}-${OS_NAME}-${ARCH}.zip"
+echo "[*] Creating archive(s)..."
 
-cd "$DIST_DIR"
-if command -v zip >/dev/null 2>&1; then
-    zip -r "../$ARCHIVE_FILE" "$PACKAGE_DIR"
-    echo "[+] Success! Archive created: $ARCHIVE_FILE"
-elif command -v 7z >/dev/null 2>&1; then
-    # Windows runners always have 7z
-    7z a "../$ARCHIVE_FILE" "$PACKAGE_DIR"
-    echo "[+] Success! Archive created: $ARCHIVE_FILE"
+# Common function to zip a package
+create_zip() {
+    local arch=$1
+    local file_name="${NAME}-v${VERSION}-${OS_NAME}-${arch}.zip"
+    
+    cd "$DIST_DIR"
+    if command -v zip >/dev/null 2>&1; then
+        zip -r "../$file_name" "$PACKAGE_DIR"
+    elif command -v 7z >/dev/null 2>&1; then
+        7z a "../$file_name" "$PACKAGE_DIR"
+    else
+        # Fallback to tar.gz
+        file_name="${NAME}-v${VERSION}-${OS_NAME}-${arch}.tar.gz"
+        tar -czvf "../$file_name" "$PACKAGE_DIR"
+    fi
+    cd ..
+    echo "[+] Created: $file_name"
+}
+
+if [[ "$OS_NAME" == "macos" ]]; then
+    # 1. Create Universal ZIP (already assembled in $PACKAGE_DIR)
+    create_zip "universal"
+    
+    # 2. Create standalone ARM64 ZIP (lean)
+    echo "[*] Swapping to lean ARM64 binaries..."
+    cp target/aarch64-apple-darwin/release/spyweb "$DIST_DIR/$PACKAGE_DIR/"
+    cp target/aarch64-apple-darwin/release/spyweb-tray "$DIST_DIR/$PACKAGE_DIR/"
+    create_zip "arm64"
+    
+    # 3. Create standalone x86_64 ZIP (lean)
+    echo "[*] Swapping to lean x86_64 binaries..."
+    cp target/x86_64-apple-darwin/release/spyweb "$DIST_DIR/$PACKAGE_DIR/"
+    cp target/x86_64-apple-darwin/release/spyweb-tray "$DIST_DIR/$PACKAGE_DIR/"
+    create_zip "x86_64"
 else
-    # Fallback to tar.gz
-    ARCHIVE_FILE="${NAME}-v${VERSION}-${OS_NAME}-${ARCH}.tar.gz"
-    tar -czvf "../$ARCHIVE_FILE" "$PACKAGE_DIR"
-    echo "[+] Success! Archive created: $ARCHIVE_FILE"
+    # Linux or Windows
+    create_zip "$ARCH"
 fi
-cd ..
