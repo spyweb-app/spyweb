@@ -15,7 +15,7 @@ SpyWeb validates config statically before startup or reload. It checks required 
 | `selector` | string | **required** | CSS selector for item containers |
 | `fields` | array | **required** | Fields to extract (see below) |
 | `enabled` | bool | `true` | Enable/disable this job |
-| `interval` | u32 | `30` | Seconds between scrape runs |
+| `interval` | u32 | `600` | Seconds between scrape runs |
 | `keywords` | string[] | *none* | Filter items matching any keyword |
 | `search_fields` | string[] | *none* | Limit keyword search to specific fields |
 | `debug` | bool | `false` | Save raw HTML and extracted JSON for debugging |
@@ -57,6 +57,19 @@ If fields are returning empty or unexpected values, enable `debug = true` in the
 - **`field_parsers`**: Shows which engine was used for each specific field.
  
 If a field is empty but the parser is `raw`, the CSS selector is likely incorrect for the literal source. If the parser is `dom-fallback`, the selector was too complex for the Raw Parser, and the DOM Parser also failed to find a match (potentially due to "God Mode" restructuring).
+
+### The Debug Command
+While the `debug = true` flag saves files during normal scheduled runs, you can also trigger a **manual one-shot debug run** via the CLI:
+
+```bash
+./spyweb debug "Job Name"
+```
+
+This command is ideal for iterative development because:
+- **Ignores `enabled` flag:** It will run the job even if it is set to `enabled = false` in your config.
+- **Instant Feedback:** It prints the final extracted items and their fields directly to your terminal.
+- **Pipeline Transparency:** It explicitly shows each stage of the extraction (Fetch → Extract → Hooks) so you can see exactly where an item might be getting dropped.
+- **Saves Artifacts:** Just like the config flag, it generates the response HTML and JSON fields in the job's directory for deep inspection.
 
 
 ## Validation Rules

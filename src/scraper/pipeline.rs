@@ -121,24 +121,23 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
         job.config.name
     );
 
-    let notifiable = match job.hooks.as_ref() {
-        Some(h) => match h.before_notify(new_items).await? {
-            None => return Ok(()),
-            Some(i) => i,
-        },
-        None => new_items,
+    let notify_items = match job.hooks.as_ref() {
+        Some(h) => h.before_notify(new_items.clone()).await?,
+        None => Some(new_items.clone()),
     };
 
-    smol::unblock({
-        let config = job.config.clone();
-        let items = notifiable.clone();
-        move || {
-            let _ = notifier::trigger_notification(&config, &items);
-        }
-    })
-    .await;
+    if let Some(items) = notify_items {
+        smol::unblock({
+            let config = job.config.clone();
+            let items = items.clone();
+            move || {
+                let _ = notifier::trigger_notification(&config, &items);
+            }
+        })
+        .await;
+    }
 
-    let payload = webhook::build_default_payload(&job.config.name, &notifiable);
+    let payload = webhook::build_default_payload(&job.config.name, &new_items);
     let payload = match job.hooks.as_ref() {
         Some(h) => match h.before_webhook(payload).await? {
             None => return Ok(()),

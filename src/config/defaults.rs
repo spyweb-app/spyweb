@@ -4,7 +4,7 @@ pub fn enabled() -> bool {
     true
 }
 pub fn interval() -> u32 {
-    30
+    600
 }
 pub fn rotate() -> Rotate {
     Rotate::RoundRobin
