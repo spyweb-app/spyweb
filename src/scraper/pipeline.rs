@@ -1,4 +1,5 @@
 use crate::{
+    color,
     config::types::Job, scraper::request::RequestConfig, scraper::runner::Runner, services::db::Db,
     services::notifier, services::webhook,
 };
@@ -10,18 +11,18 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
     let interval = Duration::from_secs(job.config.interval as u64);
 
     loop {
-        crate::t_println!("Running job: \x1b[38;2;162;155;254;1m{}\x1b[0m", job.config.name);
+        crate::t_println!("Running job: {}", color::c_job(&job.config.name));
         let started = std::time::Instant::now();
 
         if let Err(e) = run_once(&job, &db, &runner).await {
-            crate::t_eprintln!("Job '{}' error: {}", job.config.name, e);
+            crate::t_eprintln!("Job '{}' error: {}", color::c_job(&job.config.name), e);
         }
 
         crate::t_println!(
-            "Job [\x1b[38;2;162;155;254;1m{}\x1b[0m] finished in \x1b[38;2;116;185;255m{:.2}s\x1b[0m, sleeping for \x1b[38;2;116;185;255m{}s\x1b[0m",
-            job.config.name,
-            started.elapsed().as_secs_f64(),
-            job.config.interval
+            "Job [{}] finished in {}, sleeping for {}",
+            color::c_job(&job.config.name),
+            color::c_info(&format!("{:.2}s", started.elapsed().as_secs_f64())),
+            color::c_info(&format!("{}s", job.config.interval))
         );
         Timer::after(interval).await;
     }
@@ -37,7 +38,7 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
         None => request,
     };
 
-    let fetch_result = smol::unblock({
+    let fetch_attempt = smol::unblock({
         let runner = Arc::clone(runner);
         let config = job.config.clone();
         let request = request.clone();
@@ -46,18 +47,20 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
     .await;
 
     let response = match job.hooks.as_ref() {
-        Some(h) => match h.after_fetch(fetch_result).await? {
+        Some(h) => match h.after_fetch(fetch_attempt).await? {
             None => return Ok(()),
             Some(r) => r,
         },
-        None => fetch_result?,
+        None => fetch_attempt.result.map_err(anyhow::Error::msg)?,
     };
 
-    if response.status >= 400 {
-        crate::t_eprintln!(
-            "Warning: Job '{}' fetch returned status {}",
-            job.config.name,
-            response.status
+    let status_code = response.status;
+
+    if status_code >= 400 {
+        crate::t_warnln!(
+            "Job {} fetch returned status {}",
+            color::c_job(&job.config.name),
+            color::c_warn(&status_code.to_string())
         );
     }
 
@@ -88,10 +91,12 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
     };
 
     if items.is_empty() {
-        crate::t_println!(
-            "No items extracted for {}, check your config and selectors or hooks",
-            job.config.name
-        );
+        if status_code == 200 {
+            crate::t_warnln!(
+                "No items extracted for {}, check your config and selectors or hooks",
+                color::c_job(&job.config.name)
+            );
+        }
         return Ok(());
     }
 
@@ -111,14 +116,17 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
     .await?;
 
     if new_items.is_empty() {
-        crate::t_println!("Job [\x1b[38;2;162;155;254;1m{}\x1b[0m] no new items found", job.config.name);
+        if status_code == 200 {
+            crate::t_println!("Job [{}] no new items found", color::c_job(&job.config.name));
+        }
+
         return Ok(());
     }
 
     crate::t_println!(
-        "Found \x1b[38;2;85;239;196;1m{} new items\x1b[0m for \x1b[38;2;162;155;254;1m{}\x1b[0m",
-        new_items.len(),
-        job.config.name
+        "Found {} for {}",
+        color::c_ok(&format!("{} new items", new_items.len())),
+        color::c_job(&job.config.name)
     );
 
     let notify_items = match job.hooks.as_ref() {

@@ -97,7 +97,7 @@ Demonstrates **Lua-powered pagination** — the URL changes each run by appendin
 | Hook | Purpose |
 |------|---------|
 | `before_fetch` | Append `?page=N` to URL, increment counter |
-| `after_fetch` | Skip extraction on non-200 responses |
+| `after_fetch` | Skip extraction on failed requests or non-200 responses |
 | `after_extract` | Log how many items were found |
 | `filter_item` | Drop empty titles, filter by price, mutate fields |
 | `before_store` | Skip if no items remain |
@@ -169,7 +169,7 @@ before_fetch(request)         ← modify URL, headers, or return nil to skip
     ↓
 [HTTP fetch]                  ← automatic
     ↓
-after_fetch(response)         ← modify body, or return nil to skip extraction
+after_fetch(fetch_result)     ← inspect request/response/error, mutate response.body, or return nil
     ↓
 [CSS extraction]              ← automatic (raw parser → DOM fallback)
     ↓

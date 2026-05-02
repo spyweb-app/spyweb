@@ -4,7 +4,7 @@ use anyhow::Result;
 use mlua::{Lua, Table, Value};
 
 use crate::scraper::extractor::ExtractedItem;
-use crate::scraper::request::{RequestConfig, RequestResult};
+use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
 
 // Lua-shaped request: { url = "...", headers = { ["X-Foo"] = "bar" } }
 
@@ -39,41 +39,96 @@ pub fn lua_to_request(table: Table, original: RequestConfig) -> Result<RequestCo
     Ok(RequestConfig { url, headers })
 }
 
-// Lua-shaped fetch result:
-// success: { ok = true, body = "...", status = 200, url = "...", headers = {...}, proxy = "..."? }
-// error:   { ok = false, error = "..." }
-pub fn fetch_result_to_lua(lua: &Lua, res: &Result<RequestResult>) -> Result<Table> {
+fn response_to_lua(lua: &Lua, res: &RequestResult) -> Result<Table> {
     let table = lua.create_table()?;
-    match res {
+    table.set("status", res.status)?;
+    table.set("url", res.url.as_str())?;
+    table.set("body", res.body.as_str())?;
+
+    let headers = lua.create_table()?;
+    for (k, v) in &res.headers {
+        headers.set(k.as_str(), v.as_str())?;
+    }
+    table.set("headers", headers)?;
+
+    Ok(table)
+}
+
+fn error_kind(message: &str) -> &'static str {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("http status:") {
+        "http"
+    } else if lower.contains("dns") || lower.contains("resolve") {
+        "dns"
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        "timeout"
+    } else if lower.contains("tls") || lower.contains("certificate") {
+        "tls"
+    } else if lower.contains("proxy") {
+        "proxy"
+    } else if lower.contains("connect") || lower.contains("connection") {
+        "connect"
+    } else {
+        "unknown"
+    }
+}
+
+fn is_success_status(status: u16) -> bool {
+    (200..300).contains(&status)
+}
+
+// Lua-shaped fetch result:
+// {
+//   ok = boolean,
+//   request = { url = "...", headers = {...}, proxy = "..."? },
+//   response = { status = 200, url = "...", body = "...", headers = {...} } | nil,
+//   error = { message = "...", kind = "..." } | nil
+// }
+pub fn fetch_result_to_lua(lua: &Lua, attempt: &FetchAttempt) -> Result<Table> {
+    let table = lua.create_table()?;
+
+    table.set("request", request_to_lua(lua, &attempt.request)?)?;
+    let request: Table = table.get("request")?;
+    match &attempt.proxy {
+        Some(proxy) => request.set("proxy", proxy.as_str())?,
+        None => request.set("proxy", Value::Nil)?,
+    }
+
+    match &attempt.result {
         Ok(res) => {
-            table.set("ok", true)?;
-            table.set("body", res.body.as_str())?;
-            table.set("status", res.status)?;
-            table.set("url", res.url.as_str())?;
-
-            let headers = lua.create_table()?;
-            for (k, v) in &res.headers {
-                headers.set(k.as_str(), v.as_str())?;
-            }
-            table.set("headers", headers)?;
-
-            match &res.proxy {
-                Some(proxy) => table.set("proxy", proxy.as_str())?,
-                None => table.set("proxy", Value::Nil)?,
+            table.set("ok", is_success_status(res.status))?;
+            table.set("response", response_to_lua(lua, res)?)?;
+            if is_success_status(res.status) {
+                table.set("error", Value::Nil)?;
+            } else {
+                let error = lua.create_table()?;
+                error.set("message", format!("http status: {}", res.status))?;
+                error.set("kind", "http")?;
+                table.set("error", error)?;
             }
         }
-        Err(err) => {
+        Err(message) => {
             table.set("ok", false)?;
-            table.set("error", err.to_string())?;
+            table.set("response", Value::Nil)?;
+            let error = lua.create_table()?;
+            error.set("message", message.as_str())?;
+            error.set("kind", error_kind(message))?;
+            table.set("error", error)?;
         }
     }
     Ok(table)
 }
 
-pub fn lua_to_response_body_only(table: Table, original: RequestResult) -> Result<RequestResult> {
-    let body: String = table
-        .get::<Option<String>>("body")?
-        .unwrap_or(original.body.clone());
+pub fn lua_to_after_fetch_success_response(
+    table: Table,
+    original: RequestResult,
+) -> Result<RequestResult> {
+    let body = match table.get::<Option<Table>>("response")? {
+        Some(response) => response
+            .get::<Option<String>>("body")?
+            .unwrap_or(original.body.clone()),
+        None => original.body.clone(),
+    };
 
     Ok(RequestResult {
         body,
@@ -84,14 +139,14 @@ pub fn lua_to_response_body_only(table: Table, original: RequestResult) -> Resul
     })
 }
 
-pub fn lua_to_response(table: Table, original: Option<RequestResult>) -> Result<RequestResult> {
-    let original = original.unwrap_or(RequestResult {
+fn lua_table_to_response(table: Table) -> Result<RequestResult> {
+    let original = RequestResult {
         url: String::new(),
         status: 0,
         headers: HashMap::new(),
         body: String::new(),
         proxy: None,
-    });
+    };
 
     let body: String = table
         .get::<Option<String>>("body")?
@@ -99,7 +154,9 @@ pub fn lua_to_response(table: Table, original: Option<RequestResult>) -> Result<
     let url: String = table
         .get::<Option<String>>("url")?
         .unwrap_or(original.url.clone());
-    let status: u16 = table.get::<Option<u16>>("status")?.unwrap_or(original.status);
+    let status: u16 = table
+        .get::<Option<u16>>("status")?
+        .unwrap_or(original.status);
     let headers: HashMap<String, String> = match table.get::<Option<Table>>("headers")? {
         Some(h) => {
             let mut map = HashMap::new();
@@ -122,6 +179,15 @@ pub fn lua_to_response(table: Table, original: Option<RequestResult>) -> Result<
         headers,
         proxy,
     })
+}
+
+pub fn lua_to_after_fetch_error_response(table: Table) -> Result<RequestResult> {
+    if let Some(response) = table.get::<Option<Table>>("response")? {
+        return lua_table_to_response(response);
+    }
+
+    // Backward compatibility: allow returning a response-like top-level table.
+    lua_table_to_response(table)
 }
 
 // Lua-shaped item: { fields = { title = "...", link = "..." }, matches = { "rust", ... } }
@@ -326,21 +392,33 @@ mod tests {
             proxy: None,
         };
 
-        let t = fetch_result_to_lua(&lua, &Ok(res.clone())).unwrap();
+        let attempt = FetchAttempt {
+            request: RequestConfig {
+                url: "https://example.com".into(),
+                headers: HashMap::from([("User-Agent".into(), "SpyWeb".into())]),
+            },
+            proxy: None,
+            result: Ok(res.clone()),
+        };
+
+        let t = fetch_result_to_lua(&lua, &attempt).unwrap();
 
         lua.globals().set("res", t).unwrap();
         lua.load(
             r#"
-            res.body = "MUTATED"
-            res.status = 500 -- Should be ignored
-            res.url = "http://hacked.com" -- Should be ignored
+            assert(res.request.url == "https://example.com")
+            assert(res.response.status == 200)
+            res.request.url = "http://hacked.com" -- Should be ignored
+            res.response.body = "MUTATED"
+            res.response.status = 500 -- Should be ignored
+            res.response.url = "http://hacked.com" -- Should be ignored
         "#,
         )
         .exec()
         .unwrap();
 
         let t2: Table = lua.globals().get("res").unwrap();
-        let final_res = lua_to_response_body_only(t2, res).unwrap();
+        let final_res = lua_to_after_fetch_success_response(t2, res).unwrap();
 
         assert_eq!(final_res.body, "MUTATED");
         assert_eq!(final_res.status, 200);
@@ -348,17 +426,29 @@ mod tests {
     }
 
     #[test]
-    fn test_fetch_error_can_be_turned_into_response() {
+    fn test_fetch_error_envelope_can_be_turned_into_response() {
         let lua = Lua::new();
-        let err = anyhow::anyhow!("dns lookup failed");
+        let attempt = FetchAttempt {
+            request: RequestConfig {
+                url: "https://example.com/products".into(),
+                headers: HashMap::from([("Accept".into(), "text/html".into())]),
+            },
+            proxy: Some("http://proxy-1:8080".into()),
+            result: Err("request failed for job 'test': dns lookup failed".into()),
+        };
 
-        let t = fetch_result_to_lua(&lua, &Err(err)).unwrap();
+        let t = fetch_result_to_lua(&lua, &attempt).unwrap();
         lua.globals().set("res", t).unwrap();
         lua.load(
             r#"
             assert(res.ok == false)
-            assert(res.error ~= nil)
-            res = {
+            assert(res.response == nil)
+            assert(res.request.url == "https://example.com/products")
+            assert(res.request.proxy == "http://proxy-1:8080")
+            assert(res.request.headers["Accept"] == "text/html")
+            assert(res.error.message ~= nil)
+            assert(res.error.kind == "dns")
+            res.response = {
                 body = "<html>fallback</html>",
                 status = 599,
                 url = "https://fallback.example.com",
@@ -370,7 +460,7 @@ mod tests {
         .unwrap();
 
         let t2: Table = lua.globals().get("res").unwrap();
-        let final_res = lua_to_response(t2, None).unwrap();
+        let final_res = lua_to_after_fetch_error_response(t2).unwrap();
 
         assert_eq!(final_res.body, "<html>fallback</html>");
         assert_eq!(final_res.status, 599);
@@ -380,6 +470,74 @@ mod tests {
             Some("text/html")
         );
         assert_eq!(final_res.proxy, None);
+    }
+
+    #[test]
+    fn test_fetch_error_backcompat_top_level_response_still_works() {
+        let lua = Lua::new();
+        let attempt = FetchAttempt {
+            request: RequestConfig {
+                url: "https://example.com".into(),
+                headers: HashMap::new(),
+            },
+            proxy: None,
+            result: Err("request failed for job 'test': timed out".into()),
+        };
+
+        let t = fetch_result_to_lua(&lua, &attempt).unwrap();
+        lua.globals().set("res", t).unwrap();
+        lua.load(
+            r#"
+            res = {
+                body = "fallback",
+                status = 598,
+                url = "https://fallback.example.com"
+            }
+        "#,
+        )
+        .exec()
+        .unwrap();
+
+        let t2: Table = lua.globals().get("res").unwrap();
+        let final_res = lua_to_after_fetch_error_response(t2).unwrap();
+
+        assert_eq!(final_res.body, "fallback");
+        assert_eq!(final_res.status, 598);
+        assert_eq!(final_res.url, "https://fallback.example.com");
+    }
+
+    #[test]
+    fn test_http_error_response_has_response_and_not_ok() {
+        let lua = Lua::new();
+        let attempt = FetchAttempt {
+            request: RequestConfig {
+                url: "https://example.com/protected".into(),
+                headers: HashMap::new(),
+            },
+            proxy: None,
+            result: Ok(RequestResult {
+                body: "blocked".into(),
+                url: "https://example.com/protected".into(),
+                status: 403,
+                headers: HashMap::from([("content-type".into(), "text/html".into())]),
+                proxy: None,
+            }),
+        };
+
+        let t = fetch_result_to_lua(&lua, &attempt).unwrap();
+        lua.globals().set("res", t).unwrap();
+        lua.load(
+            r#"
+            assert(res.ok == false)
+            assert(res.response ~= nil)
+            assert(res.response.status == 403)
+            assert(res.response.body == "blocked")
+            assert(res.error.message == "http status: 403")
+            assert(res.error.kind == "http")
+        "#,
+        )
+        .exec()
+        .unwrap();
     }
 
     #[test]

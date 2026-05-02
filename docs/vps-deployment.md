@@ -62,6 +62,7 @@ Restart=always
 RestartSec=5
 
 # Optional: Override the default port (default: 7979)
+# ExecStart=/root/spyweb/spyweb start --port 8080
 # Environment=SPYWEB_PORT=8080
 
 [Install]

@@ -688,7 +688,10 @@ fn test_id_selector() {
     let sel = SelectorPath::parse("#target").unwrap();
     let matches = doc.select_all(&sel);
     assert_eq!(matches.len(), 1);
-    assert_eq!(doc.node_html(matches[0]).trim(), "<div id=\"target\">Found</div>");
+    assert_eq!(
+        doc.node_html(matches[0]).trim(),
+        "<div id=\"target\">Found</div>"
+    );
 }
 
 #[test]
@@ -700,12 +703,15 @@ fn test_tag_id_class_combined() {
         <div id="main" class="container">Missing Class</div>
     "#;
     let doc = RawDocument::parse(html);
-    
+
     // Tag + ID + Multiple Classes
     let sel = SelectorPath::parse("div#main.container.active").unwrap();
     let matches = doc.select_all(&sel);
     assert_eq!(matches.len(), 1);
-    assert_eq!(doc.node_html(matches[0]).trim(), "<div id=\"main\" class=\"container active\">Match</div>");
+    assert_eq!(
+        doc.node_html(matches[0]).trim(),
+        "<div id=\"main\" class=\"container active\">Match</div>"
+    );
 }
 
 #[test]
@@ -720,4 +726,3 @@ fn test_multiple_identical_ids() {
     // Even if IDs should be unique, scrapers must handle broken HTML where they aren't
     assert_eq!(matches.len(), 2);
 }
-

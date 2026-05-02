@@ -35,14 +35,20 @@ function before_fetch(request)
     return request
 end
 
-function after_fetch(response)
+function after_fetch(fetch_result)
     -- You can inspect or modify the response body here
     -- Return nil to skip extraction for this run
-    if response.status ~= 200 then
-        print("Got status " .. response.status .. ", skipping extraction")
+    if not fetch_result.ok then
+        print("Request failed for " .. fetch_result.request.url .. ": " .. fetch_result.error.message)
         return nil
     end
-    return response
+
+    if fetch_result.response.status ~= 200 then
+        print("Got status " .. fetch_result.response.status .. ", skipping extraction")
+        return nil
+    end
+
+    return fetch_result
 end
 
 function after_extract(items)

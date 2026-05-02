@@ -66,11 +66,12 @@ end
 -- Aborts extraction (returns nil) on any failure.
 function after_fetch(fetch_result)
     local fail_count = tonumber(store_get("fail_count")) or 0
-    local is_failure = not fetch_result.ok or fetch_result.status ~= 200
+    local status = fetch_result.response and fetch_result.response.status or nil
+    local is_failure = not fetch_result.ok or status ~= 200
 
     if is_failure then
         -- Handle specific fatal errors immediately
-        if fetch_result.status == 403 then
+        if status == 403 then
             log("💀 [FATAL] 403 Forbidden detected. We are likely banned. Entering cooldown.")
             store_set("fail_count", tostring(STOP_THRESHOLD))
             store_set("stop_time", tostring(os.time()))
@@ -78,7 +79,7 @@ function after_fetch(fetch_result)
             return nil
         end
 
-        if fetch_result.status == 404 then
+        if status == 404 then
             log("⚠️ [WARNING] 404 Not Found. The URL might have changed or been removed.")
             send_push("⚠️ URL Changed (404)", "The target page is missing. Check your config.", 4)
             -- We don't increment fail_count for 404 to avoid circuit breaking on a dead link
@@ -88,10 +89,10 @@ function after_fetch(fetch_result)
         -- Standard failure (timeout, network drop, etc)
         fail_count = fail_count + 1
         store_set("fail_count", tostring(fail_count))
-        log("Run failed. Fail count: " .. fail_count .. " | Error: " .. (fetch_result.error or fetch_result.status))
+        log("Run failed. Fail count: " .. fail_count .. " | Error: " .. ((fetch_result.error and fetch_result.error.message) or status))
 
         if fail_count == FAIL_THRESHOLD then
-            local err = fetch_result.ok and ("HTTP " .. fetch_result.status) or fetch_result.error
+            local err = status and ("HTTP " .. status) or fetch_result.error.message
             send_push("🚨 Job Failing", "Ongoing issues: " .. err, 4)
         elseif fail_count == STOP_THRESHOLD then
             store_set("stop_time", tostring(os.time()))

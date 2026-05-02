@@ -11,7 +11,7 @@ use crate::config::types::{JobConfig, Rotate};
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const DEFAULT_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestConfig {
     pub url: String,
     pub headers: HashMap<String, String>,
@@ -33,6 +33,30 @@ pub struct RequestResult {
     pub headers: HashMap<String, String>,
     pub body: String,
     pub proxy: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchAttempt {
+    pub request: RequestConfig,
+    pub proxy: Option<String>,
+    pub result: Result<RequestResult, String>,
+}
+
+fn format_error_chain(err: &anyhow::Error) -> String {
+    let mut chain = err.chain();
+    let mut message = chain
+        .next()
+        .map(std::string::ToString::to_string)
+        .unwrap_or_default();
+
+    for cause in chain {
+        if !message.is_empty() {
+            message.push_str(": ");
+        }
+        message.push_str(&cause.to_string());
+    }
+
+    message
 }
 
 #[derive(Debug)]
@@ -97,13 +121,18 @@ impl RequestHandler {
 
     /// Fetch using a RequestConfig (possibly mutated by Lua hooks) for URL and headers.
     /// Proxy selection still comes from job.proxy.
-    pub fn fetch_with_request(
-        &self,
-        job: &JobConfig,
-        req: &RequestConfig,
-    ) -> Result<RequestResult> {
+    pub fn fetch_with_request(&self, job: &JobConfig, req: &RequestConfig) -> FetchAttempt {
         let selected_proxy = self.select_proxy(job);
-        let agent = self.build_agent(selected_proxy.as_deref())?;
+        let agent = match self.build_agent(selected_proxy.as_deref()) {
+            Ok(agent) => agent,
+            Err(err) => {
+                return FetchAttempt {
+                    request: req.clone(),
+                    proxy: selected_proxy,
+                    result: Err(format_error_chain(&err)),
+                };
+            }
+        };
 
         let mut request = agent.get(&req.url);
         request = request.header("User-Agent", DEFAULT_USER_AGENT);
@@ -112,29 +141,37 @@ impl RequestHandler {
             request = request.header(name, value);
         }
 
-        let mut response = request
+        let result = request
             .call()
-            .with_context(|| format!("request failed for job '{}'", job.name))?;
+            .with_context(|| format!("request failed for job '{}'", job.name))
+            .and_then(|mut response| {
+                let status = response.status().as_u16();
+                let headers = flatten_headers(response.headers());
+                let body = response
+                    .body_mut()
+                    .read_to_string()
+                    .context("failed to read response body")?;
 
-        let status = response.status().as_u16();
-        let headers = flatten_headers(response.headers());
-        let body = response
-            .body_mut()
-            .read_to_string()
-            .context("failed to read response body")?;
+                Ok(RequestResult {
+                    url: req.url.clone(),
+                    status,
+                    headers,
+                    body,
+                    proxy: selected_proxy.clone(),
+                })
+            });
 
-        Ok(RequestResult {
-            url: req.url.clone(),
-            status,
-            headers,
-            body,
+        FetchAttempt {
+            request: req.clone(),
             proxy: selected_proxy,
-        })
+            result: result.map_err(|err| format_error_chain(&err)),
+        }
     }
 
     fn build_agent(&self, proxy_url: Option<&str>) -> Result<Agent> {
         let mut config = Agent::config_builder()
             .timeout_global(Some(self.timeout))
+            .http_status_as_error(false)
             .build();
 
         if let Some(proxy_url) = proxy_url {
@@ -142,6 +179,7 @@ impl RequestHandler {
                 .with_context(|| format!("invalid proxy url '{}'", proxy_url))?;
             config = Agent::config_builder()
                 .timeout_global(Some(self.timeout))
+                .http_status_as_error(false)
                 .proxy(Some(proxy))
                 .build();
         }
@@ -299,6 +337,29 @@ mod tests {
         assert_eq!(
             flattened.get("x-request-id").map(String::as_str),
             Some("abc123")
+        );
+    }
+
+    #[test]
+    fn build_agent_disables_http_status_as_error() {
+        let handler = RequestHandler::new();
+        let agent = handler.build_agent(None).unwrap();
+
+        assert!(
+            !agent.config().http_status_as_error(),
+            "HTTP 4xx/5xx responses should be treated as normal responses"
+        );
+    }
+
+    #[test]
+    fn error_chain_formatter_preserves_context_and_cause() {
+        let err = anyhow::anyhow!("dns lookup failed").context("request failed for job 'Jumia'");
+
+        let formatted = format_error_chain(&err);
+
+        assert_eq!(
+            formatted,
+            "request failed for job 'Jumia': dns lookup failed"
         );
     }
 }

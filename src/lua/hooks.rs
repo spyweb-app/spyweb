@@ -11,6 +11,7 @@
 //! --   http_get(url)        -> body string
 //! --   http_post(url, body) -> body string
 //! --   notify(title, body, timeout_ms?) -> nil
+//! --   dump(value)          -> readable string for nested Lua tables/values
 //!
 //! -- Runtime-owned globals:
 //! --   last_fetch -> last fetch result snapshot for this job VM
@@ -25,16 +26,22 @@
 //!
 //! function after_fetch(fetch_result)
 //!     -- fetch_result.ok: boolean
+//!     -- fetch_result.request.url: string
+//!     -- fetch_result.request.headers: table of string->string
+//!     -- fetch_result.request.proxy: string|nil
 //!     -- on success:
-//!     --   fetch_result.body: string (mutable)
-//!     --   fetch_result.status: number (read only in returned response)
-//!     --   fetch_result.url: string (read only in returned response)
-//!     --   fetch_result.headers: table of string->string (read only in returned response)
-//!     --   fetch_result.proxy: string|nil (read only in returned response)
+//!     --   fetch_result.response.status: number (read only)
+//!     --   fetch_result.response.url: string (read only)
+//!     --   fetch_result.response.headers: table of string->string (read only)
+//!     --   fetch_result.response.body: string (mutable in the returned value)
 //!     -- on error:
-//!     --   fetch_result.error: string
+//!     --   fetch_result.response may still exist for HTTP errors like 403/500
+//!     --   fetch_result.error.message: string
+//!     --   fetch_result.error.kind: string
 //!     -- return nil to skip extraction for this run
-//!     -- return a response-like table to continue extraction, even after a fetch error
+//!     -- return the fetch_result envelope to continue
+//!     -- on success only response.body is accepted back
+//!     -- on failure, return fetch_result.response = {...} to synthesize a response
 //!     return fetch_result
 //! end
 //!
@@ -79,6 +86,7 @@
 //! ```
 
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -87,11 +95,13 @@ use smol::lock::Mutex;
 
 use crate::lua::{bindings, engine};
 use crate::scraper::extractor::ExtractedItem;
-use crate::scraper::request::{RequestConfig, RequestResult};
+use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
 use crate::services::db::Db;
 
 pub struct JobHooks {
     lua: Mutex<Lua>,
+    job_name: String,
+    hook_path: PathBuf,
     has_before_fetch: bool,
     has_after_fetch: bool,
     has_after_extract: bool,
@@ -104,6 +114,8 @@ pub struct JobHooks {
 impl std::fmt::Debug for JobHooks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JobHooks")
+            .field("job_name", &self.job_name)
+            .field("hook_path", &self.hook_path)
             .field("has_before_fetch", &self.has_before_fetch)
             .field("has_after_fetch", &self.has_after_fetch)
             .field("has_after_extract", &self.has_after_extract)
@@ -112,6 +124,33 @@ impl std::fmt::Debug for JobHooks {
             .field("has_before_notify", &self.has_before_notify)
             .field("has_before_webhook", &self.has_before_webhook)
             .finish()
+    }
+}
+
+#[derive(Debug)]
+struct LuaHookError {
+    hook_name: &'static str,
+    hook_path: PathBuf,
+    job_name: String,
+    source: mlua::Error,
+}
+
+impl std::fmt::Display for LuaHookError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Lua {} error for job '{}' in {}: {}",
+            self.hook_name,
+            self.job_name,
+            self.hook_path.display(),
+            self.source
+        )
+    }
+}
+
+impl std::error::Error for LuaHookError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
     }
 }
 
@@ -135,7 +174,8 @@ impl JobHooks {
         bindings::register_http_and_fs(&lua, job_dir)?;
 
         let source = std::fs::read_to_string(path)?;
-        lua.load(&source).exec()?;
+        let chunk_name = path.to_string_lossy();
+        lua.load(&source).set_name(chunk_name.as_ref()).exec()?;
         bindings::register(&lua, db, job_name)?;
 
         let has = |name: &str| -> bool {
@@ -146,6 +186,8 @@ impl JobHooks {
         };
 
         Ok(Self {
+            job_name: job_name.to_string(),
+            hook_path: path.to_path_buf(),
             has_before_fetch: has("before_fetch"),
             has_after_fetch: has("after_fetch"),
             has_after_extract: has("after_extract"),
@@ -165,6 +207,29 @@ impl JobHooks {
         self.has_before_webhook
     }
 
+    fn format_hook_error(&self, hook_name: &'static str, err: anyhow::Error) -> String {
+        match err.downcast::<mlua::Error>() {
+            Ok(source) => LuaHookError {
+                hook_name,
+                hook_path: self.hook_path.clone(),
+                job_name: self.job_name.clone(),
+                source,
+            }
+            .to_string(),
+            Err(err) => format!(
+                "Lua {} error for job '{}' in {}: {}",
+                hook_name,
+                self.job_name,
+                self.hook_path.display(),
+                err
+            ),
+        }
+    }
+
+    fn log_hook_error(&self, hook_name: &'static str, err: anyhow::Error) {
+        crate::t_eprintln!("{}, skipping hook", self.format_hook_error(hook_name, err));
+    }
+
     pub async fn before_fetch(&self, req: RequestConfig) -> Result<Option<RequestConfig>> {
         if !self.has_before_fetch {
             return Ok(Some(req));
@@ -172,7 +237,7 @@ impl JobHooks {
         match self.try_before_fetch(&req).await {
             Ok(result) => Ok(result),
             Err(e) => {
-                crate::t_eprintln!("Lua before_fetch error: {e}, skipping hook");
+                self.log_hook_error("before_fetch", e);
                 Ok(Some(req))
             }
         }
@@ -189,43 +254,49 @@ impl JobHooks {
         }
     }
 
-    pub async fn after_fetch(&self, res: Result<RequestResult>) -> Result<Option<RequestResult>> {
-        self.set_last_fetch(&res).await?;
+    pub async fn after_fetch(&self, attempt: FetchAttempt) -> Result<Option<RequestResult>> {
+        self.set_last_fetch(&attempt).await?;
         if !self.has_after_fetch {
-            return res.map(Some);
+            return attempt
+                .result
+                .map(|res| Some(res))
+                .map_err(anyhow::Error::msg);
         }
-        match self.try_after_fetch(&res).await {
+        match self.try_after_fetch(&attempt).await {
             Ok(result) => Ok(result),
             Err(e) => {
-                crate::t_eprintln!("Lua after_fetch error: {e}, skipping hook");
-                match res {
+                self.log_hook_error("after_fetch", e);
+                match attempt.result {
                     Ok(res) => Ok(Some(res)),
-                    Err(err) => Err(err),
+                    Err(err) => Err(anyhow::Error::msg(err)),
                 }
             }
         }
     }
 
-    async fn set_last_fetch(&self, res: &Result<RequestResult>) -> Result<()> {
+    async fn set_last_fetch(&self, attempt: &FetchAttempt) -> Result<()> {
         let lua = self.lua.lock().await;
-        let table = engine::fetch_result_to_lua(&lua, res)?;
+        let table = engine::fetch_result_to_lua(&lua, attempt)?;
         lua.globals().set("last_fetch", table)?;
         Ok(())
     }
 
-    async fn try_after_fetch(&self, res: &Result<RequestResult>) -> Result<Option<RequestResult>> {
+    async fn try_after_fetch(&self, attempt: &FetchAttempt) -> Result<Option<RequestResult>> {
         let lua = self.lua.lock().await;
         let func: mlua::Function = lua.globals().get("after_fetch")?;
-        let table = engine::fetch_result_to_lua(&lua, res)?;
+        let table = engine::fetch_result_to_lua(&lua, attempt)?;
         match func.call_async::<mlua::Value>(table).await? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
-            mlua::Value::Table(t) => match res {
-                Ok(original) => Ok(Some(engine::lua_to_response_body_only(t, original.clone())?)),
-                Err(_) => Ok(Some(engine::lua_to_response(t, None)?)),
+            mlua::Value::Table(t) => match &attempt.result {
+                Ok(original) => Ok(Some(engine::lua_to_after_fetch_success_response(
+                    t,
+                    original.clone(),
+                )?)),
+                Err(_) => Ok(Some(engine::lua_to_after_fetch_error_response(t)?)),
             },
-            _ => match res {
+            _ => match &attempt.result {
                 Ok(res) => Ok(Some(res.clone())),
-                Err(err) => Err(anyhow::anyhow!(err.to_string())),
+                Err(err) => Err(anyhow::anyhow!(err.clone())),
             },
         }
     }
@@ -240,7 +311,7 @@ impl JobHooks {
         match self.try_after_extract(&items).await {
             Ok(result) => Ok(result),
             Err(e) => {
-                crate::t_eprintln!("Lua after_extract error: {e}, skipping hook");
+                self.log_hook_error("after_extract", e);
                 Ok(items)
             }
         }
@@ -266,7 +337,7 @@ impl JobHooks {
         match self.try_filter_item(&item).await {
             Ok(result) => Ok(result),
             Err(e) => {
-                crate::t_eprintln!("Lua filter_item error: {e}, skipping hook");
+                self.log_hook_error("filter_item", e);
                 Ok(Some(item))
             }
         }
@@ -293,7 +364,7 @@ impl JobHooks {
         match self.try_before_store(&items).await {
             Ok(result) => Ok(result),
             Err(e) => {
-                crate::t_eprintln!("Lua before_store error: {e}, skipping hook");
+                self.log_hook_error("before_store", e);
                 Ok(Some(items))
             }
         }
@@ -324,7 +395,7 @@ impl JobHooks {
         match self.try_before_notify(&items).await {
             Ok(result) => Ok(result),
             Err(e) => {
-                crate::t_eprintln!("Lua before_notify error: {e}, skipping hook");
+                self.log_hook_error("before_notify", e);
                 Ok(Some(items))
             }
         }
@@ -354,7 +425,7 @@ impl JobHooks {
         match self.try_before_webhook(&payload).await {
             Ok(result) => Ok(result),
             Err(e) => {
-                crate::t_eprintln!("Lua before_webhook error: {e}, skipping hook");
+                self.log_hook_error("before_webhook", e);
                 Ok(Some(payload))
             }
         }
@@ -372,5 +443,69 @@ impl JobHooks {
             mlua::Value::Table(t) => Ok(Some(engine::lua_to_json(&mlua::Value::Table(t))?)),
             _ => Ok(Some(payload.clone())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::db::Db;
+    use std::fs;
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("spyweb-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn hook_errors_use_hook_file_path_instead_of_rust_source() {
+        let dir = unique_test_dir("hook-traceback");
+        fs::create_dir_all(&dir).unwrap();
+        let hook_path = dir.join("hooks.lua");
+        fs::write(
+            &hook_path,
+            r#"
+function after_fetch(fetch_result)
+    return fetch_result.response.status.code
+end
+"#,
+        )
+        .unwrap();
+
+        let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+        let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+        let attempt = FetchAttempt {
+            request: RequestConfig {
+                url: "https://example.com".into(),
+                headers: std::collections::HashMap::new(),
+            },
+            proxy: None,
+            result: Ok(RequestResult {
+                url: "https://example.com".into(),
+                status: 200,
+                headers: std::collections::HashMap::new(),
+                body: "<html></html>".into(),
+                proxy: None,
+            }),
+        };
+
+        let err = smol::block_on(async { hooks.try_after_fetch(&attempt).await }).unwrap_err();
+        let rendered = hooks.format_hook_error("after_fetch", err);
+
+        assert!(rendered.contains("Lua after_fetch error for job 'test_job'"));
+        assert!(rendered.contains(hook_path.to_string_lossy().as_ref()));
+        assert!(rendered.contains("attempt to index"));
+        assert!(rendered.contains("hooks.lua:"));
+        assert!(!rendered.contains("src/lua/hooks.rs"));
+
+        let _ = fs::remove_file(dir.join("test.redb"));
+        let _ = fs::remove_file(&hook_path);
+        let _ = fs::remove_dir(&dir);
     }
 }

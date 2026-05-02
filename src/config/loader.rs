@@ -1,5 +1,5 @@
-use std::{fs, path::Path};
 use std::sync::Arc;
+use std::{fs, path::Path};
 
 use crate::config;
 use crate::lua::hooks::JobHooks;
@@ -47,7 +47,11 @@ fn normalized_search_fields(config: &JobConfig) -> Vec<String> {
 fn validate_url(value: &str, field_name: &str, job_name: &str) -> Result<()> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        bail!("Invalid {} for job '{}': value cannot be blank", field_name, job_name);
+        bail!(
+            "Invalid {} for job '{}': value cannot be blank",
+            field_name,
+            job_name
+        );
     }
 
     let uri: ureq::http::Uri = trimmed.parse().map_err(|_| {
@@ -77,7 +81,10 @@ fn validate_job_config(config: &JobConfig) -> Result<()> {
     }
 
     if config.url.trim().is_empty() {
-        bail!("Invalid job config for '{}': url cannot be blank", config.name);
+        bail!(
+            "Invalid job config for '{}': url cannot be blank",
+            config.name
+        );
     }
 
     if config.selector.trim().is_empty() {
@@ -88,11 +95,17 @@ fn validate_job_config(config: &JobConfig) -> Result<()> {
     }
 
     if config.fields.is_empty() {
-        bail!("Invalid job config for '{}': fields cannot be empty", config.name);
+        bail!(
+            "Invalid job config for '{}': fields cannot be empty",
+            config.name
+        );
     }
 
     if config.interval == 0 {
-        bail!("Invalid job config for '{}': interval must be > 0", config.name);
+        bail!(
+            "Invalid job config for '{}': interval must be > 0",
+            config.name
+        );
     }
 
     validate_url(&config.url, "url", &config.name)?;
@@ -427,10 +440,12 @@ mod tests {
     fn rejects_invalid_urls() {
         let mut job = mock_job(None);
         job.url = "not-a-url".to_string();
-        assert!(validate_job_config(&job)
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid url for job 'test-job'"));
+        assert!(
+            validate_job_config(&job)
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid url for job 'test-job'")
+        );
 
         let mut job = mock_job(None);
         job.webhook = Some(crate::config::types::Webhook {
@@ -438,10 +453,12 @@ mod tests {
             url: "bad-webhook".to_string(),
             headers: None,
         });
-        assert!(validate_job_config(&job)
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid webhook.url for job 'test-job'"));
+        assert!(
+            validate_job_config(&job)
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid webhook.url for job 'test-job'")
+        );
 
         let mut job = mock_job(None);
         job.proxy = Some(crate::config::types::Proxy {
@@ -449,20 +466,24 @@ mod tests {
             rotate: crate::config::types::Rotate::Random,
             urls: vec!["bad-proxy".to_string()],
         });
-        assert!(validate_job_config(&job)
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid proxy.urls for job 'test-job'"));
+        assert!(
+            validate_job_config(&job)
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid proxy.urls for job 'test-job'")
+        );
     }
 
     #[test]
     fn rejects_invalid_field_definitions_and_search_fields() {
         let mut job = mock_job(None);
         job.fields = vec![Field::Shorthand("   ".to_string())];
-        assert!(validate_job_config(&job)
-            .unwrap_err()
-            .to_string()
-            .contains("shorthand field cannot be blank"));
+        assert!(
+            validate_job_config(&job)
+                .unwrap_err()
+                .to_string()
+                .contains("shorthand field cannot be blank")
+        );
 
         let mut job = mock_job(None);
         job.fields = vec![Field::Full {
@@ -470,10 +491,12 @@ mod tests {
             selector: "   ".to_string(),
             att: "text".to_string(),
         }];
-        assert!(validate_job_config(&job)
-            .unwrap_err()
-            .to_string()
-            .contains("selector cannot be blank"));
+        assert!(
+            validate_job_config(&job)
+                .unwrap_err()
+                .to_string()
+                .contains("selector cannot be blank")
+        );
 
         let mut job = mock_job(None);
         job.fields = vec![
@@ -484,10 +507,12 @@ mod tests {
                 att: "text".to_string(),
             },
         ];
-        assert!(validate_job_config(&job)
-            .unwrap_err()
-            .to_string()
-            .contains("duplicate field name(s): title"));
+        assert!(
+            validate_job_config(&job)
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate field name(s): title")
+        );
 
         let mut job = mock_job(None);
         job.search_fields = Some(vec!["title".to_string(), "missing".to_string()]);
@@ -498,12 +523,9 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_job_names_and_ids() {
-        let err = validate_job_set(&[
-            wrap_job(mock_job(None)),
-            wrap_job(mock_job(None)),
-        ])
-        .unwrap_err()
-        .to_string();
+        let err = validate_job_set(&[wrap_job(mock_job(None)), wrap_job(mock_job(None))])
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("duplicate job name(s): test-job"));
 
         let mut first = mock_job(None);

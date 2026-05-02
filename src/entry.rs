@@ -13,6 +13,10 @@ use crate::services::server::WebServer;
 use crate::services::watcher;
 
 pub fn start_app() -> Result<()> {
+    start_app_with_port(None)
+}
+
+pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
     let db = Arc::new(Db::open("data")?);
     let jobs = loader::load_all_jobs("jobs.toml", "jobs", Arc::clone(&db))?;
     let active_job_ids = Arc::new(std::sync::RwLock::new(
@@ -35,7 +39,8 @@ pub fn start_app() -> Result<()> {
     let server_active_jobs = Arc::clone(&active_job_ids);
     ex.spawn(async move {
         let server = WebServer::new(server_db, server_active_jobs);
-        if let Err(e) = server.listen(&crate::config::get_base_url()) {
+        let addr = crate::config::get_base_url_with_override(port_override);
+        if let Err(e) = server.listen(&addr) {
             crate::t_eprintln!("Server error: {}", e);
         }
     })
@@ -107,7 +112,11 @@ async fn job_manager(
                     *lock = new_jobs.list.iter().map(|j| j.config.id()).collect();
                 }
                 handles = spawn_jobs(&ex, &runner, &db, new_jobs);
-                crate::t_println!("\x1b[38;2;85;239;196;1mReloaded\x1b[0m {} jobs", handles.len());
+                crate::t_println!(
+                    "{} {} jobs",
+                    crate::color::c_ok("Reloaded"),
+                    crate::color::c_info(&handles.len().to_string())
+                );
             }
             Err(e) => {
                 crate::t_eprintln!("Config reload failed: {}", e);

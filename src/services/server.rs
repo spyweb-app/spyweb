@@ -35,7 +35,10 @@ impl WebServer {
     }
 
     pub fn listen(&self, addr: &str) -> Result<()> {
-        crate::t_println!("Server listening on \x1b[38;2;116;185;255;1mhttp://{}\x1b[0m", addr);
+        crate::t_println!(
+            "Server listening on {}",
+            crate::color::c_info(&format!("http://{}", addr))
+        );
 
         let server_db = Arc::clone(&self.db);
         let server_active_jobs = Arc::clone(&self.active_jobs);

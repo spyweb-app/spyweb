@@ -346,16 +346,16 @@ pub fn hash_fields(job: &JobConfig, fields: &HashMap<String, String>) -> String 
 
     if !empty_fields.is_empty() {
         crate::t_eprintln!(
-            "Job '{}' has empty hash_fields at runtime: {}",
-            job.name,
+            "Job {} has empty hash_fields at runtime: {}",
+            crate::color::c_job(&job.name),
             empty_fields.join(", ")
         );
     }
 
     if empty_fields.len() == selected.len() {
         crate::t_eprintln!(
-            "Job '{}' has all configured hash_fields empty at runtime; falling back to hashing all extracted fields",
-            job.name
+            "Job {} has all configured hash_fields empty at runtime; falling back to hashing all extracted fields",
+            crate::color::c_job(&job.name)
         );
         return hash_pairs(fields.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     }

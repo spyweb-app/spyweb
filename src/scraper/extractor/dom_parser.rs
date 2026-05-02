@@ -98,7 +98,7 @@ mod tests {
             headers: None,
             hash_fields: None,
         };
-        
+
         let field_specs = vec![
             FieldSpec {
                 name: "link".into(),
@@ -109,7 +109,7 @@ mod tests {
                 name: "title".into(),
                 selector: "".into(), // Empty selector test
                 attr: "text".into(),
-            }
+            },
         ];
 
         let results = extract(&job, html, &field_specs).unwrap();
@@ -137,14 +137,12 @@ mod tests {
             headers: None,
             hash_fields: None,
         };
-        
-        let field_specs = vec![
-            FieldSpec {
-                name: "title".into(),
-                selector: ".title".into(),
-                attr: "text".into(),
-            }
-        ];
+
+        let field_specs = vec![FieldSpec {
+            name: "title".into(),
+            selector: ".title".into(),
+            attr: "text".into(),
+        }];
 
         let results = extract(&job, html, &field_specs).unwrap();
         assert_eq!(results.len(), 1);

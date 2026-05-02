@@ -319,6 +319,7 @@
                                 <li><a href="#http_post">http_post</a></li>
                                 <li><a href="#json_encode">json_encode</a></li>
                                 <li><a href="#json_decode">json_decode</a></li>
+                                <li><a href="#dump">dump</a></li>
                                 <li><a href="#notify">notify</a></li>
                                 <li><a href="#log">log</a></li>
                                 <li><a href="#env_get">env_get</a></li>
@@ -553,12 +554,10 @@ end</code></pre>
                                     <span class="tag is-info mr-2">2</span> after_fetch(fetch_result)
                                 </h3>
                                 <div class="content">
-                                    <p>Called after every fetch attempt. It receives either a successful response
-                                        snapshot or a
-                                        fetch error snapshot. On successful fetches, only <code>body</code> is accepted
-                                        back
-                                        into the pipeline. On failed fetches, Lua may return a full synthetic response
-                                        table to
+                                    <p>Called after every fetch attempt. It receives a stable envelope with request
+                                        context, plus either a response snapshot or an error snapshot. On successful
+                                        fetches, only <code>response.body</code> is accepted back into the pipeline. On
+                                        failed fetches, Lua may return a full synthetic <code>response</code> table to
                                         continue extraction anyway.</p>
                                     <table class="table is-fullwidth">
                                         <thead>
@@ -574,43 +573,67 @@ end</code></pre>
                                                 <td><code>fetch_result.ok</code></td>
                                                 <td>boolean</td>
                                                 <td>❌</td>
-                                                <td><code>true</code> on success, <code>false</code> on fetch error</td>
+                                                <td><code>true</code> on HTTP 2xx success, <code>false</code> on transport failures and HTTP error responses</td>
                                             </tr>
                                             <tr>
-                                                <td><code>fetch_result.body</code></td>
+                                                <td><code>fetch_result.request.url</code></td>
+                                                <td>string</td>
+                                                <td>❌</td>
+                                                <td>Attempted request URL</td>
+                                            </tr>
+                                            <tr>
+                                                <td><code>fetch_result.request.headers</code></td>
+                                                <td>table</td>
+                                                <td>❌</td>
+                                                <td>Request headers after <code>before_fetch</code></td>
+                                            </tr>
+                                            <tr>
+                                                <td><code>fetch_result.request.proxy</code></td>
+                                                <td>string / nil</td>
+                                                <td>❌</td>
+                                                <td>Selected proxy for this attempt</td>
+                                            </tr>
+                                            <tr>
+                                                <td><code>fetch_result.response</code></td>
+                                                <td>table</td>
+                                                <td>❌</td>
+                                                <td>Present when a real HTTP response exists, including HTTP errors like 403/500</td>
+                                            </tr>
+                                            <tr>
+                                                <td><code>fetch_result.response.body</code></td>
                                                 <td>string</td>
                                                 <td>✅</td>
                                                 <td>Response body on success</td>
                                             </tr>
                                             <tr>
-                                                <td><code>fetch_result.status</code></td>
+                                                <td><code>fetch_result.response.status</code></td>
                                                 <td>number</td>
                                                 <td>❌</td>
                                                 <td>HTTP status code on success</td>
                                             </tr>
                                             <tr>
-                                                <td><code>fetch_result.url</code></td>
+                                                <td><code>fetch_result.response.url</code></td>
                                                 <td>string</td>
                                                 <td>❌</td>
-                                                <td>Final URL on success</td>
+                                                <td>Final response URL on success</td>
                                             </tr>
                                             <tr>
-                                                <td><code>fetch_result.headers</code></td>
+                                                <td><code>fetch_result.response.headers</code></td>
                                                 <td>table</td>
                                                 <td>❌</td>
                                                 <td>Response headers on success</td>
                                             </tr>
                                             <tr>
-                                                <td><code>fetch_result.proxy</code></td>
-                                                <td>string / nil</td>
-                                                <td>❌</td>
-                                                <td>Selected proxy on success</td>
-                                            </tr>
-                                            <tr>
-                                                <td><code>fetch_result.error</code></td>
+                                                <td><code>fetch_result.error.message</code></td>
                                                 <td>string</td>
                                                 <td>❌</td>
                                                 <td>Error message on fetch failure</td>
+                                            </tr>
+                                            <tr>
+                                                <td><code>fetch_result.error.kind</code></td>
+                                                <td>string</td>
+                                                <td>❌</td>
+                                                <td>Best-effort error category like <code>dns</code> or <code>timeout</code></td>
                                             </tr>
                                         </tbody>
                                     </table>
@@ -618,12 +641,18 @@ end</code></pre>
                                     <h5 class="title is-6 mb-2">Parameter Structure:</h5>
                                     <pre><code class="language-lua">{
   ok = true,
-  status = 200,
-  body = "<html>...",
-  url = "https://example.com",
-  headers = { ["Content-Type"] = "text/html" },
-  proxy = nil,
-  error = nil -- set if ok is false
+  request = {
+    url = "https://example.com",
+    headers = { ["Accept"] = "text/html" },
+    proxy = nil
+  },
+  response = {
+    status = 200,
+    url = "https://example.com",
+    body = "<html>...",
+    headers = { ["Content-Type"] = "text/html" }
+  },
+  error = nil
 }</code></pre>
 
                                     <table class="table is-fullwidth">
@@ -636,9 +665,8 @@ end</code></pre>
                                         <tbody>
                                             <tr>
                                                 <td>table</td>
-                                                <td>Continue. On success only <code>body</code> is taken back; on
-                                                    failure a
-                                                    full response can be synthesized</td>
+                                                <td>Continue. On success only <code>response.body</code> is taken back;
+                                                    on failure a full <code>response</code> can be synthesized</td>
                                             </tr>
                                             <tr>
                                                 <td><code>nil</code> / <code>false</code></td>
@@ -648,17 +676,20 @@ end</code></pre>
                                     </table>
                                     <pre><code class="language-lua">function after_fetch(fetch_result)
     if not fetch_result.ok then
-        notify("Fetch failed", fetch_result.error, 8000)
+        if fetch_result.response then
+            print("HTTP error: " .. fetch_result.response.status)
+        end
+        notify("Fetch failed", fetch_result.error.message, 8000)
         return nil
     end
 
-    if fetch_result.status ~= 200 then
-        print("Bad status: " .. fetch_result.status)
+    if fetch_result.response.status ~= 200 then
+        print("Bad status: " .. fetch_result.response.status)
         return nil  -- skip extraction
     end
 
     -- Strip unwanted content from the body
-    fetch_result.body = fetch_result.body:gsub("&lt;script.-&lt;/script>", "")
+    fetch_result.response.body = fetch_result.response.body:gsub("&lt;script.-&lt;/script>", "")
     return fetch_result
 end</code></pre>
                                 </div>
@@ -1015,9 +1046,9 @@ log("Session visit: " .. visit_count)</code></pre>
                                             in a
                                             later hook</p>
                                         <pre><code class="language-lua">function before_webhook(payload)
-    if last_fetch and last_fetch.ok and last_fetch.body then
+    if last_fetch and last_fetch.ok and last_fetch.response and last_fetch.response.body then
         local count = 0
-        for _ in last_fetch.body:gmatch("promo") do
+        for _ in last_fetch.response.body:gmatch("promo") do
             count = count + 1
         end
         payload.last_fetch_promo_hits = count
@@ -1068,6 +1099,17 @@ local resp = http_post("https://api.rendering-service.com/render", body, {["Cont
                                 <pre><code class="language-lua">local data = json_decode('{"status": "ok", "count": 42}')
 log("Status is: " .. data.status)</code></pre>
 
+                                <h3 class="title is-4" id="dump"><code>dump(value)</code></h3>
+                                <p>Formats any Lua value into a readable string for debugging. This is especially
+                                    useful for nested hook payloads like <code>fetch_result</code> or
+                                    <code>last_fetch</code>. It handles nested tables, quotes strings, and marks cycles
+                                    as <code>&lt;cycle&gt;</code> instead of recursing forever.</p>
+                                <pre><code class="language-lua">function after_fetch(fetch_result)
+    print(dump(fetch_result))
+    log(dump(last_fetch))
+    return fetch_result
+end</code></pre>
+
                                 <h3 class="title is-4" id="notify"><code>notify(title, body, [timeout_ms])</code></h3>
                                 <p>Sends a desktop notification immediately from Lua. This is a thin wrapper around
                                     SpyWeb's native notification sender and can be used from any hook, including error
@@ -1082,7 +1124,7 @@ log("Status is: " .. data.status)</code></pre>
                                 </div>
                                 <pre><code class="language-lua">function after_fetch(fetch_result)
     if not fetch_result.ok then
-        notify("Network error", fetch_result.error, 10000)
+        notify("Network error", fetch_result.error.message, 10000)
         return nil
     end
     return fetch_result
@@ -1472,11 +1514,12 @@ end
 -- Aborts extraction (returns nil) on any failure.
 function after_fetch(fetch_result)
     local fail_count = tonumber(store_get("fail_count")) or 0
-    local is_failure = not fetch_result.ok or fetch_result.status ~= 200
+    local status = fetch_result.response and fetch_result.response.status or nil
+    local is_failure = not fetch_result.ok or status ~= 200
 
     if is_failure then
         -- Handle specific fatal errors immediately
-        if fetch_result.status == 403 then
+        if status == 403 then
             log("💀 [FATAL] 403 Forbidden detected. We are likely banned. Entering cooldown.")
             store_set("fail_count", tostring(STOP_THRESHOLD))
             store_set("stop_time", tostring(os.time()))
@@ -1484,7 +1527,7 @@ function after_fetch(fetch_result)
             return nil
         end
 
-        if fetch_result.status == 404 then
+        if status == 404 then
             log("⚠️ [WARNING] 404 Not Found. The URL might have changed or been removed.")
             send_push("⚠️ URL Changed (404)", "The target page is missing. Check your config.", 4)
             -- We don't increment fail_count for 404 to avoid circuit breaking on a dead link
@@ -1494,10 +1537,10 @@ function after_fetch(fetch_result)
         -- Standard failure (timeout, network drop, etc)
         fail_count = fail_count + 1
         store_set("fail_count", tostring(fail_count))
-        log("Run failed. Fail count: " .. fail_count .. " | Error: " .. (fetch_result.error or fetch_result.status))
+        log("Run failed. Fail count: " .. fail_count .. " | Error: " .. ((fetch_result.error and fetch_result.error.message) or status))
 
         if fail_count == FAIL_THRESHOLD then
-            local err = fetch_result.ok and ("HTTP " .. fetch_result.status) or fetch_result.error
+            local err = status and ("HTTP " .. status) or fetch_result.error.message
             send_push("🚨 Job Failing", "Ongoing issues: " .. err, 4)
         elseif fail_count == STOP_THRESHOLD then
             store_set("stop_time", tostring(os.time()))
@@ -1569,12 +1612,12 @@ end
                                     <pre><code class="language-lua">-- Example: Grabbing a token from a script tag and adding it to every item
 function after_extract(items)
     -- Safety check: only proceed if fetch was successful and has content
-    if not last_fetch.ok or not last_fetch.body or #last_fetch.body == 0 then
+    if not last_fetch or not last_fetch.ok or not last_fetch.response or not last_fetch.response.body then
         return items 
     end
 
-    -- last_fetch contains the raw HTML from the server
-    local html = last_fetch.body
+    -- last_fetch.response.body contains the raw HTML from the server
+    local html = last_fetch.response.body
     
     -- Extract an internal app_id from a javascript variable: var app_id = "12345"
     local internal_id = html:match('var app_id = "(%w+)"')
@@ -1658,10 +1701,10 @@ end
 
 function after_fetch(fetch_result)
     if not fetch_result.ok then
-        notify("Auth request failed", fetch_result.error)
+        notify("Auth request failed", fetch_result.error.message)
         return nil
     end
-    if fetch_result.status == 401 then
+    if fetch_result.response.status == 401 then
         print("Auth failed!")
         return nil
     end

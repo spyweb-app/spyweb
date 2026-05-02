@@ -2,6 +2,8 @@ use crate::services::db::{Db, LUA_USER_TABLE};
 use crate::services::notifier;
 use mlua::{Lua, LuaSerdeExt, Result as LuaResult};
 use redb::ReadableTable;
+use std::collections::HashSet;
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 pub fn register(lua: &Lua, db: Arc<Db>, job_name: &str) -> anyhow::Result<()> {
@@ -83,6 +85,13 @@ pub fn register_http_and_fs(lua: &Lua, job_dir: Option<std::path::PathBuf>) -> L
             Ok(())
         })?,
     )?;
+    lua.globals().set(
+        "dump",
+        lua.create_function(|_, value: mlua::Value| {
+            let mut seen = HashSet::new();
+            format_lua_value(&value, 0, &mut seen)
+        })?,
+    )?;
 
     if let Some(dir) = job_dir {
         let log_dir = dir.clone();
@@ -161,8 +170,7 @@ pub fn register_http_and_fs(lua: &Lua, job_dir: Option<std::path::PathBuf>) -> L
     lua.globals().set(
         "json_decode",
         lua.create_function(|lua, s: String| {
-            let val: serde_json::Value =
-                serde_json::from_str(&s).map_err(mlua::Error::external)?;
+            let val: serde_json::Value = serde_json::from_str(&s).map_err(mlua::Error::external)?;
             let lua_val = lua.to_value(&val).map_err(mlua::Error::external)?;
             Ok(lua_val)
         })?,
@@ -181,6 +189,82 @@ pub fn register_http_and_fs(lua: &Lua, job_dir: Option<std::path::PathBuf>) -> L
     )?;
 
     Ok(())
+}
+
+fn format_lua_value(
+    value: &mlua::Value,
+    indent: usize,
+    seen: &mut HashSet<usize>,
+) -> LuaResult<String> {
+    match value {
+        mlua::Value::Nil => Ok("nil".to_string()),
+        mlua::Value::Boolean(b) => Ok(b.to_string()),
+        mlua::Value::Integer(i) => Ok(i.to_string()),
+        mlua::Value::Number(n) => Ok(n.to_string()),
+        mlua::Value::String(s) => Ok(format!("{:?}", s.to_str()?)),
+        mlua::Value::Table(table) => format_lua_table(table, indent, seen),
+        mlua::Value::Function(_) => Ok("<function>".to_string()),
+        mlua::Value::Thread(_) => Ok("<thread>".to_string()),
+        mlua::Value::UserData(_) => Ok("<userdata>".to_string()),
+        mlua::Value::LightUserData(_) => Ok("<lightuserdata>".to_string()),
+        mlua::Value::Error(err) => Ok(format!("<error: {err}>")),
+        #[cfg(feature = "luau")]
+        mlua::Value::Vector(v) => Ok(format!("<vector: {v:?}>")),
+        #[cfg(feature = "luau")]
+        mlua::Value::Buffer(buf) => Ok(format!("<buffer: {} bytes>", buf.len())),
+        mlua::Value::Other(_) => Ok("<other>".to_string()),
+    }
+}
+
+fn format_lua_table(
+    table: &mlua::Table,
+    indent: usize,
+    seen: &mut HashSet<usize>,
+) -> LuaResult<String> {
+    let table_id = table.to_pointer() as usize;
+    if !seen.insert(table_id) {
+        return Ok("<cycle>".to_string());
+    }
+
+    let mut entries = Vec::new();
+    for pair in table.pairs::<mlua::Value, mlua::Value>() {
+        let (key, value) = pair?;
+        let key_str = format_lua_key(&key)?;
+        let value_str = format_lua_value(&value, indent + 1, seen)?;
+        entries.push((key_str, value_str));
+    }
+    seen.remove(&table_id);
+
+    if entries.is_empty() {
+        return Ok("{}".to_string());
+    }
+
+    let mut out = String::from("{\n");
+    let pad = "  ".repeat(indent + 1);
+    for (key, value) in entries {
+        for line in value.lines() {
+            if line == value.lines().next().unwrap_or_default() {
+                writeln!(&mut out, "{pad}{key} = {line},").expect("write to string");
+            } else {
+                writeln!(&mut out, "{pad}{line}").expect("write to string");
+            }
+        }
+    }
+    write!(&mut out, "{}{}", "  ".repeat(indent), "}").expect("write to string");
+    Ok(out)
+}
+
+fn format_lua_key(key: &mlua::Value) -> LuaResult<String> {
+    match key {
+        mlua::Value::String(s) => Ok(s.to_str()?.to_string()),
+        mlua::Value::Integer(i) => Ok(format!("[{i}]")),
+        mlua::Value::Number(n) => Ok(format!("[{n}]")),
+        mlua::Value::Boolean(b) => Ok(format!("[{b}]")),
+        other => Ok(format!(
+            "[{}]",
+            format_lua_value(other, 0, &mut HashSet::new())?
+        )),
+    }
 }
 
 fn log_storage_error(op: &str, err: impl std::fmt::Display) {
@@ -660,7 +744,10 @@ mod tests {
         }
 
         // Should work with explicit prefix
-        let val1: String = lua.load(r#"return env_get("SPYWEB_TEST_SECRET")"#).eval().unwrap();
+        let val1: String = lua
+            .load(r#"return env_get("SPYWEB_TEST_SECRET")"#)
+            .eval()
+            .unwrap();
         assert_eq!(val1, "12345");
 
         // Should work with auto-prefixing
@@ -668,7 +755,42 @@ mod tests {
         assert_eq!(val2, "12345");
 
         // Should NOT find variables without the prefix
-        let val3: Option<String> = lua.load(r#"return env_get("OTHER_SECRET")"#).eval().unwrap();
-        assert!(val3.is_none(), "Should not access variables without SPYWEB_ prefix");
+        let val3: Option<String> = lua
+            .load(r#"return env_get("OTHER_SECRET")"#)
+            .eval()
+            .unwrap();
+        assert!(
+            val3.is_none(),
+            "Should not access variables without SPYWEB_ prefix"
+        );
+    }
+
+    #[test]
+    fn test_dump_binding_formats_nested_tables_and_cycles() {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, None).unwrap();
+
+        let dumped: String = lua
+            .load(
+                r#"
+                local t = {
+                    status = 200,
+                    nested = {
+                        ok = true,
+                        message = "hello"
+                    }
+                }
+                t.self = t
+                return dump(t)
+            "#,
+            )
+            .eval()
+            .unwrap();
+
+        assert!(dumped.contains("status = 200"));
+        assert!(dumped.contains("nested = {"));
+        assert!(dumped.contains("ok = true"));
+        assert!(dumped.contains(r#"message = "hello""#));
+        assert!(dumped.contains("self = <cycle>"));
     }
 }

@@ -13,6 +13,7 @@
 -- Built-in Functions:
 --   http_get(url, headers)    -> performs an async GET request
 --   http_post(url, body, h)   -> performs an async POST request
+--   dump(value)               -> returns a readable string for nested Lua values/tables
 --   log(message)              -> appends to 'hook.log' in the job folder (persistent)
 --   print(message)            -> outputs to the spyweb terminal/stderr (real-time)
 --   require("module")         -> loads .lua files from current folder or 'shared/' folder
@@ -39,10 +40,15 @@ function before_fetch(request)
 end
 
 -- 2. Inspect or modify the raw response body/status before extraction
-function after_fetch(response)
-    print("[2] after_fetch - status: " .. response.status)
-    -- response.body = response.body:gsub("badword", "goodword")
-    return response
+function after_fetch(fetch_result)
+    if not fetch_result.ok then
+        print("[2] after_fetch - error: " .. fetch_result.error.message)
+        return nil
+    end
+
+    print("[2] after_fetch - status: " .. fetch_result.response.status)
+    -- fetch_result.response.body = fetch_result.response.body:gsub("badword", "goodword")
+    return fetch_result
 end
 
 -- 3. Modify the entire list of extracted items at once.

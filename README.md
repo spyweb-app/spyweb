@@ -87,12 +87,18 @@ A typical workflow is to use the **Terminal Version** for your initial setup, de
 
 Both binaries serve the admin dashboard at **http://127.0.0.1:7979** and will loop each enabled job at its configured interval.
 
-> **Tip:** You can customize the port by setting the `SPYWEB_PORT` environment variable:
+> **Tip:** You can customize the port with `--port` or the `SPYWEB_PORT` environment variable:
 > ```bash
 > # Linux / macOS
+> ./spyweb start --port 9000
+> 
+> # Or:
 > SPYWEB_PORT=9000 ./spyweb start
 > 
 > # Windows (PowerShell)
+> .\spyweb.exe start --port 9000
+> 
+> # Or:
 > $env:SPYWEB_PORT=9000; .\spyweb.exe start
 > ```
 

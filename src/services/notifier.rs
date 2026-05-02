@@ -133,7 +133,7 @@ fn render_body_template(
         .take(BODY_ITEM_CAP)
         .map(|item| {
             let mut tags = run_tags.clone();
-            tags.extend(item.fields.clone()); 
+            tags.extend(item.fields.clone());
             render_template_tags(template, &tags)
         })
         .collect();

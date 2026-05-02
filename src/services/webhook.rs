@@ -20,7 +20,7 @@ pub async fn trigger_webhook(
 
     let _ = smol::unblock(move || {
         if let Err(e) = send_webhook(&url, headers.as_ref(), payload) {
-            crate::t_eprintln!("Webhook error for {}: {}", job_name, e);
+            crate::t_eprintln!("Webhook error for {}: {}", crate::color::c_job(&job_name), e);
         }
     })
     .await;

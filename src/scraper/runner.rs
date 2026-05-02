@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::config::types::{JobConfig, Jobs};
 use crate::scraper::extractor::{ExtractedItem, Extractor};
-use crate::scraper::request::{RequestConfig, RequestHandler, RequestResult};
+use crate::scraper::request::{FetchAttempt, RequestConfig, RequestHandler, RequestResult};
 use crate::services::db::Db;
 
 #[derive(Debug, Clone)]
@@ -66,7 +66,7 @@ impl Runner {
         })
     }
 
-    pub fn fetch(&self, job: &JobConfig, request: &RequestConfig) -> Result<RequestResult> {
+    pub fn fetch(&self, job: &JobConfig, request: &RequestConfig) -> FetchAttempt {
         self.request_handler.fetch_with_request(job, request)
     }
     pub fn extract(
@@ -146,7 +146,10 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
 
     job.config.debug = true;
 
-    println!("Debug run for job: \x1b[38;2;162;155;254;1m{}\x1b[0m", job_name);
+    println!(
+        "Debug run for job: {}",
+        crate::color::c_job(job_name)
+    );
 
     let runner = Runner::new();
     let request = RequestConfig::from_job(&job.config);
@@ -155,7 +158,7 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     let request = match job.hooks.as_ref() {
         Some(h) => match h.before_fetch(request).await? {
             None => {
-                println!("Request aborted by before_fetch hook.");
+                println!("Request aborted by {} hook.", crate::color::c_warn("before_fetch"));
                 return Ok(());
             }
             Some(r) => r,
@@ -164,31 +167,39 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     };
 
     // 2. fetch
-    println!("Fetching URL: \x1b[38;2;116;185;255m{}\x1b[0m", request.url);
-    let fetch_result = runner.fetch(&job.config, &request);
-    if let Ok(response) = &fetch_result {
+    println!("Fetching URL: {}", crate::color::c_info(&request.url));
+    let fetch_attempt = runner.fetch(&job.config, &request);
+    if let Ok(response) = &fetch_attempt.result {
         if response.status >= 200 && response.status < 300 {
-            println!("\x1b[38;2;85;239;196;1mFETCH OK\x1b[0m (Status: {})", response.status);
+            println!(
+                "{} (Status: {})",
+                crate::color::c_ok("FETCH OK"),
+                response.status
+            );
         } else {
-            println!("\x1b[1;31mFETCH FAILED\x1b[0m (Status: {})", response.status);
+            println!(
+                "{} (Status: {})",
+                crate::color::c_err("FETCH FAILED"),
+                response.status
+            );
         }
     }
 
     // 3. after_fetch
     let response = match job.hooks.as_ref() {
-        Some(h) => match h.after_fetch(fetch_result).await? {
+        Some(h) => match h.after_fetch(fetch_attempt).await? {
             None => {
-                println!("Response aborted by after_fetch hook.");
+                println!("Response aborted by {} hook.", crate::color::c_warn("after_fetch"));
                 return Ok(());
             }
             Some(r) => r,
         },
-        None => fetch_result?,
+        None => fetch_attempt.result.map_err(anyhow::Error::msg)?,
     };
 
     // 4. extract
     let items = runner.extract(&job.config, job.dir.as_deref(), &response)?;
-    println!("Extracted {} raw item(s)", items.len());
+    println!("Extracted {} raw item(s)", crate::color::c_info(&items.len().to_string()));
 
     // 5. after_extract
     let items = match job.hooks.as_ref() {
@@ -214,7 +225,7 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     let items = match job.hooks.as_ref() {
         Some(h) => match h.before_store(items).await? {
             None => {
-                println!("Items aborted by before_store hook.");
+                println!("Items aborted by {} hook.", crate::color::c_warn("before_store"));
                 return Ok(());
             }
             Some(i) => i,
@@ -222,11 +233,14 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
         None => items,
     };
 
-    println!("\n\x1b[1mFinal pipeline output ({} items):\x1b[0m", items.len());
+    println!(
+        "\n{}",
+        crate::color::c_bold(&format!("Final pipeline output ({} items):", items.len()))
+    );
     for (i, item) in items.iter().enumerate() {
-        println!("\n  Item {}:", i + 1);
+        println!("\n  Item {}:", crate::color::c_info(&(i + 1).to_string()));
         for (k, v) in &item.fields {
-            println!("    \x1b[1m{}:\x1b[0m {}", k, v);
+            println!("    {}: {}", crate::color::c_bold(k), v);
         }
         if !item.matches.is_empty() {
             println!("    matches: {:?}", item.matches);
@@ -246,8 +260,8 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
 
     println!(
         "\nHTML source and extracted fields written in: {}, {}",
-        html_path.display(),
-        fields_path.display()
+        crate::color::c_dim(&html_path.display().to_string()),
+        crate::color::c_dim(&fields_path.display().to_string())
     );
 
     Ok(())

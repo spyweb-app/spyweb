@@ -48,7 +48,7 @@ fn main() -> Result<()> {
 
     thread::spawn(|| {
         if let Err(e) = entry::start_app() {
-            eprintln!("SpyWeb Background Engine Error: {}", e);
+            spyweb::t_eprintln!("SpyWeb Background Engine Error: {}", e);
         }
     });
 
@@ -82,6 +82,6 @@ fn main() -> Result<()> {
 
 #[cfg(not(feature = "tray"))]
 fn main() -> Result<()> {
-    eprintln!("Error: This binary must be compiled with the 'tray' feature enabled.");
+    eprintln!("{}" , spyweb::color::c_err("Error: This binary must be compiled with the 'tray' feature enabled."));
     std::process::exit(1);
 }
