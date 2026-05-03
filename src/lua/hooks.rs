@@ -103,6 +103,7 @@ pub struct JobHooks {
     job_name: String,
     hook_path: PathBuf,
     has_before_fetch: bool,
+    has_override_fetch: bool,
     has_after_fetch: bool,
     has_after_extract: bool,
     has_filter_item: bool,
@@ -117,6 +118,7 @@ impl std::fmt::Debug for JobHooks {
             .field("job_name", &self.job_name)
             .field("hook_path", &self.hook_path)
             .field("has_before_fetch", &self.has_before_fetch)
+            .field("has_override_fetch", &self.has_override_fetch)
             .field("has_after_fetch", &self.has_after_fetch)
             .field("has_after_extract", &self.has_after_extract)
             .field("has_filter_item", &self.has_filter_item)
@@ -189,6 +191,7 @@ impl JobHooks {
             job_name: job_name.to_string(),
             hook_path: path.to_path_buf(),
             has_before_fetch: has("before_fetch"),
+            has_override_fetch: has("override_fetch"),
             has_after_fetch: has("after_fetch"),
             has_after_extract: has("after_extract"),
             has_filter_item: has("filter_item"),
@@ -251,6 +254,50 @@ impl JobHooks {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => Ok(Some(engine::lua_to_request(t, req.clone())?)),
             _ => Ok(Some(req.clone())),
+        }
+    }
+
+    pub fn has_override_fetch(&self) -> bool {
+        self.has_override_fetch
+    }
+
+    pub async fn override_fetch(&self, req: RequestConfig) -> Result<FetchAttempt> {
+        match self.try_override_fetch(&req).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                self.log_hook_error("override_fetch", e);
+                Ok(FetchAttempt {
+                    request: req,
+                    proxy: None,
+                    result: Err("override_fetch hook failed".into()),
+                })
+            }
+        }
+    }
+
+    async fn try_override_fetch(&self, req: &RequestConfig) -> Result<FetchAttempt> {
+        let lua = self.lua.lock().await;
+        let func: mlua::Function = lua.globals().get("override_fetch")?;
+        let table = engine::request_to_lua(&lua, req)?;
+        let ret = func.call_async::<mlua::Value>(table).await?;
+        match ret {
+            mlua::Value::Table(t) => {
+                if let Some(err_msg) = t.get::<Option<String>>("error")? {
+                    Ok(FetchAttempt {
+                        request: req.clone(),
+                        proxy: None,
+                        result: Err(err_msg),
+                    })
+                } else {
+                    let response = engine::lua_table_to_response(t)?;
+                    Ok(FetchAttempt {
+                        request: req.clone(),
+                        proxy: response.proxy.clone(),
+                        result: Ok(response),
+                    })
+                }
+            }
+            _ => Err(anyhow::anyhow!("override_fetch must return a response table")),
         }
     }
 
@@ -503,6 +550,56 @@ end
         assert!(rendered.contains("attempt to index"));
         assert!(rendered.contains("hooks.lua:"));
         assert!(!rendered.contains("src/lua/hooks.rs"));
+
+        let _ = fs::remove_file(dir.join("test.redb"));
+        let _ = fs::remove_file(&hook_path);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn test_override_fetch_hook() {
+        let dir = unique_test_dir("override-fetch");
+        fs::create_dir_all(&dir).unwrap();
+        let hook_path = dir.join("hooks.lua");
+        fs::write(
+            &hook_path,
+            r#"
+function override_fetch(request)
+    if request.url == "https://fail.com" then
+        return { error = "simulated failure" }
+    end
+    return {
+        status = 200,
+        body = "overridden body for " .. request.url,
+        url = request.url
+    }
+end
+"#,
+        )
+        .unwrap();
+
+        let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+        let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+        assert!(hooks.has_override_fetch());
+
+        let req = RequestConfig {
+            url: "https://example.com".into(),
+            headers: Default::default(),
+        };
+
+        // Test Success
+        let attempt = smol::block_on(hooks.override_fetch(req.clone())).unwrap();
+        let res = attempt.result.unwrap();
+        assert_eq!(res.status, 200);
+        assert_eq!(res.body, "overridden body for https://example.com");
+
+        // Test Lua-returned error
+        let req_fail = RequestConfig {
+            url: "https://fail.com".into(),
+            headers: Default::default(),
+        };
+        let attempt_fail = smol::block_on(hooks.override_fetch(req_fail)).unwrap();
+        assert_eq!(attempt_fail.result.unwrap_err(), "simulated failure");
 
         let _ = fs::remove_file(dir.join("test.redb"));
         let _ = fs::remove_file(&hook_path);

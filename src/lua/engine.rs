@@ -139,7 +139,7 @@ pub fn lua_to_after_fetch_success_response(
     })
 }
 
-fn lua_table_to_response(table: Table) -> Result<RequestResult> {
+pub fn lua_table_to_response(table: Table) -> Result<RequestResult> {
     let original = RequestResult {
         url: String::new(),
         status: 0,

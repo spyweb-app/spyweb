@@ -38,20 +38,25 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
         None => request,
     };
 
-    let fetch_attempt = smol::unblock({
-        let runner = Arc::clone(runner);
-        let config = job.config.clone();
-        let request = request.clone();
-        move || runner.fetch(&config, &request)
-    })
-    .await;
+    let fetch_attempt = match job.hooks.as_ref().filter(|h| h.has_override_fetch()) {
+        Some(h) => h.override_fetch(request.clone()).await?,
+        None => {
+            smol::unblock({
+                let runner = Arc::clone(runner);
+                let config = job.config.clone();
+                let request = request.clone();
+                move || runner.fetch(&config, &request)
+            })
+            .await
+        }
+    };
 
     let response = match job.hooks.as_ref() {
-        Some(h) => match h.after_fetch(fetch_attempt).await? {
+        Some(h) => match h.after_fetch(fetch_attempt.clone()).await? {
             None => return Ok(()),
             Some(r) => r,
         },
-        None => fetch_attempt.result.map_err(anyhow::Error::msg)?,
+        None => fetch_attempt.result.clone().map_err(anyhow::Error::msg)?,
     };
 
     let status_code = response.status;

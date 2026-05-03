@@ -305,7 +305,9 @@
                             <p class="menu-label">Hook Reference</p>
                             <ul class="menu-list">
                                 <li><a href="#before_fetch">before_fetch</a></li>
+                                <li><a href="#override_fetch">override_fetch</a></li>
                                 <li><a href="#after_fetch">after_fetch</a></li>
+                                <li><a href="#override_extract">override_extract</a></li>
                                 <li><a href="#after_extract">after_extract</a></li>
                                 <li><a href="#filter_item">filter_item</a></li>
                                 <li><a href="#before_store">before_store</a></li>
@@ -343,7 +345,7 @@
                         <h1 class="title is-2">The SpyWeb Master Guide</h1>
                         <p class="subtitle is-5">High-performance web monitoring with zero dependencies</p>
                         <div class="tags is-centered mt-4" style="gap:.5em">
-                            <span class="tag is-info has-text-white">7 Hook Stages</span>
+                            <span class="tag is-info has-text-white">9 Hook Stages</span>
                             <span class="tag is-success has-text-white">Hot Reload</span>
                             <span class="tag is-warning">Error Resilient</span>
                         </div>
@@ -356,7 +358,7 @@
                             <p><strong>SpyWeb</strong> is a zero-dependency web monitoring engine that lets you
                                 customize every stage of the pipeline with <strong>Lua scripts</strong> (Luau dialect).
                                 Place a <code>hooks.lua</code> alongside your job's <code>config.toml</code> and define
-                                any combination of 7 hook functions.</p>
+                                any combination of 9 hook functions.</p>
                             <div class="notification is-info">
                                 <strong>All hooks are optional.</strong> Omit any you don't need — spyweb runs fine with
                                 just a <code>config.toml</code>.
@@ -390,6 +392,9 @@
                         <div class="pipeline-stage"><span class="stage-name">before_fetch(request)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Modify URL, headers, or return nil
                                 to skip this run entirely</small></div>
+                        <div class="pipeline-stage"><span class="stage-name">override_fetch(request)</span> <span
+                                class="stage-thread">executor thread</span><br><small>Custom fetching phase (bypasses
+                                built-in HTTP client if defined)</small></div>
                         <div class="pipeline-stage" style="border-color:var(--blue)"><span class="stage-name">[HTTP
                                 fetch]</span> <span class="stage-thread">background thread</span><br><small>Automatic —
                                 uses request config from previous stage</small></div>
@@ -397,6 +402,9 @@
                                 class="stage-thread">executor thread</span><br><small>Inspect success or failure,
                                 mutate body on success, or return a synthetic response to recover from fetch
                                 errors</small></div>
+                        <div class="pipeline-stage"><span class="stage-name">override_extract(response)</span> <span
+                                class="stage-thread">executor thread</span><br><small>Custom extraction phase for
+                                JSON/XML (bypasses built-in CSS extraction if defined)</small></div>
                         <div class="pipeline-stage" style="border-color:var(--blue)"><span class="stage-name">[CSS
                                 extraction]</span> <span class="stage-thread">background
                                 thread</span><br><small>Automatic — raw parser with DOM fallback</small></div>
@@ -548,10 +556,56 @@ end</code></pre>
                                 </div>
                             </div>
 
+                            <!-- override_fetch -->
+                            <div id="override_fetch" class="box mb-5">
+                                <h3 class="title is-4">
+                                    <span class="tag is-info mr-2">2</span> override_fetch(request)
+                                </h3>
+                                <div class="content">
+                                    <p>Overrides Phase 1 (Fetching). If this hook is defined, SpyWeb will NOT use its
+                                        internal HTTP client.</p>
+                                    <p><strong>Purpose:</strong> To fetch data using a custom method (e.g., launching a
+                                        Chrome instance via CDP or using a proxy rotater).</p>
+                                    <table class="table is-fullwidth">
+                                        <thead>
+                                            <tr>
+                                                <th>Return</th>
+                                                <th>Effect</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td><code>response</code> object</td>
+                                                <td>A standard response table
+                                                    (<code>{ status = 200, body = "...", url = "..." }</code>). The
+                                                    output of this hook acts exactly like a native fetch result and will
+                                                    still pass through the <code>after_fetch</code> hook (wrapped in a
+                                                    fetch_result envelope) if you have one defined. Or, return
+                                                    <code>{ error = "msg" }</code> to simulate a network failure.</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <h5 class="title is-6 mb-2">Example: Custom Fetching (e.g. bypassing internal HTTP
+                                        client)</h5>
+                                    <pre><code class="language-lua">function override_fetch(request)
+    -- E.g. call an external API or run a headless browser script
+    local custom_body = http_get("http://my-renderer.local/?url=" .. request.url)
+    
+    -- MUST return a response object (or { error = "message" } for failure):
+    return {
+        status = 200,
+        url = request.url,
+        body = custom_body,
+        headers = { ["Content-Type"] = "text/html" }
+    }
+end</code></pre>
+                                </div>
+                            </div>
+
                             <!-- after_fetch -->
                             <div id="after_fetch" class="box mb-5">
                                 <h3 class="title is-4">
-                                    <span class="tag is-info mr-2">2</span> after_fetch(fetch_result)
+                                    <span class="tag is-info mr-2">3</span> after_fetch(fetch_result)
                                 </h3>
                                 <div class="content">
                                     <p>Called after every fetch attempt. It receives a stable envelope with request
@@ -573,7 +627,8 @@ end</code></pre>
                                                 <td><code>fetch_result.ok</code></td>
                                                 <td>boolean</td>
                                                 <td>❌</td>
-                                                <td><code>true</code> on HTTP 2xx success, <code>false</code> on transport failures and HTTP error responses</td>
+                                                <td><code>true</code> on HTTP 2xx success, <code>false</code> on
+                                                    transport failures and HTTP error responses</td>
                                             </tr>
                                             <tr>
                                                 <td><code>fetch_result.request.url</code></td>
@@ -597,7 +652,8 @@ end</code></pre>
                                                 <td><code>fetch_result.response</code></td>
                                                 <td>table</td>
                                                 <td>❌</td>
-                                                <td>Present when a real HTTP response exists, including HTTP errors like 403/500</td>
+                                                <td>Present when a real HTTP response exists, including HTTP errors like
+                                                    403/500</td>
                                             </tr>
                                             <tr>
                                                 <td><code>fetch_result.response.body</code></td>
@@ -633,7 +689,8 @@ end</code></pre>
                                                 <td><code>fetch_result.error.kind</code></td>
                                                 <td>string</td>
                                                 <td>❌</td>
-                                                <td>Best-effort error category like <code>dns</code> or <code>timeout</code></td>
+                                                <td>Best-effort error category like <code>dns</code> or
+                                                    <code>timeout</code></td>
                                             </tr>
                                         </tbody>
                                     </table>
@@ -695,10 +752,73 @@ end</code></pre>
                                 </div>
                             </div>
 
+                            <!-- override_extract -->
+                            <div id="override_extract" class="box mb-5">
+                                <h3 class="title is-4">
+                                    <span class="tag is-info mr-2">4</span> override_extract(response)
+                                </h3>
+                                <div class="content">
+                                    <p>Overrides Phase 2 (Extraction). If this hook is defined, SpyWeb will NOT use its
+                                        internal HTML/CSS scraper.</p>
+                                    <p><strong>Purpose:</strong> To parse non-HTML data (like JSON or XML) or apply
+                                        entirely custom extraction logic.</p>
+                                    <table class="table is-fullwidth">
+                                        <thead>
+                                            <tr>
+                                                <th>Field</th>
+                                                <th>Description</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td><code>response</code></td>
+                                                <td>The <code>response</code> object from the fetch phase (after
+                                                    <code>after_fetch</code> has run).</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <table class="table is-fullwidth">
+                                        <thead>
+                                            <tr>
+                                                <th>Return</th>
+                                                <th>Effect</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td>Array of structured items</td>
+                                                <td>The items in the array <em>must</em> use the standard item structure
+                                                    (<code>{ fields = { ... } }</code>). The keys within
+                                                    <code>fields</code> must match the <code>fields</code> defined in
+                                                    <code>jobs.toml</code>. The output acts exactly like native
+                                                    extraction and will still pass through the
+                                                    <code>after_extract</code> hook if you have one defined.</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <h5 class="title is-6 mb-2">Example: Scraping a JSON API</h5>
+                                    <pre><code class="language-lua">function override_extract(response)
+    local data = json_decode(response.body)
+    local items = {}
+    for i, post in ipairs(data.posts) do
+        table.insert(items, {
+            -- MUST return the EXACT structure that after_extract expects:
+            fields = {
+                author = post.user.name,
+                message = post.content
+            },
+            matches = {} -- empty array for keyword matches
+        })
+    end
+    return items
+end</code></pre>
+                                </div>
+                            </div>
+
                             <!-- after_extract -->
                             <div id="after_extract" class="box mb-5">
                                 <h3 class="title is-4">
-                                    <span class="tag is-info mr-2">3</span> after_extract(items)
+                                    <span class="tag is-info mr-2">5</span> after_extract(items)
                                 </h3>
                                 <div class="content">
                                     <p>Batch hook — receives <strong>all</strong> extracted items at once. Good for
@@ -736,7 +856,7 @@ end</code></pre>
                             <!-- filter_item -->
                             <div id="filter_item" class="box mb-5">
                                 <h3 class="title is-4">
-                                    <span class="tag is-info mr-2">4</span> filter_item(item)
+                                    <span class="tag is-info mr-2">6</span> filter_item(item)
                                 </h3>
                                 <div class="content">
                                     <div class="notification is-warning">
@@ -796,7 +916,7 @@ end</code></pre>
                             <!-- before_store -->
                             <div id="before_store" class="box mb-5">
                                 <h3 class="title is-4">
-                                    <span class="tag is-info mr-2">5</span> before_store(items)
+                                    <span class="tag is-info mr-2">7</span> before_store(items)
                                 </h3>
                                 <div class="content">
                                     <div class="notification is-danger">
@@ -830,7 +950,7 @@ end</code></pre>
                             <!-- before_notify -->
                             <div id="before_notify" class="box mb-5">
                                 <h3 class="title is-4">
-                                    <span class="tag is-info mr-2">6</span> before_notify(items)
+                                    <span class="tag is-info mr-2">8</span> before_notify(items)
                                 </h3>
                                 <p>Called after items are saved to the DB. It receives only the <strong>new
                                         items</strong>
@@ -858,7 +978,7 @@ end</code></pre>
                         <!-- before_webhook -->
                         <div id="before_webhook" class="box mb-5">
                             <h3 class="title is-4">
-                                <span class="tag is-info mr-2">7</span> before_webhook(payload)
+                                <span class="tag is-info mr-2">9</span> before_webhook(payload)
                             </h3>
                             <div class="content">
                                 <p>Reshape or silence webhook POSTs. Receives the full JSON payload (job_name,
@@ -1103,7 +1223,8 @@ log("Status is: " .. data.status)</code></pre>
                                 <p>Formats any Lua value into a readable string for debugging. This is especially
                                     useful for nested hook payloads like <code>fetch_result</code> or
                                     <code>last_fetch</code>. It handles nested tables, quotes strings, and marks cycles
-                                    as <code>&lt;cycle&gt;</code> instead of recursing forever.</p>
+                                    as <code>&lt;cycle&gt;</code> instead of recursing forever.
+                                </p>
                                 <pre><code class="language-lua">function after_fetch(fetch_result)
     print(dump(fetch_result))
     log(dump(last_fetch))
@@ -1436,7 +1557,8 @@ body = "Title: {title}\nLink: {link}"</code></pre>
                                             Filter</a></li>
                                     <li :class="{'is-active':tab=='headers'}"><a @click="tab='headers'">Auth Headers</a>
                                     </li>
-                                    <li :class="{'is-active':tab==='pagechange'}"><a @click="tab='pagechange'">Page Change</a></li>
+                                    <li :class="{'is-active':tab==='pagechange'}"><a @click="tab='pagechange'">Page
+                                            Change</a></li>
                                 </ul>
                             </div>
                             <div x-show="tab==='sentinel'">
@@ -1715,7 +1837,9 @@ end</code></pre>
                             </div>
                             <div x-show="tab==='pagechange'">
                                 <div class="content">
-                                    <p><strong>Page Change & Anti-Bot Detection:</strong> If a website blocks you or changes its layout, your CSS selector will return 0 items. Use this to instantly inspect the underlying HTTP response and trigger an alert.</p>
+                                    <p><strong>Page Change & Anti-Bot Detection:</strong> If a website blocks you or
+                                        changes its layout, your CSS selector will return 0 items. Use this to instantly
+                                        inspect the underlying HTTP response and trigger an alert.</p>
                                     <pre><code class="language-lua">-- hook.lua — fallback debugging
 function after_extract(items)
     -- If no items were extracted, we might have been blocked!

@@ -40,7 +40,7 @@ interval = 300
 | Feature | Description |
 | :--- | :--- |
 | **Zero Dependencies** | ~5MB self-contained. Completely portable, no runtime required. |
-| **Lua Scripting** | 7 hook stages plus persistent Lua storage for counters, cursors, and shared state. |
+| **Lua Scripting** | 9 hook stages plus persistent Lua storage for counters, cursors, and shared state. |
 | **Hot Reload** | Save a config or Lua script and SpyWeb respawns the job instantly. |
 | **Internal DB** | Built-in deduplication ensures you never see the same item twice. |
 | **Dual Binary** | Choice of a headless CLI or a silent system tray app for background runs. |

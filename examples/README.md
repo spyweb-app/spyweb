@@ -167,9 +167,13 @@ Every scrape run goes through these stages in order:
 ```
 before_fetch(request)         ← modify URL, headers, or return nil to skip
     ↓
+override_fetch(request)       ← bypass built-in HTTP client
+    ↓
 [HTTP fetch]                  ← automatic
     ↓
 after_fetch(fetch_result)     ← inspect request/response/error, mutate response.body, or return nil
+    ↓
+override_extract(response)    ← bypass built-in CSS extraction
     ↓
 [CSS extraction]              ← automatic (raw parser → DOM fallback)
     ↓
