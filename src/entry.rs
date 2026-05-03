@@ -104,10 +104,10 @@ async fn job_manager(
 
         crate::t_println!("Reloading config...");
 
-        drop(handles);
-
         match loader::load_all_jobs("jobs.toml", "jobs", Arc::clone(&db)) {
             Ok(new_jobs) => {
+                drop(handles);
+
                 if let Ok(mut lock) = active_job_ids.write() {
                     *lock = new_jobs.list.iter().map(|j| j.config.id()).collect();
                 }
@@ -120,7 +120,6 @@ async fn job_manager(
             }
             Err(e) => {
                 crate::t_eprintln!("Config reload failed: {}", e);
-                handles = vec![];
             }
         }
     }

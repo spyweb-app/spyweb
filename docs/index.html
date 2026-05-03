@@ -1436,6 +1436,7 @@ body = "Title: {title}\nLink: {link}"</code></pre>
                                             Filter</a></li>
                                     <li :class="{'is-active':tab=='headers'}"><a @click="tab='headers'">Auth Headers</a>
                                     </li>
+                                    <li :class="{'is-active':tab==='pagechange'}"><a @click="tab='pagechange'">Page Change</a></li>
                                 </ul>
                             </div>
                             <div x-show="tab==='sentinel'">
@@ -1709,6 +1710,33 @@ function after_fetch(fetch_result)
         return nil
     end
                                     return fetch_result
+end</code></pre>
+                                </div>
+                            </div>
+                            <div x-show="tab==='pagechange'">
+                                <div class="content">
+                                    <p><strong>Page Change & Anti-Bot Detection:</strong> If a website blocks you or changes its layout, your CSS selector will return 0 items. Use this to instantly inspect the underlying HTTP response and trigger an alert.</p>
+                                    <pre><code class="language-lua">-- hook.lua — fallback debugging
+function after_extract(items)
+    -- If no items were extracted, we might have been blocked!
+    if #items == 0 then
+        local debug_info = {
+            ok = last_fetch.ok,
+            status = last_fetch.response.status,
+            url = last_fetch.response.url,
+            -- Safely extract the page title to check for Cloudflare/Captchas
+            title = last_fetch.response.body:match("&lt;title&gt;(.-)&lt;/title&gt;")
+        }
+        
+        -- Print to the console without logging the massive raw HTML body
+        print(dump(debug_info))
+        
+        -- You can easily trigger any alert mechanism here!
+        -- notify("Scraper Blocked!", debug_info.title)
+        -- http_post("https://ntfy.sh/my_alerts", "Blocked on " .. debug_info.title)
+    end
+
+    return items
 end</code></pre>
                                 </div>
                             </div>
