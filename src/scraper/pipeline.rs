@@ -69,13 +69,18 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
         );
     }
 
-    let items = smol::unblock({
-        let runner = Arc::clone(runner);
-        let config = job.config.clone();
-        let dir = job.dir.clone();
-        move || runner.extract(&config, dir.as_deref(), &response)
-    })
-    .await?;
+    let items = match job.hooks.as_ref().filter(|h| h.has_override_extract()) {
+        Some(h) => h.override_extract(&response).await?,
+        None => {
+            smol::unblock({
+                let runner = Arc::clone(runner);
+                let config = job.config.clone();
+                let dir = job.dir.clone();
+                move || runner.extract(&config, dir.as_deref(), &response)
+            })
+            .await?
+        }
+    };
 
     let items = match job.hooks.as_ref() {
         Some(h) => h.after_extract(items).await?,
@@ -86,7 +91,13 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
         Some(h) if h.has_filter_item() => {
             let mut filtered = Vec::new();
             for item in items {
-                if let Some(kept) = h.filter_item(item).await? {
+                if let Some(mut kept) = h.filter_item(item).await? {
+                    // Even if user filters, we still want the engine to tag them for the DB
+                    kept.matches = crate::scraper::extractor::matching_keywords(
+                        &kept.fields,
+                        job.config.keywords.as_deref(),
+                        job.config.search_fields.as_deref(),
+                    );
                     filtered.push(kept);
                 }
             }

@@ -39,7 +39,7 @@ pub fn lua_to_request(table: Table, original: RequestConfig) -> Result<RequestCo
     Ok(RequestConfig { url, headers })
 }
 
-fn response_to_lua(lua: &Lua, res: &RequestResult) -> Result<Table> {
+pub fn response_to_lua(lua: &Lua, res: &RequestResult) -> Result<Table> {
     let table = lua.create_table()?;
     table.set("status", res.status)?;
     table.set("url", res.url.as_str())?;

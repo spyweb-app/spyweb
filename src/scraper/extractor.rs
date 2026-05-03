@@ -209,7 +209,7 @@ fn decode_html_entities(value: &str) -> String {
 //         .any(|keyword| haystack.contains(&keyword))
 // }
 
-fn matching_keywords(
+pub fn matching_keywords(
     fields: &HashMap<String, String>,
     keywords: Option<&[String]>,
     search_fields: Option<&[String]>,

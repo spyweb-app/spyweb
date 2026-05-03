@@ -4,7 +4,7 @@
 ---@diagnostic disable: lowercase-global
 
 -- Full Pipeline Example
--- This hook demonstrates all 7 stages of the SpyWeb lifecycle.
+-- This hook demonstrates all 9 stages of the SpyWeb lifecycle.
 
 -- NOTE: Only define the hooks you actually need. 
 -- SpyWeb pre-detects which functions exist at startup and skips the 
@@ -35,22 +35,26 @@ function before_fetch(request)
     return request
 end
 
--- 2. Inspect or modify the raw response body/status before extraction
+-- 2. override_fetch (not shown in starter kit, see full example)
+
+-- 3. Inspect or modify the raw response body/status before extraction
 function after_fetch(fetch_result)
     if not fetch_result.ok then
-        print("[2] after_fetch - error: " .. fetch_result.error.message)
+        print("[3] after_fetch - error: " .. fetch_result.error.message)
         return nil
     end
 
-    print("[2] after_fetch - status: " .. fetch_result.response.status)
+    print("[3] after_fetch - status: " .. fetch_result.response.status)
     -- fetch_result.response.body = fetch_result.response.body:gsub("badword", "goodword")
     return fetch_result
 end
 
--- 3. Modify the entire list of extracted items at once.
+-- 4. override_extract (not shown in starter kit, see full example)
+
+-- 5. Modify the entire list of extracted items at once.
 -- This runs even if 0 items were found (useful for detecting site changes).
 function after_extract(items)
-    print("[3] after_extract - found " .. #items .. " items")
+    print("[5] after_extract - found " .. #items .. " items")
 
     -- Example: Drop items with price more than 50,000
     local filtered = {}
@@ -68,29 +72,29 @@ function after_extract(items)
     return filtered
 end
 
--- 4. Clean or transform a single item (runs for every item)
+-- 6. Clean or transform a single item (runs for every item)
 -- Returning nil here drops the specific item.
 function filter_item(item)
-    -- print("[4] filter_item: " .. item.fields.title)
+    -- print("[6] filter_item: " .. item.fields.title)
     return item
 end
 
--- 5. Last chance to modify items before they are checked against the Database (dedup)
+-- 7. Last chance to modify items before they are checked against the Database (dedup)
 function before_store(items)
-    print("[5] before_store - " .. #items .. " items passing to DB")
+    print("[7] before_store - " .. #items .. " items passing to DB")
     return items
 end
 
--- 6. Modify items before they trigger a desktop notification
+-- 8. Modify items before they trigger a desktop notification
 -- Only 'new' items (passed dedup) reach here.
 function before_notify(items)
-    print("[6] before_notify - " .. #items .. " NEW items found")
+    print("[8] before_notify - " .. #items .. " NEW items found")
     return items
 end
 
--- 7. Modify or abort the JSON payload sent to your webhook
+-- 9. Modify or abort the JSON payload sent to your webhook
 function before_webhook(payload)
-    print("[7] before_webhook - Preparing POST to " .. payload.job_name)
+    print("[9] before_webhook - Preparing POST to " .. payload.job_name)
     
     -- Increment state for the next run
     iter = iter + 1

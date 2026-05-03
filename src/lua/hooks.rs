@@ -105,6 +105,7 @@ pub struct JobHooks {
     has_before_fetch: bool,
     has_override_fetch: bool,
     has_after_fetch: bool,
+    has_override_extract: bool,
     has_after_extract: bool,
     has_filter_item: bool,
     has_before_store: bool,
@@ -120,6 +121,7 @@ impl std::fmt::Debug for JobHooks {
             .field("has_before_fetch", &self.has_before_fetch)
             .field("has_override_fetch", &self.has_override_fetch)
             .field("has_after_fetch", &self.has_after_fetch)
+            .field("has_override_extract", &self.has_override_extract)
             .field("has_after_extract", &self.has_after_extract)
             .field("has_filter_item", &self.has_filter_item)
             .field("has_before_store", &self.has_before_store)
@@ -193,6 +195,7 @@ impl JobHooks {
             has_before_fetch: has("before_fetch"),
             has_override_fetch: has("override_fetch"),
             has_after_fetch: has("after_fetch"),
+            has_override_extract: has("override_extract"),
             has_after_extract: has("after_extract"),
             has_filter_item: has("filter_item"),
             has_before_store: has("before_store"),
@@ -345,6 +348,32 @@ impl JobHooks {
                 Ok(res) => Ok(Some(res.clone())),
                 Err(err) => Err(anyhow::anyhow!(err.clone())),
             },
+        }
+    }
+
+    pub fn has_override_extract(&self) -> bool {
+        self.has_override_extract
+    }
+
+    pub async fn override_extract(&self, response: &RequestResult) -> Result<Vec<ExtractedItem>> {
+        match self.try_override_extract(response).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                self.log_hook_error("override_extract", e);
+                Ok(vec![])
+            }
+        }
+    }
+
+    async fn try_override_extract(&self, response: &RequestResult) -> Result<Vec<ExtractedItem>> {
+        let lua = self.lua.lock().await;
+        let func: mlua::Function = lua.globals().get("override_extract")?;
+        let table = engine::response_to_lua(&lua, response)?;
+        let ret = func.call_async::<mlua::Value>(table).await?;
+        match ret {
+            mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(vec![]),
+            mlua::Value::Table(t) => engine::lua_to_items(t, vec![]),
+            _ => Ok(vec![]),
         }
     }
 
@@ -600,6 +629,48 @@ end
         };
         let attempt_fail = smol::block_on(hooks.override_fetch(req_fail)).unwrap();
         assert_eq!(attempt_fail.result.unwrap_err(), "simulated failure");
+
+        let _ = fs::remove_file(dir.join("test.redb"));
+        let _ = fs::remove_file(&hook_path);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn test_override_extract_hook() {
+        let dir = unique_test_dir("override-extract");
+        fs::create_dir_all(&dir).unwrap();
+        let hook_path = dir.join("hooks.lua");
+        fs::write(
+            &hook_path,
+            r#"
+function override_extract(response)
+    return {
+        { fields = { title = "Custom Item 1", body = response.body } },
+        { fields = { title = "Custom Item 2", body = "Fixed body" } }
+    }
+end
+"#,
+        )
+        .unwrap();
+
+        let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+        let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+        assert!(hooks.has_override_extract());
+
+        let res = RequestResult {
+            url: "https://example.com".into(),
+            status: 200,
+            headers: Default::default(),
+            body: "Raw HTML body".into(),
+            proxy: None,
+        };
+
+        let items = smol::block_on(hooks.override_extract(&res)).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].fields["title"], "Custom Item 1");
+        assert_eq!(items[0].fields["body"], "Raw HTML body");
+        assert_eq!(items[1].fields["title"], "Custom Item 2");
+        assert_eq!(items[1].fields["body"], "Fixed body");
 
         let _ = fs::remove_file(dir.join("test.redb"));
         let _ = fs::remove_file(&hook_path);

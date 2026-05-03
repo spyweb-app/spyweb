@@ -94,8 +94,18 @@ impl Runner {
 
         items
             .into_iter()
-            .filter(|item| {
-                crate::scraper::extractor::has_match(&item.fields, keywords, search_fields)
+            .filter_map(|mut item| {
+                let matches = crate::scraper::extractor::matching_keywords(
+                    &item.fields,
+                    keywords,
+                    search_fields,
+                );
+                if matches.is_empty() {
+                    None
+                } else {
+                    item.matches = matches;
+                    Some(item)
+                }
             })
             .collect()
     }

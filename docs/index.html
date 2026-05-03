@@ -802,16 +802,18 @@ end</code></pre>
     local items = {}
     for i, post in ipairs(data.posts) do
         table.insert(items, {
-            -- MUST return the EXACT structure that after_extract expects:
             fields = {
                 author = post.user.name,
                 message = post.content
             },
-            matches = {} -- empty array for keyword matches
+            -- matches = {} -- Note: Engine ignores this and auto-tags matches from fields
         })
     end
     return items
 end</code></pre>
+                                    <div class="notification is-warning mt-3">
+                                        <strong>Note on Matches:</strong> The <code>matches</code> field is <strong>immutable and system-owned</strong>. Even if you define it in your Lua table, the engine will ignore it. Instead, the engine automatically populates this field by scanning your returned <code>fields</code> against the job's keywords after the hook returns. This ensures the audit trail remains honest to the engine's keyword configuration.
+                                    </div>
                                 </div>
                             </div>
 
@@ -832,7 +834,7 @@ end</code></pre>
                                     <pre><code class="language-lua">{
   { 
     fields = { title = "...", link = "..." },
-    matches = { "keyword1", ... }
+    matches = { "keyword1", ... } -- READ-ONLY: Populated by engine
   },
   ...
 }</code></pre>
