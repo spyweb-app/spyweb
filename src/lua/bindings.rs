@@ -77,6 +77,13 @@ pub fn register_http_and_fs(lua: &Lua, job_dir: Option<std::path::PathBuf>) -> L
 
     lua.globals().set("http_get", http_get)?;
     lua.globals().set("http_post", http_post)?;
+
+    // Internal globals
+    lua.load(include_str!("globals/helpers.lua"))
+        .set_name("helpers.lua")
+        .exec()
+        .map_err(|e| mlua::Error::runtime(format!("Failed to load helpers.lua: {e}")))?;
+
     lua.globals().set(
         "notify",
         lua.create_function(|_, (title, body, timeout): (String, String, Option<u32>)| {
@@ -85,13 +92,13 @@ pub fn register_http_and_fs(lua: &Lua, job_dir: Option<std::path::PathBuf>) -> L
             Ok(())
         })?,
     )?;
-    lua.globals().set(
+    /*lua.globals().set(
         "dump",
         lua.create_function(|_, value: mlua::Value| {
             let mut seen = HashSet::new();
             format_lua_value(&value, 0, &mut seen)
         })?,
-    )?;
+    )?;*/
 
     if let Some(dir) = job_dir {
         let log_dir = dir.clone();
@@ -191,6 +198,7 @@ pub fn register_http_and_fs(lua: &Lua, job_dir: Option<std::path::PathBuf>) -> L
     Ok(())
 }
 
+/*
 fn format_lua_value(
     value: &mlua::Value,
     indent: usize,
@@ -266,6 +274,7 @@ fn format_lua_key(key: &mlua::Value) -> LuaResult<String> {
         )),
     }
 }
+*/
 
 fn log_storage_error(op: &str, err: impl std::fmt::Display) {
     crate::t_eprintln!("Lua storage {} failed: {}", op, err);
@@ -792,5 +801,44 @@ mod tests {
         assert!(dumped.contains("ok = true"));
         assert!(dumped.contains(r#"message = "hello""#));
         assert!(dumped.contains("self = <cycle>"));
+    }
+
+    #[test]
+    fn test_copy_and_deep_copy_helpers() {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, None).unwrap();
+
+        lua.load(
+            r#"
+            local original = {
+                a = 1,
+                b = { c = 2 },
+                d = { 3, 4 }
+            }
+
+            -- Test Shallow Copy
+            local shallow = copy(original)
+            assert(shallow ~= original, "shallow should be a new table")
+            assert(shallow.a == original.a, "shallow.a should match")
+            assert(shallow.b == original.b, "shallow.b should be the same reference")
+
+            -- Test Deep Copy
+            local deep = deep_copy(original)
+            assert(deep ~= original, "deep should be a new table")
+            assert(deep.a == original.a, "deep.a should match")
+            assert(deep.b ~= original.b, "deep.b should be a new table")
+            assert(deep.b.c == original.b.c, "deep.b.c should match")
+            assert(deep.d ~= original.d, "deep.d should be a new table")
+            assert(deep.d[1] == original.d[1], "deep.d[1] should match")
+
+            -- Test Deep Copy Cycles
+            original.self = original
+            local deep_cycle = deep_copy(original)
+            assert(deep_cycle.self == deep_cycle, "deep_cycle should preserve self-reference")
+            assert(deep_cycle.self ~= original, "deep_cycle.self should not point to original")
+        "#,
+        )
+        .exec()
+        .unwrap();
     }
 }
