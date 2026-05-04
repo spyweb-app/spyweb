@@ -106,7 +106,10 @@ fn handle_request_logic(
     }
 
     if url == "/api/jobs" {
-        let job_ids = active_jobs.read().unwrap().clone();
+        let job_ids = active_jobs
+            .read()
+            .map_err(|err| anyhow::anyhow!("active jobs lock poisoned: {}", err))?
+            .clone();
         return Ok(Response::json(&job_ids));
     }
 

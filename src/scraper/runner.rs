@@ -121,18 +121,7 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     let db = Arc::new(Db::open("data")?);
     let mut jobs = crate::config::loader::load_all_jobs("jobs.toml", "jobs", db)?;
 
-    let search_id = job_name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() {
-                c.to_lowercase().next().unwrap()
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('_')
-        .to_string();
+    let search_id = crate::config::types::normalize_job_id(job_name);
 
     let available_jobs = jobs
         .list
@@ -370,7 +359,9 @@ mod tests {
             <div class="job"><h2>Go Developer</h2><a href="/go">Apply</a></div>
         "#;
 
-        let result = runner.process_response(&job, None, response(html)).unwrap();
+        let Ok(result) = runner.process_response(&job, None, response(html)) else {
+            panic!("processing a valid HTML response should succeed");
+        };
 
         assert_eq!(result.status, 200);
         assert_eq!(result.item_count, 2);
@@ -385,7 +376,9 @@ mod tests {
             <div class="job"><h2>Go Developer</h2><a href="/go">Apply</a></div>
         "#;
 
-        let result = runner.process_response(&job, None, response(html)).unwrap();
+        let Ok(result) = runner.process_response(&job, None, response(html)) else {
+            panic!("processing a valid HTML response should succeed");
+        };
 
         assert_eq!(result.item_count, 1);
         assert_eq!(

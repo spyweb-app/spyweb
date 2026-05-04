@@ -55,18 +55,14 @@ fn main() -> Result<()> {
     let tray_menu = Menu::new();
     let open_i = MenuItem::new("Open Web UI", true, None);
     let quit_i = MenuItem::new("Quit SpyWeb", true, None);
-    tray_menu
-        .append_items(&[&open_i, &PredefinedMenuItem::separator(), &quit_i])
-        .unwrap();
-
+    tray_menu.append_items(&[&open_i, &PredefinedMenuItem::separator(), &quit_i])?;
     let icon = Icon::from_rgba(include_bytes!("../../icon-32x32.rgba").to_vec(), 32, 32)?;
 
     let _tray = TrayIconBuilder::new()
         .with_tooltip("SpyWeb")
         .with_icon(icon)
         .with_menu(Box::new(tray_menu))
-        .build()
-        .unwrap();
+        .build()?;
 
     let event_loop = EventLoop::builder().build()?;
 

@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  📖 <a href="docs/index.html"><b>Master Guide</b></a> |
+  📖 <a href="https://docs.spyweb.app/"><b>Master Guide</b></a> |
   ⚙️ <a href="docs/config.md">Config</a> |
-  📜 <a href="https://spyweb.pages.dev/">Lua API</a> |
+  📜 <a href="https://docs.spyweb.app/#hooks">Lua API</a> |
   🛠️ <a href="docs/api.md">REST API</a> |
   🚀 <a href="docs/vps-deployment.md">VPS Setup</a> |
   📂 <a href="examples/">Examples</a> |
@@ -32,7 +32,6 @@ url = "https://news.ycombinator.com"
 selector = ".athing"
 fields = ["title:.titleline > a", "link:.titleline > a@href"]
 keywords = ["rust", "linux", "open source"]
-interval = 300
 ```
 
 ## Features
@@ -142,9 +141,11 @@ function before_fetch(request)
 end
 ```
 >
-> 💡 **Pro-Tip:** Editing hooks and config on a VPS? Check out our [VPS Setup & Deployment Guide](docs/vps-deployment.md) for a high-performance terminal IDE experience (Syntax checking, Autocomplete, and more).
+> Check the [Examples](examples/) for more Lua hook examples.
 >
-> **JavaScript & Rendering:** SpyWeb is designed for extreme efficiency and does not ship with a heavy headless browser. For JS-heavy client-rendered pages or protected sites, you can use the `before_fetch` hook to seamlessly delegate rendering to any external service or local proxy. This maintains SpyWeb's tiny footprint while providing the flexibility to handle complex rendering requirements.
+> **JavaScript & Rendering:** SpyWeb is designed for extreme efficiency and does not embed a heavy headless browser. For JS-heavy client-rendered pages, you can use the `override_fetch` hook to seamlessly delegate rendering to any external service or local proxy.
+>
+> **Coming Soon: Native CDP Support.** I'll be implementing a lightweight CDP (Chrome DevTools Protocol) client that allows you to control a **host browser** (like Headless Chrome or Chromium) directly from your Lua hooks. This maintains SpyWeb's tiny ~5MB footprint by utilizing the browser already on your system, providing full automation capabilities without the bloat.
 
 ---
 

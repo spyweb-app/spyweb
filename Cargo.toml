@@ -1,6 +1,6 @@
 [package]
 name = "spyweb"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 authors = ["Kosher Kenn <kosherkenn12@gmail.com>"]
 description = "A lightweight, configurable scraper with Lua customization support"
@@ -14,7 +14,6 @@ exclude = ["tests/", "jobs/", "logs/"]
 
 [dependencies]
 anyhow = "1.0.102"
-# features = "0.10.0"
 # futures = "0.3.32"
 mlua = { version = "0.11.6", features = ["vendored", "send", "async", "serialize"] }
 notify = "8.2.0"
@@ -33,7 +32,6 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"], optional = true}
 open = {version = "5.3.4", optional = true}
-# winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 tray-icon = {version = "0.22.0", optional=true}
 
 [features]

@@ -95,6 +95,20 @@ pub enum Rotate {
     Random,
     RoundRobin,
 }
+
+pub fn normalize_job_id(input: &str) -> String {
+    let mut normalized = String::with_capacity(input.len());
+
+    for c in input.chars() {
+        if c.is_alphanumeric() {
+            normalized.extend(c.to_lowercase());
+        } else {
+            normalized.push('_');
+        }
+    }
+
+    normalized.trim_matches('_').to_string()
+}
 // pub struct Field {
 //     pub name: String,
 //     pub selector: String,
@@ -103,18 +117,7 @@ pub enum Rotate {
 
 impl JobConfig {
     pub fn id(&self) -> String {
-        self.name
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() {
-                    c.to_lowercase().next().unwrap()
-                } else {
-                    '_'
-                }
-            })
-            .collect::<String>()
-            .trim_matches('_')
-            .to_string()
+        normalize_job_id(&self.name)
     }
     pub fn field_names(&self) -> Vec<String> {
         self.fields

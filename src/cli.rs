@@ -32,39 +32,54 @@ fn spawn_terminal_if_needed() {
         return;
     }
 
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(err) => {
+            crate::t_eprintln!("Failed to determine executable path: {}", err);
+            return;
+        }
+    };
+
     #[cfg(target_os = "windows")]
     {
-        let exe = std::env::current_exe().unwrap();
-        std::process::Command::new("cmd")
+        if let Err(err) = std::process::Command::new("cmd")
             .arg("/K")
-            .arg(format!("\"{}\"", exe.to_str().unwrap()))
+            .arg(format!("\"{}\"", exe.display()))
             .spawn()
-            .expect("failed to spawn terminal");
+        {
+            crate::t_eprintln!("Failed to spawn terminal: {}", err);
+            return;
+        }
         std::process::exit(0);
     }
 
     #[cfg(target_os = "macos")]
     {
-        let exe = std::env::current_exe().unwrap();
-        std::process::Command::new("open")
-            .args(["-a", "Terminal", exe.to_str().unwrap()])
+        if let Err(err) = std::process::Command::new("open")
+            .args(["-a", "Terminal"])
+            .arg(&exe)
             .spawn()
-            .unwrap();
+        {
+            crate::t_eprintln!("Failed to spawn Terminal.app: {}", err);
+            return;
+        }
         std::process::exit(0);
     }
 
     #[cfg(target_os = "linux")]
     {
-        let exe = std::env::current_exe().unwrap();
         for term in &["x-terminal-emulator", "gnome-terminal", "xterm", "konsole"] {
             if std::process::Command::new(term)
-                .args(["-e", exe.to_str().unwrap()])
+                .arg("-e")
+                .arg(&exe)
                 .spawn()
                 .is_ok()
             {
                 std::process::exit(0);
             }
         }
+
+        crate::t_eprintln!("Failed to spawn a terminal with known Linux terminal emulators.");
     }
 }
 
@@ -171,19 +186,25 @@ mod tests {
 
     #[test]
     fn parses_port_after_start() {
-        let parsed = parse_start_port(&args(&["spyweb", "start", "--port", "9999"])).unwrap();
+        let Ok(parsed) = parse_start_port(&args(&["spyweb", "start", "--port", "9999"])) else {
+            panic!("valid --port syntax should parse");
+        };
         assert_eq!(parsed, Some(9999));
     }
 
     #[test]
     fn parses_port_equals_syntax() {
-        let parsed = parse_start_port(&args(&["spyweb", "start", "--port=8888"])).unwrap();
+        let Ok(parsed) = parse_start_port(&args(&["spyweb", "start", "--port=8888"])) else {
+            panic!("valid --port= syntax should parse");
+        };
         assert_eq!(parsed, Some(8888));
     }
 
     #[test]
     fn allows_start_without_port() {
-        let parsed = parse_start_port(&args(&["spyweb", "start"])).unwrap();
+        let Ok(parsed) = parse_start_port(&args(&["spyweb", "start"])) else {
+            panic!("missing optional --port should still parse");
+        };
         assert_eq!(parsed, None);
     }
 }

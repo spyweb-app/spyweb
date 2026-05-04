@@ -325,8 +325,14 @@ mod tests {
     #[test]
     fn flatten_headers_preserves_header_names_and_values() {
         let mut headers = HeaderMap::new();
-        headers.insert("content-type", "text/html".parse().unwrap());
-        headers.insert("x-request-id", "abc123".parse().unwrap());
+        headers.insert(
+            "content-type",
+            ureq::http::HeaderValue::from_static("text/html"),
+        );
+        headers.insert(
+            "x-request-id",
+            ureq::http::HeaderValue::from_static("abc123"),
+        );
 
         let flattened = flatten_headers(&headers);
 
@@ -343,7 +349,9 @@ mod tests {
     #[test]
     fn build_agent_disables_http_status_as_error() {
         let handler = RequestHandler::new();
-        let agent = handler.build_agent(None).unwrap();
+        let Ok(agent) = handler.build_agent(None) else {
+            panic!("building an agent without a proxy should succeed");
+        };
 
         assert!(
             !agent.config().http_status_as_error(),

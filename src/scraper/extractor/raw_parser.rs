@@ -631,7 +631,9 @@ fn close_until_match(
     };
 
     while stack.len() > position {
-        let index = stack.pop().unwrap();
+        let Some(index) = stack.pop() else {
+            break;
+        };
         nodes[index].close_start = close_start;
         nodes[index].end = close_end;
     }
@@ -668,18 +670,24 @@ fn test_select_root_element() {
 
     let doc = RawDocument::parse(html);
 
-    let item_selector = SelectorPath::parse(".listing-box").unwrap();
+    let Some(item_selector) = SelectorPath::parse(".listing-box") else {
+        panic!("selector should parse");
+    };
     let items = doc.select_all(&item_selector);
 
     assert_eq!(items.len(), 1);
     let item_index = items[0];
 
-    let field_selector = SelectorPath::parse(".listing-box").unwrap();
+    let Some(field_selector) = SelectorPath::parse(".listing-box") else {
+        panic!("selector should parse");
+    };
 
     let matched = doc.select_first_within(item_index, &field_selector);
 
-    assert!(matched.is_some(), "Should match the root element itself");
-    let value = extract_raw_value(&doc, matched.unwrap(), "data-link", "");
+    let Some(matched) = matched else {
+        panic!("Should match the root element itself");
+    };
+    let value = extract_raw_value(&doc, matched, "data-link", "");
     assert_eq!(value, "parent-link");
 }
 
@@ -690,7 +698,9 @@ fn test_id_selector() {
         <div id="wrong">Miss</div>
     "#;
     let doc = RawDocument::parse(html);
-    let sel = SelectorPath::parse("#target").unwrap();
+    let Some(sel) = SelectorPath::parse("#target") else {
+        panic!("selector should parse");
+    };
     let matches = doc.select_all(&sel);
     assert_eq!(matches.len(), 1);
     assert_eq!(
@@ -710,7 +720,9 @@ fn test_tag_id_class_combined() {
     let doc = RawDocument::parse(html);
 
     // Tag + ID + Multiple Classes
-    let sel = SelectorPath::parse("div#main.container.active").unwrap();
+    let Some(sel) = SelectorPath::parse("div#main.container.active") else {
+        panic!("selector should parse");
+    };
     let matches = doc.select_all(&sel);
     assert_eq!(matches.len(), 1);
     assert_eq!(
@@ -726,7 +738,9 @@ fn test_multiple_identical_ids() {
         <li id="item">Two</li>
     "#;
     let doc = RawDocument::parse(html);
-    let sel = SelectorPath::parse("#item").unwrap();
+    let Some(sel) = SelectorPath::parse("#item") else {
+        panic!("selector should parse");
+    };
     let matches = doc.select_all(&sel);
     // Even if IDs should be unique, scrapers must handle broken HTML where they aren't
     assert_eq!(matches.len(), 2);

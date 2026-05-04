@@ -46,4 +46,4 @@ When a job finds new items, it can POST a JSON payload to a configured webhook U
 }
 ```
 
-> **Pro Tip:** Use the `before_webhook(payload)` Lua hook to completely reshape this JSON before it is sent. This allows you to match specific API formats like **Discord embeds**, **Slack blocks**, or **Pushover** notifications without an external middleware.
+> Use the `before_webhook(payload)` Lua hook to completely reshape this JSON before it is sent. This allows you to match specific API formats like **Discord embeds**, **Slack blocks**, or **Pushover** notifications without an external middleware.
