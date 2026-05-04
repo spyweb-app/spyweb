@@ -3,19 +3,25 @@ use scraper::{Html, Selector};
 
 use crate::{config::types::JobConfig, scraper::extractor::matching_keywords};
 
-use super::{ExtractedItem, FieldSpec, extract_dom_value, has_match, safe_element_html};
+use super::{
+    ExtractedItem, ExtractionResult, FieldSpec, extract_dom_value, has_match, safe_element_html,
+};
 
 pub(super) fn extract(
     job: &JobConfig,
     html: &str,
     field_specs: &[FieldSpec],
-) -> Result<Vec<ExtractedItem>> {
+) -> Result<ExtractionResult> {
     let document = Html::parse_fragment(html);
     let item_selector = Selector::parse(&job.selector)
         .map_err(|err| anyhow!("invalid selector '{}': {err}", job.selector))?;
 
     let mut items = Vec::new();
+    let mut selector_matches = 0;
+
     for element in document.select(&item_selector) {
+        selector_matches += 1;
+
         let mut fields = std::collections::HashMap::new();
         let mut field_match_html = job.debug.then(std::collections::HashMap::new);
         let mut field_parsers = job.debug.then(std::collections::HashMap::new);
@@ -72,7 +78,10 @@ pub(super) fn extract(
         });
     }
 
-    Ok(items)
+    Ok(ExtractionResult {
+        items,
+        selector_matches,
+    })
 }
 
 #[cfg(test)]
@@ -112,10 +121,11 @@ mod tests {
             },
         ];
 
-        let results = extract(&job, html, &field_specs).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].fields["link"], "https://example.com");
-        assert_eq!(results[0].fields["title"], "Job Title");
+        let result = extract(&job, html, &field_specs).unwrap();
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.selector_matches, 1);
+        assert_eq!(result.items[0].fields["link"], "https://example.com");
+        assert_eq!(result.items[0].fields["title"], "Job Title");
     }
 
     #[test]
@@ -144,8 +154,9 @@ mod tests {
             attr: "text".into(),
         }];
 
-        let results = extract(&job, html, &field_specs).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].fields["title"], "Software Engineer");
+        let result = extract(&job, html, &field_specs).unwrap();
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.selector_matches, 1);
+        assert_eq!(result.items[0].fields["title"], "Software Engineer");
     }
 }

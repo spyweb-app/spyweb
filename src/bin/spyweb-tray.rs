@@ -82,6 +82,11 @@ fn main() -> Result<()> {
 
 #[cfg(not(feature = "tray"))]
 fn main() -> Result<()> {
-    eprintln!("{}" , spyweb::color::c_err("Error: This binary must be compiled with the 'tray' feature enabled."));
+    eprintln!(
+        "{}",
+        spyweb::color::c_err(
+            "Error: This binary must be compiled with the 'tray' feature enabled."
+        )
+    );
     std::process::exit(1);
 }

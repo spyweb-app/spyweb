@@ -300,7 +300,9 @@ impl JobHooks {
                     })
                 }
             }
-            _ => Err(anyhow::anyhow!("override_fetch must return a response table")),
+            _ => Err(anyhow::anyhow!(
+                "override_fetch must return a response table"
+            )),
         }
     }
 
@@ -375,6 +377,12 @@ impl JobHooks {
             mlua::Value::Table(t) => engine::lua_to_items(t, vec![]),
             _ => Ok(vec![]),
         }
+    }
+
+    pub async fn set_selector_matches(&self, count: usize) -> Result<()> {
+        let lua = self.lua.lock().await;
+        lua.globals().set("selector_matches", count)?;
+        Ok(())
     }
 
     // No shortcircuit — nil or empty table both become empty vec.

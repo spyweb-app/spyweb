@@ -13,6 +13,7 @@ pub struct JobRunResult {
     pub url: String,
     pub status: u16,
     pub item_count: usize,
+    pub selector_matches: usize,
     pub items: Vec<ExtractedItem>,
     pub proxy: Option<String>,
 }
@@ -52,8 +53,8 @@ impl Runner {
         dir: Option<&Path>,
         response: RequestResult,
     ) -> Result<JobRunResult> {
-        let items = self.extractor.extract(config, dir, &response.body)?;
-        let items = self.keyword_filter(config, items);
+        let result = self.extractor.extract(config, dir, &response.body)?;
+        let items = self.keyword_filter(config, result.items);
         let item_count = items.len();
 
         Ok(JobRunResult {
@@ -61,6 +62,7 @@ impl Runner {
             url: response.url,
             status: response.status,
             item_count,
+            selector_matches: result.selector_matches,
             items,
             proxy: response.proxy,
         })
@@ -74,7 +76,7 @@ impl Runner {
         config: &JobConfig,
         dir: Option<&Path>,
         response: &RequestResult,
-    ) -> Result<Vec<ExtractedItem>> {
+    ) -> Result<crate::scraper::extractor::ExtractionResult> {
         self.extractor.extract(config, dir, &response.body)
     }
 
@@ -119,7 +121,6 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     let db = Arc::new(Db::open("data")?);
     let mut jobs = crate::config::loader::load_all_jobs("jobs.toml", "jobs", db)?;
 
-    // Smart match: normalize the input to compare against job IDs
     let search_id = job_name
         .chars()
         .map(|c| {
@@ -156,10 +157,7 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
 
     job.config.debug = true;
 
-    println!(
-        "Debug run for job: {}",
-        crate::color::c_job(job_name)
-    );
+    println!("Debug run for job: {}", crate::color::c_job(job_name));
 
     let runner = Runner::new();
     let request = RequestConfig::from_job(&job.config);
@@ -168,7 +166,10 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     let request = match job.hooks.as_ref() {
         Some(h) => match h.before_fetch(request).await? {
             None => {
-                println!("Request aborted by {} hook.", crate::color::c_warn("before_fetch"));
+                println!(
+                    "Request aborted by {} hook.",
+                    crate::color::c_warn("before_fetch")
+                );
                 return Ok(());
             }
             Some(r) => r,
@@ -177,8 +178,17 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     };
 
     // 2. fetch
-    println!("Fetching URL: {}", crate::color::c_info(&request.url));
-    let fetch_attempt = runner.fetch(&job.config, &request);
+    let fetch_attempt = match job.hooks.as_ref().filter(|h| h.has_override_fetch()) {
+        Some(h) => {
+            println!("{}", crate::color::c_info("Using override_fetch hook"));
+            h.override_fetch(request.clone()).await?
+        }
+        None => {
+            println!("Fetching URL: {}", crate::color::c_info(&request.url));
+            runner.fetch(&job.config, &request)
+        }
+    };
+
     if let Ok(response) = &fetch_attempt.result {
         if response.status >= 200 && response.status < 300 {
             println!(
@@ -199,7 +209,10 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     let response = match job.hooks.as_ref() {
         Some(h) => match h.after_fetch(fetch_attempt).await? {
             None => {
-                println!("Response aborted by {} hook.", crate::color::c_warn("after_fetch"));
+                println!(
+                    "Response aborted by {} hook.",
+                    crate::color::c_warn("after_fetch")
+                );
                 return Ok(());
             }
             Some(r) => r,
@@ -208,8 +221,30 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     };
 
     // 4. extract
-    let items = runner.extract(&job.config, job.dir.as_deref(), &response)?;
-    println!("Extracted {} raw item(s)", crate::color::c_info(&items.len().to_string()));
+    let extraction = match job.hooks.as_ref().filter(|h| h.has_override_extract()) {
+        Some(h) => {
+            println!("{}", crate::color::c_info("Using override_extract hook"));
+            let items = h.override_extract(&response).await?;
+            let count = items.len();
+            crate::scraper::extractor::ExtractionResult {
+                items,
+                selector_matches: count,
+            }
+        }
+        None => runner.extract(&job.config, job.dir.as_deref(), &response)?,
+    };
+
+    println!(
+        "Extracted {} item(s) (out of {} selector matches)",
+        crate::color::c_info(&extraction.items.len().to_string()),
+        crate::color::c_info(&extraction.selector_matches.to_string())
+    );
+
+    if let Some(h) = job.hooks.as_ref() {
+        h.set_selector_matches(extraction.selector_matches).await?;
+    }
+
+    let items = extraction.items;
 
     // 5. after_extract
     let items = match job.hooks.as_ref() {
@@ -235,7 +270,10 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     let items = match job.hooks.as_ref() {
         Some(h) => match h.before_store(items).await? {
             None => {
-                println!("Items aborted by {} hook.", crate::color::c_warn("before_store"));
+                println!(
+                    "Items aborted by {} hook.",
+                    crate::color::c_warn("before_store")
+                );
                 return Ok(());
             }
             Some(i) => i,

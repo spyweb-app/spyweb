@@ -2,8 +2,6 @@ use crate::services::db::{Db, LUA_USER_TABLE};
 use crate::services::notifier;
 use mlua::{Lua, LuaSerdeExt, Result as LuaResult};
 use redb::ReadableTable;
-use std::collections::HashSet;
-use std::fmt::Write as _;
 use std::sync::Arc;
 
 pub fn register(lua: &Lua, db: Arc<Db>, job_name: &str) -> anyhow::Result<()> {

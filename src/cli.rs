@@ -80,7 +80,9 @@ fn parse_start_port(args: &[String]) -> anyhow::Result<Option<u16>> {
                 .parse::<u16>()
                 .map_err(|_| anyhow::anyhow!("Invalid value for --port: {}", value))?;
             if port.replace(parsed).is_some() {
-                return Err(anyhow::anyhow!("The --port flag may only be specified once"));
+                return Err(anyhow::anyhow!(
+                    "The --port flag may only be specified once"
+                ));
             }
         } else if arg == "--port" {
             let Some(value) = args.get(i + 1) else {
@@ -90,7 +92,9 @@ fn parse_start_port(args: &[String]) -> anyhow::Result<Option<u16>> {
                 .parse::<u16>()
                 .map_err(|_| anyhow::anyhow!("Invalid value for --port: {}", value))?;
             if port.replace(parsed).is_some() {
-                return Err(anyhow::anyhow!("The --port flag may only be specified once"));
+                return Err(anyhow::anyhow!(
+                    "The --port flag may only be specified once"
+                ));
             }
             i += 1;
         }

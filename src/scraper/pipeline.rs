@@ -1,7 +1,6 @@
 use crate::{
-    color,
-    config::types::Job, scraper::request::RequestConfig, scraper::runner::Runner, services::db::Db,
-    services::notifier, services::webhook,
+    color, config::types::Job, scraper::request::RequestConfig, scraper::runner::Runner,
+    services::db::Db, services::notifier, services::webhook,
 };
 use anyhow::Result;
 use smol::Timer;
@@ -69,8 +68,15 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
         );
     }
 
-    let items = match job.hooks.as_ref().filter(|h| h.has_override_extract()) {
-        Some(h) => h.override_extract(&response).await?,
+    let extraction = match job.hooks.as_ref().filter(|h| h.has_override_extract()) {
+        Some(h) => {
+            let items = h.override_extract(&response).await?;
+            let count = items.len();
+            crate::scraper::extractor::ExtractionResult {
+                items,
+                selector_matches: count,
+            }
+        }
         None => {
             smol::unblock({
                 let runner = Arc::clone(runner);
@@ -82,9 +88,13 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
         }
     };
 
+    if let Some(h) = job.hooks.as_ref() {
+        h.set_selector_matches(extraction.selector_matches).await?;
+    }
+
     let items = match job.hooks.as_ref() {
-        Some(h) => h.after_extract(items).await?,
-        None => items,
+        Some(h) => h.after_extract(extraction.items).await?,
+        None => extraction.items,
     };
 
     let items = match job.hooks.as_ref() {
@@ -108,10 +118,19 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
 
     if items.is_empty() {
         if status_code == 200 {
-            crate::t_warnln!(
-                "No items extracted for {}, check your config and selectors or hooks",
-                color::c_job(&job.config.name)
-            );
+            if extraction.selector_matches == 0 {
+                crate::t_warnln!(
+                    "Job [{}]: Selector '{}' matched 0 elements. The site may have changed or you have wrong selector",
+                    color::c_job(&job.config.name),
+                    job.config.selector
+                );
+            } else {
+                crate::t_println!(
+                    "Job [{}]: {} items found by selector, but none matched your keywords",
+                    color::c_job(&job.config.name),
+                    extraction.selector_matches
+                );
+            }
         }
         return Ok(());
     }
@@ -133,7 +152,10 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
 
     if new_items.is_empty() {
         if status_code == 200 {
-            crate::t_println!("Job [{}] no new items found", color::c_job(&job.config.name));
+            crate::t_println!(
+                "Job [{}] no new items found",
+                color::c_job(&job.config.name)
+            );
         }
 
         return Ok(());

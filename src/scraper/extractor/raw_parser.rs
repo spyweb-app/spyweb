@@ -7,7 +7,7 @@ use scraper::{ElementRef, Html, Selector};
 use crate::{config::types::JobConfig, scraper::extractor::matching_keywords};
 
 use super::{
-    ExtractedItem, FieldSpec, decode_html_entities, extract_dom_value, has_match,
+    ExtractedItem, ExtractionResult, FieldSpec, decode_html_entities, extract_dom_value, has_match,
     normalize_whitespace, resolve_attr_value, safe_element_html,
 };
 
@@ -56,7 +56,7 @@ pub(super) fn extract(
     job: &JobConfig,
     html: &str,
     field_specs: &[FieldSpec],
-) -> Result<Option<Vec<ExtractedItem>>> {
+) -> Result<Option<ExtractionResult>> {
     let Some(item_selector) = SelectorPath::parse(&job.selector) else {
         return Ok(None);
     };
@@ -68,6 +68,8 @@ pub(super) fn extract(
     }
 
     let mut items = Vec::new();
+    let selector_matches = raw_items.len();
+
     for &item_index in &raw_items {
         let item_html = raw_document.node_html(item_index).to_owned();
         let fragment = Html::parse_fragment(&item_html);
@@ -129,7 +131,10 @@ pub(super) fn extract(
         });
     }
 
-    Ok(Some(items))
+    Ok(Some(ExtractionResult {
+        items,
+        selector_matches,
+    }))
 }
 
 fn extract_field_with_dom_fallback(

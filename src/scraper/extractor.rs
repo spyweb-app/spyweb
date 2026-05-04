@@ -27,6 +27,12 @@ pub struct ExtractedItem {
     pub matches: Vec<String>,
 }
 
+#[derive(Debug, Default)]
+pub struct ExtractionResult {
+    pub items: Vec<ExtractedItem>,
+    pub selector_matches: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FieldSpec {
     name: String,
@@ -47,19 +53,19 @@ impl Extractor {
         config: &JobConfig,
         dir: Option<&Path>,
         html: &str,
-    ) -> Result<Vec<ExtractedItem>> {
+    ) -> Result<ExtractionResult> {
         if config.debug {
             save_response_body(html, config, dir)?;
         }
 
         let field_specs = compile_fields(&config.fields)?;
-        let items = extract_with_raw_fallback(config, html, &field_specs)?;
+        let result = extract_with_raw_fallback(config, html, &field_specs)?;
 
         if config.debug {
-            save_extracted_items(&items, config, dir)?;
+            save_extracted_items(&result.items, config, dir)?;
         }
 
-        Ok(items)
+        Ok(result)
     }
 }
 
@@ -67,9 +73,9 @@ fn extract_with_raw_fallback(
     job: &JobConfig,
     html: &str,
     field_specs: &[FieldSpec],
-) -> Result<Vec<ExtractedItem>> {
-    if let Some(items) = raw_parser::extract(job, html, field_specs)? {
-        return Ok(items);
+) -> Result<ExtractionResult> {
+    if let Some(res) = raw_parser::extract(job, html, field_specs)? {
+        return Ok(res);
     }
 
     dom_parser::extract(job, html, field_specs)
@@ -457,9 +463,11 @@ mod tests {
             None,
         );
 
-        let items = extractor.extract(&job, None, HTML).unwrap();
+        let extraction = extractor.extract(&job, None, HTML).unwrap();
+        let items = extraction.items;
 
         assert_eq!(items.len(), 2);
+        assert_eq!(extraction.selector_matches, 2);
         assert_eq!(
             items[0].fields.get("title").map(String::as_str),
             Some("Rust Developer")
@@ -488,9 +496,11 @@ mod tests {
             Some(vec!["RUST"]),
         );
 
-        let items = extractor.extract(&job, None, HTML).unwrap();
+        let extraction = extractor.extract(&job, None, HTML).unwrap();
+        let items = extraction.items;
 
         assert_eq!(items.len(), 1);
+        assert_eq!(extraction.selector_matches, 2);
         assert_eq!(
             items[0].fields.get("title").map(String::as_str),
             Some("Rust Developer")
@@ -534,9 +544,12 @@ mod tests {
             </div>
         "#;
 
-        let items = extractor.extract(&job, None, html).unwrap();
+        let extraction = extractor.extract(&job, None, html).unwrap();
+        let items = extraction.items;
 
         assert_eq!(items.len(), 1);
+        assert_eq!(extraction.selector_matches, 1);
+
         assert_eq!(
             items[0].fields.get("title").map(String::as_str),
             Some("Rust Developer")
@@ -551,8 +564,10 @@ mod tests {
         let extractor = Extractor::new();
         let job = job(".job", vec![Field::Shorthand("link:a@href".into())], None);
 
-        let items = extractor.extract(&job, None, HTML).unwrap();
+        let extraction = extractor.extract(&job, None, HTML).unwrap();
+        let items = extraction.items;
 
+        assert_eq!(extraction.selector_matches, 2);
         assert_eq!(
             items[0].fields.get("link").map(String::as_str),
             Some("https://example.com/jobs/rust")
@@ -574,9 +589,11 @@ mod tests {
             None,
         );
 
-        let items = extractor.extract(&job, None, UGLY_HTML).unwrap();
+        let extraction = extractor.extract(&job, None, UGLY_HTML).unwrap();
+        let items = extraction.items;
 
         assert_eq!(items.len(), 1);
+        assert_eq!(extraction.selector_matches, 1);
         assert_eq!(
             items[0].fields.get("title").map(String::as_str),
             Some("Project Manager Any")
@@ -620,9 +637,11 @@ mod tests {
 
         job.debug = true;
 
-        let items = extractor.extract(&job, None, UGLY_HTML).unwrap();
+        let extraction = extractor.extract(&job, None, UGLY_HTML).unwrap();
+        let items = extraction.items;
 
         assert_eq!(items.len(), 1);
+        assert_eq!(extraction.selector_matches, 1);
         assert!(items[0].parent_html.as_deref().unwrap().contains("job-tag"));
         assert!(
             items[0]
@@ -651,7 +670,8 @@ mod tests {
             None,
         );
 
-        let items = extractor.extract(&job, None, UGLY_HTML).unwrap();
+        let extraction = extractor.extract(&job, None, UGLY_HTML).unwrap();
+        let items = extraction.items;
 
         assert_eq!(
             items[0].fields.get("link").map(String::as_str),
@@ -672,9 +692,11 @@ mod tests {
             None,
         );
 
-        let items = extractor.extract(&job, None, UGLY_HTML).unwrap();
+        let extraction = extractor.extract(&job, None, UGLY_HTML).unwrap();
+        let items = extraction.items;
 
         assert_eq!(items.len(), 1);
+        assert_eq!(extraction.selector_matches, 1);
         assert_eq!(
             items[0].fields.get("see_more").map(String::as_str),
             Some("https://example.com/job/1625213")
