@@ -151,3 +151,16 @@ Keywords: {matches}
 Available tags: `{job_name}`, `{url}`, `{item_count}`, `{timestamp}`, `{matches}`, `{match_count}`, and any extracted field name.
 
 > ⚠️ **Note on Notification Limits:** Most desktop operating systems restrict notification bodies to about **4 lines** before truncating them. If your template body uses multiple fields per item (like title + link + keywords), you will likely only see a single record in the pop-up. If you use a leaner template (e.g., just the `{title}`), you can often fit 2-3 scraped records in a single desktop notification before it gets cut off.
+
+## Lua Hooks (`hooks.lua`)
+
+For advanced workflows, you can place a `hooks.lua` file in the same directory as your `config.toml`. SpyWeb will automatically detect and run these hooks during the scraping pipeline.
+
+Common use cases for hooks:
+- **`before_fetch`**: Handle pagination or custom authentication.
+- **`override_fetch`**: Use a headless browser or external API for fetching.
+- **`after_fetch`**: Recover from network errors or clean the HTML body.
+- **`override_extract`**: Parse JSON/XML APIs instead of HTML.
+- **`filter_item`**: Apply complex custom filtering logic per item.
+
+For a full reference of all 9 hook stages and built-in Lua functions like `dump()`, `http_get()`, and `store_set()`, see the [Master Guide](index.html).

@@ -321,10 +321,14 @@
                                 <li><a href="#http_post">http_post</a></li>
                                 <li><a href="#json_encode">json_encode</a></li>
                                 <li><a href="#json_decode">json_decode</a></li>
+                                <li><a href="#copy">copy</a></li>
+                                <li><a href="#deep_copy">deep_copy</a></li>
                                 <li><a href="#dump">dump</a></li>
                                 <li><a href="#notify">notify</a></li>
                                 <li><a href="#log">log</a></li>
                                 <li><a href="#env_get">env_get</a></li>
+                                <li><a href="#selector_matches">selector_matches</a></li>
+                                <li><a href="#last_fetch">last_fetch</a></li>
                             </ul>
                             <p class="menu-label">More</p>
                             <ul class="menu-list">
@@ -1233,6 +1237,22 @@ log("Status is: " .. data.status)</code></pre>
     return fetch_result
 end</code></pre>
 
+                                <h3 class="title is-4" id="copy"><code>copy(table)</code></h3>
+                                <p>Returns a shallow copy of a table. Only the first level of keys and values are
+                                    copied; nested tables are still shared by reference.</p>
+                                <pre><code class="language-lua">local original = { a = 1, b = { c = 2 } }
+local shallow = copy(original)
+shallow.a = 99 -- original.a is still 1
+shallow.b.c = 99 -- original.b.c IS now 99</code></pre>
+
+                                <h3 class="title is-4" id="deep_copy"><code>deep_copy(table)</code></h3>
+                                <p>Returns a deep, recursive copy of a table. Every nested table is cloned, ensuring
+                                    total isolation from the original. It safely handles circular references (cycles).
+                                </p>
+                                <pre><code class="language-lua">local original = { a = 1, b = { c = 2 } }
+local deep = deep_copy(original)
+deep.b.c = 99 -- original.b.c remains 2</code></pre>
+
                                 <h3 class="title is-4" id="notify"><code>notify(title, body, [timeout_ms])</code></h3>
                                 <p>Sends a desktop notification immediately from Lua. This is a thin wrapper around
                                     SpyWeb's native notification sender and can be used from any hook, including error
@@ -1279,6 +1299,16 @@ end</code></pre>
         request.headers["Authorization"] = "Bearer " .. api_key
     end
     return request
+end</code></pre>
+
+                                <h3 class="title is-4" id="selector_matches"><code>selector_matches</code> (Global)</h3>
+                                <p>A read-only number representing how many elements on the page matched the main
+                                    CSS <code>selector</code> defined in your config. This is set automatically
+                                    after the extraction phase and is available in <code>after_extract</code> and
+                                    all subsequent hooks.</p>
+                                <pre><code class="language-lua">function after_extract(items)
+    print("Found " .. #items .. " items (out of " .. selector_matches .. " selector hits)")
+    return items
 end</code></pre>
 
                             </div>
@@ -1583,6 +1613,7 @@ body = "Title: {title}\nLink: {link}"</code></pre>
 -- 3. Circuit Breaker: Stops hitting the site if you get banned or it goes down.
 -- 4. Self-Healing: Automatically tries to recover after a 24-hour cooldown.
 -- 5. VIP Alerts: Only sends push notifications for "PRICE DROP" items.
+-- 6. Layout Detection: Alerts you if the site structure changes.
 -- ==========================================================================
 
 
@@ -1682,6 +1713,33 @@ function after_fetch(fetch_result)
     store_delete("fail_count")
     store_delete("stop_time")
     return fetch_result
+end
+
+-- --------------------------------------------------------------------------
+-- 4b. EXTRACTION DIAGNOSTICS
+-- --------------------------------------------------------------------------
+-- Detect layout changes. If the site is alive (200 OK) but the selector 
+-- returns 0 hits, the CSS selector in config.toml is likely outdated.
+function after_extract(items)
+    if selector_matches == 0 then
+        log("🚨 [FATAL] CSS Selector matched 0 items. Layout might have changed!")
+        
+        -- Clone state to log diagnostics without the massive body
+        local debug_info = deep_copy(last_fetch)
+        if debug_info.response then
+            debug_info.page_title = debug_info.response.body:match("&lt;title&gt;(.-)&lt;/title&gt;")
+            debug_info.response.body = "[stripped]"
+        end
+        log(dump(debug_info))
+        
+        -- Enter cooldown to avoid hammering a broken page
+        store_set("fail_count", tostring(STOP_THRESHOLD))
+        store_set("stop_time", tostring(os.time()))
+        
+        send_push("🚨 LAYOUT CHANGE", "CSS selector matched 0 items on " .. (debug_info.page_title or "unknown page"), 5)
+        return nil -- Stop the pipeline
+    end
+    return items
 end
 
 -- --------------------------------------------------------------------------
@@ -1844,22 +1902,23 @@ end</code></pre>
                                         inspect the underlying HTTP response and trigger an alert.</p>
                                     <pre><code class="language-lua">-- hook.lua — fallback debugging
 function after_extract(items)
-    -- If no items were extracted, we might have been blocked!
-    if #items == 0 then
-        local debug_info = {
-            ok = last_fetch.ok,
-            status = last_fetch.response.status,
-            url = last_fetch.response.url,
-            -- Safely extract the page title to check for Cloudflare/Captchas
-            title = last_fetch.response.body:match("&lt;title&gt;(.-)&lt;/title&gt;")
-        }
+    -- selector_matches tells us if the CSS selector found anything at all, 
+    -- regardless of whether keywords filtered them out later.
+    if selector_matches == 0 then
+        -- Clone last_fetch so we can safely mutate it for logging
+        local debug_info = deep_copy(last_fetch)
         
-        -- Print to the console without logging the massive raw HTML body
+        if debug_info.response then 
+            -- Extract the page title so we can see if it's a 403 or Cloudflare page
+            debug_info.page_title = debug_info.response.body:match("&lt;title&gt;(.-)&lt;/title&gt;")
+            -- Remove the massive body string so it doesn't clutter the console
+            debug_info.response.body = "[stripped]" 
+        end
+        
+        print("SELECTOR MATCH FAILURE:")
         print(dump(debug_info))
         
-        -- You can easily trigger any alert mechanism here!
-        -- notify("Scraper Blocked!", debug_info.title)
-        -- http_post("https://ntfy.sh/my_alerts", "Blocked on " .. debug_info.title)
+        -- notify("Scraper Blocked!", "Page Title: " .. (debug_info.page_title or "Unknown"))
     end
 
     return items

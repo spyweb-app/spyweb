@@ -10,6 +10,7 @@
 -- 3. Circuit Breaker: Stops hitting the site if you get banned or it goes down.
 -- 4. Self-Healing: Automatically tries to recover after a 24-hour cooldown.
 -- 5. VIP Alerts: Only sends push notifications for "PRICE DROP" items.
+-- 6. Layout Detection: Alerts you if the site structure changes.
 -- ==========================================================================
 
 
@@ -109,6 +110,33 @@ function after_fetch(fetch_result)
     store_delete("fail_count")
     store_delete("stop_time")
     return fetch_result
+end
+
+-- --------------------------------------------------------------------------
+-- 4b. EXTRACTION DIAGNOSTICS
+-- --------------------------------------------------------------------------
+-- Detect layout changes. If the site is alive (200 OK) but the selector 
+-- returns 0 hits, the CSS selector in config.toml is likely outdated.
+function after_extract(items)
+    if selector_matches == 0 then
+        log("🚨 [FATAL] CSS Selector matched 0 items. Layout might have changed!")
+        
+        -- Clone state to log diagnostics without the massive body
+        local debug_info = deep_copy(last_fetch)
+        if debug_info.response then
+            debug_info.page_title = debug_info.response.body:match("<title>(.-)</title>")
+            debug_info.response.body = "[stripped]"
+        end
+        log(dump(debug_info))
+        
+        -- Enter cooldown to avoid hammering a broken page
+        store_set("fail_count", tostring(STOP_THRESHOLD))
+        store_set("stop_time", tostring(os.time()))
+        
+        send_push("🚨 LAYOUT CHANGE", "CSS selector matched 0 items on " .. (debug_info.page_title or "unknown page"), 5)
+        return nil -- Stop the pipeline
+    end
+    return items
 end
 
 -- --------------------------------------------------------------------------

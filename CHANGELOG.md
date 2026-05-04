@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Added `--port` CLI flag and `SPYWEB_PORT` environment variable to override the default REST API port.
-- Introduced `dump()` global helper function in Lua for pretty-printing tables to the console during debugging.
+- Introduced `dump()`, `copy()`, and `deep_copy()` global helper functions in Lua for managing tables during debugging and state persistence.
+- Added a `selector_matches` global variable in Lua, allowing hooks to see how many elements matched the main selector (even if they were later filtered out).
 - Added comprehensive semantic terminal colors for a much better CLI experience (job names, warnings, execution times).
 - **Lua API:** Added `override_fetch` hook to bypass the built-in HTTP client for custom fetching (e.g. headless browsers).
 - **Lua API:** Added `override_extract` hook to bypass the built-in HTML/CSS parser for custom extraction (e.g. JSON/XML scraping).
