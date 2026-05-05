@@ -51,9 +51,29 @@ keywords = ["rust", "linux", "open source"]
 ## Install & Run
 Download the latest release ZIP from the [Releases page](https://github.com/spyweb-rs/spyweb/releases) and extract it.
 
+--- OR USE THE COMMAND BELOW ---
+
+```bash
+# Linux
+curl -L -o spyweb.zip https://dl.spyweb.app/linux && tar -xf spyweb.zip && rm spyweb.zip
+
+# macOS (Intel)
+curl -L -o spyweb.zip https://dl.spyweb.app/mac-intel && tar -xf spyweb.zip && rm spyweb.zip
+
+# macOS (Apple Silicon)
+curl -L -o spyweb.zip https://dl.spyweb.app/mac-arm && tar -xf spyweb.zip && rm spyweb.zip
+
+# Windows (CMD, Windows 10 or later)
+curl -L -o spyweb.zip https://dl.spyweb.app/windows && tar -xf spyweb.zip && del spyweb.zip
+
+# Windows (PowerShell)
+Invoke-WebRequest -Uri https://dl.spyweb.app/windows -OutFile spyweb.zip; Expand-Archive spyweb.zip; Remove-Item spyweb.zip
+
+```
+
 ### Release Structure
 ```text
-spyweb-folder/
+spyweb/
 ├── spyweb           # Terminal executable
 ├── spyweb-tray      # Background tray executable
 ├── data             # Internal database file (Created on first run)

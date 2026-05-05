@@ -15,7 +15,7 @@ function dump(value, indent, seen)
         seen[value] = true
 
         local entries = {}
-        -- Note: using pairs to support both array and hash parts
+        
         for k, v in pairs(value) do
             local key_str
             if type(k) == "string" and k:match("^[%a_][%w_]*$") then
@@ -30,7 +30,7 @@ function dump(value, indent, seen)
         if #entries == 0 then return "{}" end
         return "{\n" .. table.concat(entries, "\n") .. "\n" .. pad .. "}"
     else
-        -- Handle UserData or other types by showing their tostring representation
+        
         local s = tostring(value)
         if s == t then
             return "<" .. t .. ">"
@@ -57,7 +57,7 @@ function deep_copy(t, seen)
     local res = {}
     seen[t] = res
     for k, v in pairs(t) do
-        -- We don't deep_copy keys per the discussion (most scraping keys are primitives)
+        
         res[k] = deep_copy(v, seen)
     end
     return res

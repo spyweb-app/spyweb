@@ -9,12 +9,8 @@ This guide covers everything you need to go from a fresh Linux VPS to a producti
 Download the latest Linux binary package directly to your server.
 
 ```bash
-# Download the release ZIP (Replace [URL] with the actual link from GitHub)
-# Example: https://github.com/spyweb-rs/spyweb/releases/download/v1.0.0/spyweb-v1.0.0-linux-x86_64.zip
-wget [RELEASE_ZIP_URL]
-
-# Unzip the package
-unzip spyweb-*.zip
+# Download and extract SpyWeb
+curl -L -o spyweb.zip https://dl.spyweb.app/linux && tar -xf spyweb.zip && rm spyweb.zip
 
 # Enter the directory and remove the tray version (not needed on VPS)
 cd spyweb && rm spyweb-tray
