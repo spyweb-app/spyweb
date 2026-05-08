@@ -11,19 +11,18 @@ use crate::cdp::types::LaunchOptions;
 pub struct Browser {
     pub(crate) transport: Arc<CdpTransport>,
 
-    process: Option<async_process::Child>, // Some if launch by a child process, None if connected via WSS
-    user_data_dir: Option<PathBuf>, // Profile dir — locked via fs4 to prevent collision across any CDP browser
-    pub(crate) _lock_file: Option<std::fs::File>, // Held to keep the fs4 exclusive lock alive until Drop
+    process: Option<async_process::Child>,
+    user_data_dir: Option<PathBuf>,
+    pub(crate) _lock_file: Option<std::fs::File>,
     pub(crate) keep_alive: bool,
+    pub(crate) browser_ws_url: Option<String>,
 }
 
 impl Browser {
-    /// Get the path to the user data directory (profile), if one was provided.
     pub fn get_user_data_dir(&self) -> Option<PathBuf> {
         self.user_data_dir.clone()
     }
 
-    /// Connect to an already-running CDP browser at the given WebSocket URL.
     pub async fn connect(ws_url: &str) -> Result<Self> {
         if !ws_url.starts_with("ws://") && !ws_url.starts_with("wss://") {
             bail!("Invalid WebSocket URL: must start with ws:// or wss://");
@@ -37,10 +36,10 @@ impl Browser {
             user_data_dir: None,
             _lock_file: None,
             keep_alive: true,
+            browser_ws_url: Some(ws_url.to_string()),
         })
     }
 
-    /// Launch a new browser process and connect to it via CDP.
     pub async fn launch(options: LaunchOptions) -> Result<Self> {
         use async_process::{Command, Stdio};
         use futures_lite::AsyncBufReadExt;
@@ -156,16 +155,17 @@ impl Browser {
             }
         };
 
-        // Step 5: Connect transport
+        // Step 5: Connect to browser-level WebSocket
         let transport = CdpTransport::connect(&ws_url).await?;
 
-        // Step 6: Return Browser
+        // Step 6: Return Browser (browser-level transport — use b:attach() for page access)
         Ok(Self {
             transport: Arc::new(transport),
             process: Some(child),
             user_data_dir: options.user_data_dir,
             _lock_file: lock_file,
             keep_alive: options.keep_alive,
+            browser_ws_url: Some(ws_url),
         })
     }
 }
@@ -177,38 +177,104 @@ impl Drop for Browser {
         {
             let _ = child.kill();
         }
-        // fs4 lock is released when _lock_file is dropped
     }
 }
 
-/// Helper to find a CDP-compatible browser executable on the system.
-/// Prioritizes the OS default browser, then searches common paths.
 pub fn find_browser_executable() -> String {
-    // 1. Try to find the OS default browser
-    if let Some(default) = get_os_default_browser()
-        && is_cdp_compatible(&default)
-        && let Some(path) = find_in_path(&default)
-    {
-        return path;
+    if let Ok(val) = std::env::var("BROWSER") {
+        let v = val.trim().to_string();
+        if !v.is_empty() && is_cdp_compatible(&v) {
+            if std::path::Path::new(&v).is_file() {
+                return v;
+            }
+            if let Some(path) = find_in_path(&v) {
+                return path;
+            }
+        }
     }
 
-    // 2. Fallback to a prioritized list of known CDP-compatible browsers
-    let fallbacks = [
-        "google-chrome-stable",
-        "google-chrome",
-        "chromium-browser",
-        "chromium",
-        "brave-browser",
-        "microsoft-edge",
-    ];
+    let default = get_os_default_browser();
 
-    for bin in fallbacks {
-        if let Some(path) = find_in_path(bin) {
+    if let Some(ref d) = default
+        && is_cdp_compatible(d)
+    {
+        // on non-windows, verify it exists in PATH
+        #[cfg(not(target_os = "windows"))]
+        if let Some(path) = find_in_path(d) {
             return path;
         }
     }
 
-    // 3. Absolute fallbacks for specific OSs if PATH search fails
+    // 2. Windows absolute paths (uses `default` from above)
+    #[cfg(target_os = "windows")]
+    {
+        // Helper: score a path so the detected default browser is checked first
+        let sort_key = |path: &str| -> u8 {
+            let p = path.to_lowercase();
+            match default.as_deref() {
+                Some(d) if d.contains("edge") && p.contains("edge") => 0,
+                Some(d) if d.contains("brave") && p.contains("brave") => 0,
+                Some(_) if p.contains("chrome") => 0,
+                _ => 1,
+            }
+        };
+
+        // check user-level install first (most common)
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            let mut candidates = vec![
+                format!(r"{}\Google\Chrome\Application\chrome.exe", local),
+                format!(r"{}\Microsoft\Edge\Application\msedge.exe", local),
+                format!(
+                    r"{}\BraveSoftware\Brave-Browser\Application\brave.exe",
+                    local
+                ),
+            ];
+            candidates.sort_by_key(|p| sort_key(p));
+            for path in &candidates {
+                if std::path::Path::new(path).exists() {
+                    return path.clone();
+                }
+            }
+        }
+
+        // system-level install
+        let mut system_paths = vec![
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+        ];
+        system_paths.sort_by_key(|p| sort_key(p));
+        for path in system_paths {
+            if std::path::Path::new(path).exists() {
+                return path.to_string();
+            }
+        }
+
+        // genuine last resort
+        return "chrome.exe".to_string();
+    }
+
+    // 3. Linux/macOS fallback list via PATH
+    #[cfg(not(target_os = "windows"))]
+    {
+        let fallbacks = [
+            "google-chrome-stable",
+            "google-chrome",
+            "chromium-browser",
+            "chromium",
+            "brave-browser",
+            "microsoft-edge",
+        ];
+        for bin in fallbacks {
+            if let Some(path) = find_in_path(bin) {
+                return path;
+            }
+        }
+    }
+
+    // 4. macOS absolute paths
     #[cfg(target_os = "macos")]
     {
         let mac_paths = [
@@ -224,13 +290,7 @@ pub fn find_browser_executable() -> String {
         }
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        // On Windows, if "google-chrome" isn't in PATH, it's rarely found by name alone
-        // but we'll return a sensible default for the cmd to try
-        return "chrome.exe".to_string();
-    }
-
+    #[cfg(not(target_os = "windows"))]
     "google-chrome".to_string()
 }
 
@@ -253,28 +313,26 @@ fn get_os_default_browser() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
-        // This is a bit complex to parse, but we can check the default handler
-        let output = Command::new("defaults")
-            .args([
-                "read",
-                "com.apple.LaunchServices/com.apple.launchservices.secure",
-                "LSHandlers",
-            ])
-            .output()
-            .ok()?;
+        // open -Ra "https:" returns the path of the default app bundle for the https scheme
+        let output = Command::new("open").args(["-Ra", "https:"]).output().ok()?;
         if output.status.success() {
-            let res = String::from_utf8_lossy(&output.stdout);
-            if res.contains("com.google.chrome") {
-                return Some("google-chrome".into());
-            }
-            if res.contains("org.chromium.chromium") {
-                return Some("chromium".into());
-            }
-            if res.contains("com.brave.browser") {
-                return Some("brave-browser".into());
-            }
-            if res.contains("com.microsoft.edgemac") {
-                return Some("microsoft-edge".into());
+            let app_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !app_path.is_empty() {
+                let stripped = app_path.strip_suffix(".app").unwrap_or(&app_path);
+                let bin_name = stripped.rsplit('/').next().unwrap_or(stripped);
+                let lower = bin_name.to_lowercase();
+                if lower.contains("google chrome") || lower.contains("chrome") {
+                    return Some("google-chrome".into());
+                }
+                if lower.contains("chromium") {
+                    return Some("chromium".into());
+                }
+                if lower.contains("brave") {
+                    return Some("brave-browser".into());
+                }
+                if lower.contains("edge") {
+                    return Some("microsoft-edge".into());
+                }
             }
         }
     }
@@ -282,22 +340,76 @@ fn get_os_default_browser() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
-        let output = Command::new("reg")
-            .args(["query", "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice", "/v", "ProgId"])
-            .output()
-            .ok()?;
-        if output.status.success() {
-            let res = String::from_utf8_lossy(&output.stdout);
-            if res.contains("ChromeHTML") {
+
+        // Try multiple registry paths to find the default browser ProgId
+        let progid = [
+            // Most common path on Windows 10/11
+            "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice",
+            // Fallback: http scheme
+            "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\http\\UserChoice",
+            // Fallback: .htm file association
+            "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.htm\\UserChoice",
+        ]
+        .iter()
+        .find_map(|path| {
+            let output = Command::new("reg")
+                .args(["query", path, "/v", "ProgId"])
+                .output()
+                .ok()?;
+            if output.status.success() {
+                let line = String::from_utf8_lossy(&output.stdout);
+                // Extract the value after REG_SZ/REG_EXPAND_SZ
+                line.lines().find_map(|l| {
+                    let l = l.trim();
+                    if l.starts_with("ProgId") || l.starts_with("Progid") {
+                        l.split_whitespace().last().map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        });
+
+        if let Some(ref p) = progid {
+            let lower = p.to_lowercase();
+            if lower.contains("chromehtml") || lower.contains("chrome") {
                 return Some("chrome".into());
             }
-            if res.contains("Chromium") {
+            if lower.contains("chromium") {
                 return Some("chromium".into());
             }
-            if res.contains("Brave") {
+            if lower.contains("brave") {
                 return Some("brave".into());
             }
-            if res.contains("MSEdgeHTM") {
+            if lower.contains("msedgehtm") || lower.contains("edge") {
+                return Some("msedge".into());
+            }
+        }
+
+        // Last resort: read the command line for https handler directly
+        let cmd_output = Command::new("reg")
+            .args([
+                "query",
+                "HKEY_CLASSES_ROOT\\https\\shell\\open\\command",
+                "/ve",
+            ])
+            .output()
+            .ok()?;
+        if cmd_output.status.success() {
+            let cmd_line = String::from_utf8_lossy(&cmd_output.stdout);
+            let lower = cmd_line.to_lowercase();
+            if lower.contains("chrome") {
+                return Some("chrome".into());
+            }
+            if lower.contains("chromium") {
+                return Some("chromium".into());
+            }
+            if lower.contains("brave") {
+                return Some("brave".into());
+            }
+            if lower.contains("msedge") || lower.contains("edge") {
                 return Some("msedge".into());
             }
         }
