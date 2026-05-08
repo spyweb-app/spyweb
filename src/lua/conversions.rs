@@ -247,21 +247,35 @@ pub fn lua_to_items(table: Table, originals: Vec<ExtractedItem>) -> Result<Vec<E
 
     for i in 1..=len {
         let entry: Value = table.get(i)?;
-        match entry {
-            Value::Table(t) => {
-                let original = match t.get::<Option<usize>>("_meta_idx")? {
-                    Some(idx) if idx < originals.len() => originals[idx].clone(),
-                    _ => ExtractedItem {
-                        fields: HashMap::new(),
-                        matches: vec![],
-                        parent_html: None,
-                        field_match_html: None,
-                        ..Default::default()
-                    },
-                };
-                items.push(lua_to_item(t, original)?);
-            }
-            _ => {}
+        // match entry {
+        //     Value::Table(t) => {
+        //         let original = match t.get::<Option<usize>>("_meta_idx")? {
+        //             Some(idx) if idx < originals.len() => originals[idx].clone(),
+        //             _ => ExtractedItem {
+        //                 fields: HashMap::new(),
+        //                 matches: vec![],
+        //                 parent_html: None,
+        //                 field_match_html: None,
+        //                 ..Default::default()
+        //             },
+        //         };
+        //         items.push(lua_to_item(t, original)?);
+        //     }
+        //     _ => {}
+        // }
+        if let Value::Table(t) = entry {
+            let original = match t.get::<Option<usize>>("_meta_idx")? {
+                Some(idx) if idx < originals.len() => originals[idx].clone(),
+                _ => ExtractedItem {
+                    fields: HashMap::new(),
+                    matches: vec![],
+                    parent_html: None,
+                    field_match_html: None,
+                    ..Default::default()
+                },
+            };
+
+            items.push(lua_to_item(t, original)?);
         }
     }
 

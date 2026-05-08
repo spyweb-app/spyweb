@@ -6,6 +6,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::cdp::types::{CdpEvent, JsonRpcMessage};
 
@@ -16,7 +17,7 @@ pub struct CdpTransport {
     // Pending requests: id → oneshot sender waiting for response
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<anyhow::Result<Value>>>>>,
 
-    // Event broadcast: all subscribers receive every CDP notification
+    // Event queue: cloned receivers compete for messages.
     _event_tx: Sender<CdpEvent>,
     event_rx: Receiver<CdpEvent>, // kept to allow new subscriber clones
 
@@ -38,7 +39,7 @@ impl CdpTransport {
         // Channel for outgoing WebSocket frames
         let (ws_tx, ws_rx) = async_channel::unbounded::<String>();
 
-        // Channel for CDP event notifications
+        // Channel for CDP event notifications.
         let (event_tx, event_rx) = async_channel::unbounded::<CdpEvent>();
 
         // Pending request map shared between caller and read loop
@@ -58,17 +59,22 @@ impl CdpTransport {
             .detach();
         }
 
-        // Spawn read loop — routes incoming messages to pending or event channel
+        // Spawn read loop — routes incoming messages to pending or event channel.
         {
             let pending = Arc::clone(&pending);
             let event_tx = event_tx.clone();
             let mut ws_read = ws_read;
 
             smol::spawn(async move {
+                let mut disconnect_error = None;
+
                 while let Some(Ok(frame)) = ws_read.next().await {
                     let text = match frame {
                         Message::Text(t) => t.to_string(),
-                        Message::Close(_) => break,
+                        Message::Close(_) => {
+                            disconnect_error = Some("WebSocket closed".to_string());
+                            break;
+                        }
                         _ => continue,
                     };
 
@@ -78,7 +84,9 @@ impl CdpTransport {
                     };
 
                     match parsed {
-                        JsonRpcMessage::Response { id, result, error } => {
+                        JsonRpcMessage::Response {
+                            id, result, error, ..
+                        } => {
                             let sender = pending.lock().unwrap().remove(&id);
                             if let Some(tx) = sender {
                                 let value = if let Some(err) = error {
@@ -93,15 +101,30 @@ impl CdpTransport {
                                 let _ = tx.send(value);
                             }
                         }
-                        JsonRpcMessage::Notification { method, params } => {
+                        JsonRpcMessage::Notification {
+                            method,
+                            params,
+                            session_id,
+                        } => {
                             let _ = event_tx
                                 .send(CdpEvent {
                                     method,
                                     params: params.unwrap_or(Value::Null),
+                                    session_id,
                                 })
                                 .await;
                         }
                     }
+                }
+
+                let err =
+                    disconnect_error.unwrap_or_else(|| "WebSocket read loop ended".to_string());
+                let pending = {
+                    let mut guard = pending.lock().unwrap();
+                    std::mem::take(&mut *guard)
+                };
+                for (_, tx) in pending {
+                    let _ = tx.send(Err(anyhow::anyhow!(err.clone())));
                 }
             })
             .detach();
@@ -118,21 +141,42 @@ impl CdpTransport {
 
     /// Send a CDP command and wait for its JSON-RPC response.
     pub async fn call(&self, method: &str, params: Value) -> anyhow::Result<Value> {
+        self.call_inner(method, params, None).await
+    }
+
+    pub async fn call_session(
+        &self,
+        session_id: &str,
+        method: &str,
+        params: Value,
+    ) -> anyhow::Result<Value> {
+        self.call_inner(method, params, Some(session_id)).await
+    }
+
+    async fn call_inner(
+        &self,
+        method: &str,
+        params: Value,
+        session_id: Option<&str>,
+    ) -> anyhow::Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
 
         self.pending.lock().unwrap().insert(id, tx);
 
-        let request = serde_json::json!({
+        let mut request = serde_json::json!({
             "id": id,
             "method": method,
             "params": params,
         });
+        if let Some(session_id) = session_id {
+            request["sessionId"] = Value::String(session_id.to_string());
+        }
 
-        self.ws_tx
-            .send(request.to_string())
-            .await
-            .map_err(|_| anyhow::anyhow!("WebSocket write channel closed"))?;
+        if self.ws_tx.send(request.to_string()).await.is_err() {
+            self.pending.lock().unwrap().remove(&id);
+            return Err(anyhow::anyhow!("WebSocket write channel closed"));
+        }
 
         rx.await
             .map_err(|_| anyhow::anyhow!("Response channel dropped before reply"))?
@@ -155,6 +199,42 @@ impl CdpTransport {
             if event.method == event_name && predicate(&event.params) {
                 return Ok(event);
             }
+        }
+    }
+
+    pub async fn wait_event_timeout<F>(
+        &self,
+        event_name: &str,
+        timeout: Option<Duration>,
+        predicate: F,
+    ) -> anyhow::Result<CdpEvent>
+    where
+        F: Fn(&Value) -> bool,
+    {
+        if let Some(timeout) = timeout {
+            smol::future::or(self.wait_event(event_name, predicate), async move {
+                smol::Timer::after(timeout).await;
+                Err(anyhow::anyhow!(
+                    "Timeout waiting for CDP event {} after {}ms",
+                    event_name,
+                    timeout.as_millis()
+                ))
+            })
+            .await
+        } else {
+            self.wait_event(event_name, predicate).await
+        }
+    }
+
+    pub fn close(&self) {
+        self.ws_tx.close();
+        self._event_tx.close();
+        let pending = {
+            let mut guard = self.pending.lock().unwrap();
+            std::mem::take(&mut *guard)
+        };
+        for (_, tx) in pending {
+            let _ = tx.send(Err(anyhow::anyhow!("CDP transport closed")));
         }
     }
 }

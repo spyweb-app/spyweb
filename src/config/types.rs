@@ -2,6 +2,7 @@ use crate::config::defaults;
 use crate::lua::hooks::JobHooks;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -130,5 +131,59 @@ impl JobConfig {
                 Field::Full { name, .. } => name.clone(),
             })
             .collect()
+    }
+}
+
+fn spyweb_home_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(user_profile) = std::env::var("USERPROFILE") {
+            if !user_profile.trim().is_empty() {
+                return Some(PathBuf::from(user_profile));
+            }
+        }
+
+        if let (Ok(homedrive), Ok(homepath)) =
+            (std::env::var("HOMEDRIVE"), std::env::var("HOMEPATH"))
+        {
+            let combined = format!("{}{}", homedrive, homepath);
+            if !combined.trim().is_empty() {
+                return Some(PathBuf::from(combined));
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            if !home.trim().is_empty() {
+                return Some(PathBuf::from(home));
+            }
+        }
+    }
+
+    None
+}
+
+pub fn spyweb_profile_root() -> Option<PathBuf> {
+    spyweb_home_dir().map(|home| home.join(".spyweb"))
+}
+
+pub fn spyweb_job_profile_dir(job_dir: &Path) -> Option<PathBuf> {
+    let job_folder = job_dir.file_name()?.to_string_lossy().to_string();
+    spyweb_profile_root().map(|root| root.join(job_folder))
+}
+
+impl Job {
+    pub fn profile_dir(&self) -> Option<PathBuf> {
+        self.dir.as_deref().and_then(spyweb_job_profile_dir)
+    }
+
+    pub fn profile_label(&self) -> String {
+        self.dir
+            .as_ref()
+            .and_then(|dir| dir.file_name())
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| self.config.id())
     }
 }

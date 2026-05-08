@@ -12,13 +12,14 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
                 }
                 let mut response = req
                     .call()
-                    .map_err(|e| mlua::Error::runtime(format!("http_get failed: {e}")))?;
+                    .map_err(|e|format!("http_get failed: {e}"))?;
                 response
                     .body_mut()
                     .read_to_string()
-                    .map_err(|e| mlua::Error::runtime(format!("http_get read failed: {e}")))
+                    .map_err(|e|format!("http_get read failed: {e}"))
             })
-            .await;
+            .await
+            .map_err(mlua::Error::runtime);
             result
         },
     )?;
@@ -46,13 +47,14 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
                 }
                 let mut response = req
                     .send(body.as_bytes())
-                    .map_err(|e| mlua::Error::runtime(format!("http_post failed: {e}")))?;
+                    .map_err(|e| format!("http_post failed: {e}"))?;
                 response
                     .body_mut()
                     .read_to_string()
-                    .map_err(|e| mlua::Error::runtime(format!("http_post read failed: {e}")))
+                    .map_err(|e| format!("http_post read failed: {e}"))
             })
-            .await;
+            .await
+            .map_err(mlua::Error::runtime);
             result
         },
     )?;

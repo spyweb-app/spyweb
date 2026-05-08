@@ -1,14 +1,10 @@
-use std::path::Path;
-use std::path::PathBuf;
-use std::sync::Arc;
-
+use crate::lua::engine;
+use crate::services::db::Db;
 use anyhow::Result;
 use mlua::Lua;
 use smol::lock::Mutex;
-
-use crate::lua::engine;
-use crate::services::db::Db;
-
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 pub mod stages;
 
 pub struct JobHooks {

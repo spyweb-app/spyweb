@@ -17,7 +17,7 @@ fn test_json_rpc_parsing() {
     let notification_json = r#"{"method": "Target.targetCreated", "params": {"targetInfo": {}}}"#;
     let parsed: JsonRpcMessage = serde_json::from_str(notification_json).unwrap();
     match parsed {
-        JsonRpcMessage::Notification { method, params } => {
+        JsonRpcMessage::Notification { method, params, .. } => {
             assert_eq!(method, "Target.targetCreated");
             assert!(params.is_some());
         }

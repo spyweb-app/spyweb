@@ -8,10 +8,14 @@ pub enum JsonRpcMessage {
         id: u64,
         result: Option<Value>,
         error: Option<CdpErrorBody>,
+        #[serde(rename = "sessionId")]
+        session_id: Option<String>,
     },
     Notification {
         method: String,
         params: Option<Value>,
+        #[serde(rename = "sessionId")]
+        session_id: Option<String>,
     },
 }
 
@@ -25,6 +29,7 @@ pub struct CdpErrorBody {
 pub struct CdpEvent {
     pub method: String,
     pub params: Value,
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug)]

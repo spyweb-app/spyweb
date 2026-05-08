@@ -1,3 +1,9 @@
+use std::sync::Arc;
+
+use crate::config::loader;
+use crate::config::types::{Job, Jobs};
+use crate::services::{db::Db, profiles};
+
 #[cfg(target_os = "windows")]
 fn is_persistent_terminal() -> bool {
     unsafe {
@@ -120,6 +126,150 @@ fn parse_start_port(args: &[String]) -> anyhow::Result<Option<u16>> {
     Ok(port)
 }
 
+fn load_jobs_for_profiles() -> anyhow::Result<Jobs> {
+    let db = Arc::new(Db::open("data")?);
+    loader::load_all_jobs("jobs.toml", "jobs", db)
+}
+
+fn profile_usage() {
+    eprintln!(
+        "Usage: {} {} <{}|{}|{} <job|all>|{} <job|all>>",
+        crate::color::c_bold("spyweb"),
+        crate::color::c_info("profile"),
+        crate::color::c_info("check"),
+        crate::color::c_info("list"),
+        crate::color::c_info("clear"),
+        crate::color::c_info("delete")
+    );
+}
+
+fn print_profile_check(job: &Job) -> anyhow::Result<()> {
+    let summary = profiles::profile_summary(job)?;
+    println!("{}", summary);
+    Ok(())
+}
+
+fn print_profile_check_all(jobs: &Jobs) -> anyhow::Result<()> {
+    let mut shown = 0usize;
+    for job in &jobs.list {
+        if job.dir.is_none() {
+            continue;
+        }
+        print_profile_check(job)?;
+        shown += 1;
+    }
+
+    if shown == 0 {
+        println!("{}", crate::color::c_dim("No job profiles found."));
+    }
+
+    Ok(())
+}
+
+fn resolve_job<'a>(jobs: &'a Jobs, target: &str) -> anyhow::Result<&'a Job> {
+    profiles::find_job(jobs, target).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Job '{}' not found. Use `spyweb check` to list jobs.",
+            target
+        )
+    })
+}
+
+fn clear_job_profile(job: &Job) -> anyhow::Result<()> {
+    let Some(path) = profiles::profile_dir_for_job(job) else {
+        println!(
+            "{} has no profile directory",
+            crate::color::c_job(&job.config.name)
+        );
+        return Ok(());
+    };
+
+    profiles::clear_profile_dir(&path)?;
+    println!(
+        "Cleared profile for {} at {}",
+        crate::color::c_job(&job.config.name),
+        path.display()
+    );
+    Ok(())
+}
+
+fn delete_job_profile(job: &Job) -> anyhow::Result<()> {
+    let Some(path) = profiles::profile_dir_for_job(job) else {
+        println!(
+            "{} has no profile directory",
+            crate::color::c_job(&job.config.name)
+        );
+        return Ok(());
+    };
+
+    profiles::delete_profile_dir(&path)?;
+    println!(
+        "Deleted profile for {} at {}",
+        crate::color::c_job(&job.config.name),
+        path.display()
+    );
+    Ok(())
+}
+
+fn handle_profile_command(args: &[String]) -> anyhow::Result<()> {
+    let Some(cmd) = args.get(2).map(String::as_str) else {
+        profile_usage();
+        std::process::exit(1);
+    };
+
+    let jobs = load_jobs_for_profiles()?;
+
+    match cmd {
+        "check" | "list" => {
+            match args.get(3).map(String::as_str) {
+                None | Some("all") | Some("--all") => print_profile_check_all(&jobs)?,
+                Some(target) => print_profile_check(resolve_job(&jobs, target)?)?,
+            }
+            Ok(())
+        }
+        "clear" => {
+            match args.get(3).map(String::as_str) {
+                Some("all") | Some("--all") => {
+                    for job in &jobs.list {
+                        if job.dir.is_none() {
+                            continue;
+                        }
+                        clear_job_profile(job)?;
+                    }
+                }
+                Some(target) => clear_job_profile(resolve_job(&jobs, target)?)?,
+                None => {
+                    profile_usage();
+                    std::process::exit(1);
+                }
+            }
+            Ok(())
+        }
+        "delete" => {
+            match args.get(3).map(String::as_str) {
+                Some("all") | Some("--all") => {
+                    for job in &jobs.list {
+                        if job.dir.is_none() {
+                            continue;
+                        }
+                        delete_job_profile(job)?;
+                    }
+                }
+                Some(target) => delete_job_profile(resolve_job(&jobs, target)?)?,
+                None => {
+                    profile_usage();
+                    std::process::exit(1);
+                }
+            }
+            Ok(())
+        }
+        _ => {
+            profile_usage();
+            std::process::exit(1);
+        }
+    }
+}
+
 pub fn listen_command() -> anyhow::Result<()> {
     // lets spawn a terminal on dboule click if needed
     // too lazy to cd
@@ -148,6 +298,7 @@ pub fn listen_command() -> anyhow::Result<()> {
                 std::process::exit(1);
             }
         },
+        Some("profile") | Some("profiles") => handle_profile_command(&args),
         Some("v") | Some("-v") | Some("version") => {
             let engine = if cfg!(feature = "luau") {
                 "Luau"
@@ -164,11 +315,12 @@ pub fn listen_command() -> anyhow::Result<()> {
         }
         _ => {
             eprintln!(
-                "Usage: {} <{}|{}|{} <job_name>|{}>",
+                "Usage: {} <{}|{}|{} <job_name>|{}|{} <job|all>>",
                 crate::color::c_bold("spyweb"),
                 crate::color::c_info("check"),
                 crate::color::c_info("start"),
                 crate::color::c_info("debug"),
+                crate::color::c_info("profile"),
                 crate::color::c_info("version")
             );
             std::process::exit(1);
@@ -178,7 +330,8 @@ pub fn listen_command() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_start_port;
+    use super::{parse_start_port, resolve_job};
+    use crate::config::types::{Field, Job, JobConfig, Jobs};
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
@@ -206,5 +359,37 @@ mod tests {
             panic!("missing optional --port should still parse");
         };
         assert_eq!(parsed, None);
+    }
+
+    fn mock_job(dir: Option<&str>, name: &str) -> Job {
+        Job {
+            config: JobConfig {
+                name: name.to_string(),
+                url: "https://example.com".to_string(),
+                selector: ".item".to_string(),
+                fields: vec![Field::Shorthand("title".to_string())],
+                keywords: None,
+                search_fields: None,
+                webhook: None,
+                debug: false,
+                enabled: true,
+                interval: 60,
+                proxy: None,
+                notification: None,
+                headers: None,
+                hash_fields: None,
+            },
+            hooks: None,
+            dir: dir.map(|d| std::path::PathBuf::from(d)),
+        }
+    }
+
+    #[test]
+    fn resolves_job_by_name_or_id() {
+        let jobs = Jobs {
+            list: vec![mock_job(Some("jobs/jumia"), "Jumia")],
+        };
+        assert!(resolve_job(&jobs, "Jumia").is_ok());
+        assert!(resolve_job(&jobs, "jumia").is_ok());
     }
 }

@@ -156,7 +156,13 @@ impl Browser {
         };
 
         // Step 5: Connect to browser-level WebSocket
-        let transport = CdpTransport::connect(&ws_url).await?;
+        let transport = match CdpTransport::connect(&ws_url).await {
+            Ok(transport) => transport,
+            Err(err) => {
+                let _ = child.kill();
+                return Err(err).context("Browser started, but CDP WebSocket connection failed");
+            }
+        };
 
         // Step 6: Return Browser (browser-level transport — use b:attach() for page access)
         Ok(Self {
@@ -168,14 +174,20 @@ impl Browser {
             browser_ws_url: Some(ws_url),
         })
     }
+
+    pub fn close(&mut self) {
+        self.transport.close();
+        if let Some(mut child) = self.process.take() {
+            let _ = child.kill();
+        }
+        self._lock_file.take();
+    }
 }
 
 impl Drop for Browser {
     fn drop(&mut self) {
-        if !self.keep_alive
-            && let Some(mut child) = self.process.take()
-        {
-            let _ = child.kill();
+        if !self.keep_alive {
+            self.close();
         }
     }
 }

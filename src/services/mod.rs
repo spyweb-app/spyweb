@@ -6,3 +6,4 @@ pub mod webhook;
 
 // #[cfg(feature = "tray")]
 pub mod notifier;
+pub mod profiles;
