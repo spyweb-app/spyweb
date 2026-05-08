@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 BIN_NAME="spyweb"
 
 show_help() {
-    echo "Usage: ./run [option] [feature]"
+    echo "Usage: ./run [option] [flags] [feature]"
     echo ""
     echo "Full options:"
     echo "  win-debug       Build (debug) for Windows and run the .exe"
@@ -24,6 +24,9 @@ show_help() {
     echo "  win-tray-release Build (release) for Windows Tray"
     echo "  linux-tray-debug Build (debug) for Linux Tray and run"
     echo "  watch           Use cargo-watch (auto-runs on save)"
+    echo ""
+    echo "Flags:"
+    echo "  -n              Compile only, do not run (use with wd/win-debug)"
     echo ""
     echo "Feature options:"
     echo "  tray            Enable desktop-only features (tray icon, notifications)"
@@ -41,9 +44,32 @@ show_help() {
     exit 1
 }
 
-CMD="$1"
-FEATURE="${2:-}"
+NO_RUN=0
+CMD=""
+FEATURE=""
 FEATURE_ARGS=()
+
+# Parse arguments
+for arg in "$@"; do
+    case "$arg" in
+        -n)
+            NO_RUN=1
+            ;;
+        tray)
+            FEATURE="tray"
+            ;;
+        "")
+            ;;
+        *)
+            if [ -z "$CMD" ]; then
+                CMD="$arg"
+            else
+                echo "[!] Unknown argument: $arg"
+                show_help
+            fi
+            ;;
+    esac
+done
 
 # Normalize short aliases
 case "$CMD" in
@@ -58,17 +84,9 @@ case "$CMD" in
     w)   CMD="watch" ;;
 esac
 
-case "$FEATURE" in
-    "")
-        ;;
-    tray)
-        FEATURE_ARGS=(--features tray)
-        ;;
-    *)
-        echo "[!] Unknown feature: $FEATURE"
-        show_help
-        ;;
-esac
+if [ "$FEATURE" = "tray" ]; then
+    FEATURE_ARGS=(--features tray)
+fi
 
 describe_features() {
     if [ "${#FEATURE_ARGS[@]}" -eq 0 ]; then
@@ -82,11 +100,15 @@ case "$CMD" in
     win-debug)
         echo "[*] Compiling (debug) for Windows [$(describe_features)]..."
         cargo build --target x86_64-pc-windows-gnu "${FEATURE_ARGS[@]}"
-        EXE_PATH="./target/x86_64-pc-windows-gnu/debug/${BIN_NAME}.exe"
-        if [ -f "$EXE_PATH" ]; then
-            WIN_EXE_PATH=$(wslpath -w "$EXE_PATH")
-            echo "[*] Running: $WIN_EXE_PATH"
-            /mnt/c/Windows/System32/cmd.exe /C "\"$WIN_EXE_PATH\" start"
+        if [ "$NO_RUN" -eq 0 ]; then
+            EXE_PATH="./target/x86_64-pc-windows-gnu/debug/${BIN_NAME}.exe"
+            if [ -f "$EXE_PATH" ]; then
+                WIN_EXE_PATH=$(wslpath -w "$EXE_PATH")
+                echo "[*] Running: $WIN_EXE_PATH"
+                /mnt/c/Windows/System32/cmd.exe /C "\"$WIN_EXE_PATH\" start"
+            fi
+        else
+            echo "[*] -n: skipping execution"
         fi
         ;;
 

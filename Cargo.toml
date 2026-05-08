@@ -33,6 +33,12 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"], optional = true}
 open = {version = "5.3.4", optional = true}
 tray-icon = {version = "0.22.0", optional=true}
+async-tungstenite = { version = "0.34.1", features = ["smol-runtime"] }
+async-channel = "2.5.0"
+futures-channel = "0.3.32"
+async-process = "2.5.0"
+fs4 = "0.8.2"
+futures-lite = "2.6.1"
 
 [features]
 luau = ["mlua/luau"]
@@ -47,5 +53,7 @@ tempfile = "3.17"
 opt-level = "z"     
 lto = true          
 codegen-units = 1   
-panic = "abort"     
+# panic = "abort"     
 strip = true        
+# strip = false
+# debug = true
