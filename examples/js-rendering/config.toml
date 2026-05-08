@@ -1,9 +1,9 @@
-name = "External JS Rendering Example"
-url = "https://example-spa.com/listings"
-selector = ".js-rendered-item"
+name = "Native JS Rendering Example"
+url = "https://news.ycombinator.com" # HackerNews is simple for testing, or use a real SPA
+selector = ".athing" # HN uses .athing for items
 fields = [
-  "title:.item-title",
-  "price:.item-price"
+  "title:.titleline > a",
+  "link:.titleline > a:href"
 ]
-enabled = false
+enabled = false # Set to true to run
 interval = 300

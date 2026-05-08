@@ -1,0 +1,9 @@
+name = "Hybrid Human-in-the-Loop Recovery"
+url = "https://example.com/protected-page"
+selector = ".data-item"
+fields = [
+  "title:.title",
+  "value:.value"
+]
+enabled = false
+interval = 600
