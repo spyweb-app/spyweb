@@ -35,14 +35,10 @@ impl WebServer {
     }
 
     pub fn listen(&self, addr: &str) -> Result<()> {
-        crate::t_println!(
-            "Server listening on {}",
-            crate::color::c_info(&format!("http://{}", addr))
-        );
-
         let server_db = Arc::clone(&self.db);
         let server_active_jobs = Arc::clone(&self.active_jobs);
-        rouille::start_server(addr, move |request| {
+
+        let server = rouille::Server::new(addr, move |request| {
             let url = request.url();
 
             // HTML pages
@@ -81,7 +77,16 @@ impl WebServer {
                 }))
                 .with_status_code(500),
             }
-        });
+        })
+        .map_err(|e| anyhow::anyhow!("Failed to start server on {}: {}", addr, e))?;
+
+        crate::t_println!(
+            "Server listening on {}",
+            crate::color::c_info(&format!("http://{}", addr))
+        );
+
+        server.run();
+        Ok(())
     }
 }
 
