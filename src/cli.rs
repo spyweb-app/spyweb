@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use clap::{Parser, Subcommand};
+
 use crate::config::loader;
 use crate::config::types::{Job, Jobs};
 use crate::services::{db::Db, profiles};
@@ -15,13 +17,6 @@ fn is_persistent_terminal() -> bool {
         count >= 2
     }
 }
-
-// this thing is sooo unrealiable
-// #[cfg(target_os = "windows")]
-// fn is_persistent_terminal() -> bool {
-//     std::env::var("PROMPT").is_ok()      // cmd.exe sets this
-//     || std::env::var("PSModulePath").is_ok() // PowerShell sets this
-// }
 
 #[cfg(not(target_os = "windows"))]
 fn is_persistent_terminal() -> bool {
@@ -89,58 +84,55 @@ fn spawn_terminal_if_needed() {
     }
 }
 
-fn parse_start_port(args: &[String]) -> anyhow::Result<Option<u16>> {
-    let mut port = None;
-    let mut i = 2;
+#[derive(Parser)]
+#[command(
+    name = "spyweb",
+    version,
+    about = "Tiny web monitoring/scraper with Lua scripting",
+    disable_version_flag = true
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
 
-    while i < args.len() {
-        let arg = &args[i];
+#[derive(Subcommand)]
+enum Commands {
+    Check,
+    Start {
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    Debug {
+        job_name: String,
+    },
+    Profile {
+        #[command(subcommand)]
+        command: ProfileCommands,
+    },
+    #[command(aliases = ["v"])]
+    Version,
+}
 
-        if let Some(value) = arg.strip_prefix("--port=") {
-            let parsed = value
-                .parse::<u16>()
-                .map_err(|_| anyhow::anyhow!("Invalid value for --port: {}", value))?;
-            if port.replace(parsed).is_some() {
-                return Err(anyhow::anyhow!(
-                    "The --port flag may only be specified once"
-                ));
-            }
-        } else if arg == "--port" {
-            let Some(value) = args.get(i + 1) else {
-                return Err(anyhow::anyhow!("Missing value for --port"));
-            };
-            let parsed = value
-                .parse::<u16>()
-                .map_err(|_| anyhow::anyhow!("Invalid value for --port: {}", value))?;
-            if port.replace(parsed).is_some() {
-                return Err(anyhow::anyhow!(
-                    "The --port flag may only be specified once"
-                ));
-            }
-            i += 1;
-        }
-
-        i += 1;
-    }
-
-    Ok(port)
+#[derive(Subcommand)]
+enum ProfileCommands {
+    Check {
+        job: Option<String>,
+    },
+    List {
+        job: Option<String>,
+    },
+    Clear {
+        target: String,
+    },
+    Delete {
+        target: String,
+    },
 }
 
 fn load_jobs_for_profiles() -> anyhow::Result<Jobs> {
     let db = Arc::new(Db::open("data")?);
     loader::load_all_jobs("jobs.toml", "jobs", db)
-}
-
-fn profile_usage() {
-    eprintln!(
-        "Usage: {} {} <{}|{}|{} <job|all>|{} <job|all>>",
-        crate::color::c_bold("spyweb"),
-        crate::color::c_info("profile"),
-        crate::color::c_info("check"),
-        crate::color::c_info("list"),
-        crate::color::c_info("clear"),
-        crate::color::c_info("delete")
-    );
 }
 
 fn print_profile_check(job: &Job) -> anyhow::Result<()> {
@@ -211,95 +203,65 @@ fn delete_job_profile(job: &Job) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_profile_command(args: &[String]) -> anyhow::Result<()> {
-    let Some(cmd) = args.get(2).map(String::as_str) else {
-        profile_usage();
-        std::process::exit(1);
-    };
-
+fn handle_profile_command(cmd: ProfileCommands) -> anyhow::Result<()> {
     let jobs = load_jobs_for_profiles()?;
 
     match cmd {
-        "check" | "list" => {
-            match args.get(3).map(String::as_str) {
+        ProfileCommands::Check { job } | ProfileCommands::List { job } => {
+            match job.as_deref() {
                 None | Some("all") | Some("--all") => print_profile_check_all(&jobs)?,
                 Some(target) => print_profile_check(resolve_job(&jobs, target)?)?,
             }
             Ok(())
         }
-        "clear" => {
-            match args.get(3).map(String::as_str) {
-                Some("all") | Some("--all") => {
-                    for job in &jobs.list {
-                        if job.dir.is_none() {
-                            continue;
-                        }
-                        clear_job_profile(job)?;
+        ProfileCommands::Clear { target } => {
+            if target == "all" || target == "--all" {
+                for job in &jobs.list {
+                    if job.dir.is_none() {
+                        continue;
                     }
+                    clear_job_profile(job)?;
                 }
-                Some(target) => clear_job_profile(resolve_job(&jobs, target)?)?,
-                None => {
-                    profile_usage();
-                    std::process::exit(1);
-                }
+            } else {
+                clear_job_profile(resolve_job(&jobs, &target)?)?;
             }
             Ok(())
         }
-        "delete" => {
-            match args.get(3).map(String::as_str) {
-                Some("all") | Some("--all") => {
-                    for job in &jobs.list {
-                        if job.dir.is_none() {
-                            continue;
-                        }
-                        delete_job_profile(job)?;
+        ProfileCommands::Delete { target } => {
+            if target == "all" || target == "--all" {
+                for job in &jobs.list {
+                    if job.dir.is_none() {
+                        continue;
                     }
+                    delete_job_profile(job)?;
                 }
-                Some(target) => delete_job_profile(resolve_job(&jobs, target)?)?,
-                None => {
-                    profile_usage();
-                    std::process::exit(1);
-                }
+            } else {
+                delete_job_profile(resolve_job(&jobs, &target)?)?;
             }
             Ok(())
-        }
-        _ => {
-            profile_usage();
-            std::process::exit(1);
         }
     }
 }
 
 pub fn listen_command() -> anyhow::Result<()> {
-    // lets spawn a terminal on dboule click if needed
-    // too lazy to cd
     spawn_terminal_if_needed();
 
-    let args: Vec<String> = std::env::args().collect();
+    let cli = Cli::parse();
 
-    match args.get(1).map(String::as_str) {
-        Some("check") => crate::config::config_check(),
-        Some("start") => {
-            let port = parse_start_port(&args)?;
+    match cli.command {
+        Commands::Check => crate::config::config_check(),
+        Commands::Start { port } => {
             if let Err(e) = crate::entry::start_app_with_port(port) {
                 crate::t_eprintln!("Application error: {}", e);
                 std::process::exit(1);
             }
             Ok(())
         }
-        Some("debug") => match args.get(2) {
-            Some(job_name) => smol::block_on(crate::scraper::runner::debug_job(job_name)),
-            None => {
-                eprintln!(
-                    "Usage: {} {} <job_name>",
-                    crate::color::c_bold("spyweb"),
-                    crate::color::c_info("debug")
-                );
-                std::process::exit(1);
-            }
-        },
-        Some("profile") | Some("profiles") => handle_profile_command(&args),
-        Some("v") | Some("-v") | Some("version") => {
+        Commands::Debug { job_name } => {
+            smol::block_on(crate::scraper::runner::debug_job(&job_name))
+        }
+        Commands::Profile { command } => handle_profile_command(command),
+        Commands::Version => {
             let engine = if cfg!(feature = "luau") {
                 "Luau"
             } else {
@@ -313,53 +275,13 @@ pub fn listen_command() -> anyhow::Result<()> {
             );
             std::process::exit(0);
         }
-        _ => {
-            eprintln!(
-                "Usage: {} <{}|{}|{} <job_name>|{}|{} <job|all>>",
-                crate::color::c_bold("spyweb"),
-                crate::color::c_info("check"),
-                crate::color::c_info("start"),
-                crate::color::c_info("debug"),
-                crate::color::c_info("profile"),
-                crate::color::c_info("version")
-            );
-            std::process::exit(1);
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_start_port, resolve_job};
+    use super::resolve_job;
     use crate::config::types::{Field, Job, JobConfig, Jobs};
-
-    fn args(items: &[&str]) -> Vec<String> {
-        items.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn parses_port_after_start() {
-        let Ok(parsed) = parse_start_port(&args(&["spyweb", "start", "--port", "9999"])) else {
-            panic!("valid --port syntax should parse");
-        };
-        assert_eq!(parsed, Some(9999));
-    }
-
-    #[test]
-    fn parses_port_equals_syntax() {
-        let Ok(parsed) = parse_start_port(&args(&["spyweb", "start", "--port=8888"])) else {
-            panic!("valid --port= syntax should parse");
-        };
-        assert_eq!(parsed, Some(8888));
-    }
-
-    #[test]
-    fn allows_start_without_port() {
-        let Ok(parsed) = parse_start_port(&args(&["spyweb", "start"])) else {
-            panic!("missing optional --port should still parse");
-        };
-        assert_eq!(parsed, None);
-    }
 
     fn mock_job(dir: Option<&str>, name: &str) -> Job {
         Job {
@@ -380,16 +302,16 @@ mod tests {
                 hash_fields: None,
             },
             hooks: None,
-            dir: dir.map(|d| std::path::PathBuf::from(d)),
+            dir: dir.map(std::path::PathBuf::from),
         }
     }
 
     #[test]
     fn resolves_job_by_name_or_id() {
         let jobs = Jobs {
-            list: vec![mock_job(Some("jobs/jumia"), "Jumia")],
+            list: vec![mock_job(Some("jobs/spyweb"), "Spyweb")],
         };
-        assert!(resolve_job(&jobs, "Jumia").is_ok());
-        assert!(resolve_job(&jobs, "jumia").is_ok());
+        assert!(resolve_job(&jobs, "SpyWeb").is_ok());
+        assert!(resolve_job(&jobs, "spyweb").is_ok());
     }
 }
