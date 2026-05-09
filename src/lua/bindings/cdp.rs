@@ -264,7 +264,8 @@ async fn create_page_table(
 
                     if let Some(base64_data) = result.get("data").and_then(|v| v.as_str()) {
                         let bytes = decode_base64(base64_data)?;
-                        smol::unblock(move || std::fs::write(path.clone(), bytes))
+                        let p = path.clone();
+                        smol::unblock(move || std::fs::write(p, bytes))
                             .await
                             .map_err(mlua::Error::external)?;
 
@@ -434,7 +435,7 @@ impl mlua::UserData for Browser {
                     if let Some(existing) = infos.and_then(|arr| {
                         arr.iter().find(|t| {
                             t["type"].as_str() == Some("page")
-                                && t["url"].as_str().map_or(false, |u| u == "about:blank")
+                                && t["url"].as_str() == Some("about:blank")
                         })
                     }) {
                         let target_id = existing["targetId"].as_str().unwrap().to_string();

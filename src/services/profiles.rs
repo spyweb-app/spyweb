@@ -52,8 +52,12 @@ fn remove_dir_contents(path: &Path) -> Result<()> {
         let entry = entry?;
         let entry_path = entry.path();
         if entry_path.is_dir() {
-            fs::remove_dir_all(&entry_path)
-                .with_context(|| format!("Failed to remove {}", entry_path.display()))?;
+            fs::remove_dir_all(&entry_path).with_context(|| {
+                format!(
+                    "Cannot clear profile: the browser profile at {} is in use (locked by a running browser). Close the browser and try again.",
+                    entry_path.display()
+                )
+            })?;
         } else {
             fs::remove_file(&entry_path)
                 .with_context(|| format!("Failed to remove {}", entry_path.display()))?;
@@ -145,7 +149,7 @@ mod tests {
                 hash_fields: None,
             },
             hooks: None,
-            dir: dir.map(|d| PathBuf::from(d)),
+            dir: dir.map(PathBuf::from),
         }
     }
 

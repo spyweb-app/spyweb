@@ -55,6 +55,7 @@ impl JobHooks {
         let func: mlua::Function = lua.globals().get("override_fetch")?;
         let table = conversions::request_to_lua(&lua, req)?;
         let ret = func.call_async::<mlua::Value>(table).await?;
+        let _ = lua.gc_collect();
         match ret {
             mlua::Value::Table(t) => {
                 if let Some(err_msg) = t.get::<Option<String>>("error")? {
@@ -81,10 +82,7 @@ impl JobHooks {
     pub async fn after_fetch(&self, attempt: FetchAttempt) -> Result<Option<RequestResult>> {
         self.set_last_fetch(&attempt).await?;
         if !self.has_after_fetch {
-            return attempt
-                .result
-                .map(|res| Some(res))
-                .map_err(anyhow::Error::msg);
+            return attempt.result.map(Some).map_err(anyhow::Error::msg);
         }
         match self.try_after_fetch(&attempt).await {
             Ok(result) => Ok(result),

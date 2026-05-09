@@ -2,9 +2,11 @@
 
 ## Overview
 
-**Spyweb does not bundle a browser.** Unlike Puppeteer or Playwright (which download a 300MB+ Chromium binary you don't need), Spyweb uses whatever browser you already have installed to render JavaScript-heavy pages. You don't download anything extra. You don't configure anything special. It just works.
+**Spyweb does not bundle a browser.** Unlike tools that download a 300MB+ Chromium binary you don't need, Spyweb uses whatever browser you already have installed to render JavaScript-heavy pages. You don't download anything extra. You don't configure anything special. It just works.
 
 If you need JS rendering in a hook (to scrape a React site, bypass a Cloudflare challenge, click buttons, wait for DOM elements), you use the `cdp` module. That's it.
+
+For detailed documentation with examples, see [SpyWeb CDP Docs](https://docs.spyweb.app/cdp.html).
 
 ### How It Works
 
@@ -59,6 +61,7 @@ function override_fetch(request)
     local html = page:content()
     browser:close()
     
+    -- 6. Pass the html back to the pipeline (triggers extraction or catches in after_fetch)
     return {
         status = 200,
         body = html,
@@ -100,7 +103,13 @@ function override_fetch(request)
     if page:wait_for_selector(".item", 5000) then
         local html = page:content()
         page:close() -- Closes the tab, but the browser stays open
-        return { status = 200, body = html, url = request.url }
+        
+        -- Pass the html back to the pipeline (triggers extraction or catches in after_fetch)
+        return {
+            status = 200,
+            body = html,
+            url = request.url
+        }
     else
         page:close()
         return { error = "Content timeout" }

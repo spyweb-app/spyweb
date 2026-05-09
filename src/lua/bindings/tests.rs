@@ -453,6 +453,10 @@ fn test_cdp_page_network_and_screenshot_helpers() {
                 end
                 return {}
             end,
+            call_save = function(self, method, params, path)
+                table.insert(calls, { method = method, params = params })
+                table.insert(writes, { path = path, data = "ZmFrZS1wbmc=" })
+            end,
             wait_event = function(self, event, timeout_ms, predicate)
                 return { method = event, params = {} }
             end

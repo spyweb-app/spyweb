@@ -323,8 +323,7 @@ function cdp._inject_page(page)
         scale = 1
       }
     end
-    local result = self:call("Page.captureScreenshot", params)
-    cdp._write_base64(path, result.data)
+    self:call_save("Page.captureScreenshot", params, path)
     return path
   end
 

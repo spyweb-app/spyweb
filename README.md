@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">SpyWeb</h1>
-  <p align="center">Tiny web scraper with Lua scripting - ~5MB binary, no runtime required, under 5MB idle RAM</p>
+  <p align="center">Tiny web scraper with Lua scripting - ~7MB binary, no runtime required, under 5MB idle RAM</p>
 </p>
 
 <p align="center">
@@ -14,6 +14,7 @@
   ⚙️ <a href="docs/config.md">Config</a> |
   📜 <a href="https://docs.spyweb.app/#hooks">Lua API</a> |
   🛠️ <a href="docs/api.md">REST API</a> |
+  🌐 <a href="docs/cdp.md">CDP Browser API</a> |
   🚀 <a href="docs/vps-deployment.md">VPS Setup</a> |
   📂 <a href="examples/">Examples</a> |
   🏗️ <a href="CONTRIBUTING.md">Build from Source</a>
@@ -38,14 +39,15 @@ keywords = ["rust", "linux", "open source"]
 
 | Feature | Description |
 | :--- | :--- |
-| **Zero Dependencies** | ~5MB self-contained. Completely portable, no runtime required. |
+| **Zero Dependencies** | ~7MB self-contained. Completely portable, no runtime required. |
 | **Lua Scripting** | 9 hook stages plus persistent Lua storage for counters, cursors, and shared state. |
 | **Hot Reload** | Save a config or Lua script and SpyWeb respawns the job instantly. |
 | **Internal DB** | Built-in deduplication ensures you never see the same item twice. |
 | **Dual Binary** | Choice of a headless CLI or a silent system tray app for background runs. |
 | **Concurrency** | Async-first engine; slow proxies or large jobs never block others. |
 | **Fault Tolerant** | Lua hook errors are caught and logged without stopping the job, ensuring 100% uptime. |
-| **Hybrid Engine** | Automatically falls back to a spec-compliant DOM parser for broken or complex HTML. |
+| **Hybrid Engine** | Falls back to a spec-compliant DOM parser for broken or complex HTML. |
+| **CDP Automation** | Launch or connect to any Chromium browser for JS rendering, clicking, waiting, screenshots — no bundled browser needed. |
 | **Pro Alerting** | Integrated desktop notifications and customizable webhooks for real-time monitoring. |
 
 ## Install & Run
@@ -134,6 +136,14 @@ The terminal binary includes helpful developer tools:
 
 # Check version and active Lua engine
 ./spyweb version
+
+# Profile management — check, list, clear, or delete per-job browser profiles
+./spyweb profile check "My Job"  # Show profile status (all jobs if no name given)
+./spyweb profile list            # Alias for check
+./spyweb profile clear all       # Wipe browser caches for all jobs
+./spyweb profile clear "My Job"  # Clear a specific job's cache
+./spyweb profile delete all      # Delete profile directories entirely
+./spyweb profile delete "My Job" # Delete a specific job's profile directory
 ```
 
 ## Lua API & Hooks
@@ -163,9 +173,23 @@ end
 >
 > Check the [Examples](examples/) for more Lua hook examples.
 >
-> **JavaScript & Rendering:** SpyWeb is designed for extreme efficiency and does not embed a heavy headless browser. For JS-heavy client-rendered pages, you can use the `override_fetch` hook to seamlessly delegate rendering to any external service or local proxy.
->
-> **Coming Soon: Native CDP Support.** I'll be implementing a lightweight CDP (Chrome DevTools Protocol) client that allows you to control a **host browser** (like Headless Chrome or Chromium) directly from your Lua hooks. This maintains SpyWeb's tiny ~5MB footprint by utilizing the browser already on your system, providing full automation capabilities without the bloat.
+---
+> 
+> **JavaScript Rendering with CDP:** SpyWeb does not bundle a 300MB browser. Instead, the built-in [CDP module](docs/cdp.md) launches whatever Chromium-based browser you already have installed (Chrome, Edge, Brave, Lightpanda, etc.) and controls it via the Chrome DevTools Protocol — all from your Lua hooks. Zero downloads, zero config, full JS execution.
+> 
+> ```lua
+> function override_fetch(request)
+>     local browser = cdp.launch({})
+>     local page = browser:attach()
+>     page:open(request.url)
+>     page:wait_for_selector(".dynamic-content", 10000)
+>     local html = page:content()
+>     browser:close()
+>     return { status = 200, body = html, url = request.url }
+> end
+> ```
+> 
+> See the [CDP Documentation](docs/cdp.md) for the full API — browser management, page navigation, click/wait/inject, cookies, screenshots, and a complete production hybrid-recovery pattern that falls back to a visual browser on bot detection.
 
 ---
 

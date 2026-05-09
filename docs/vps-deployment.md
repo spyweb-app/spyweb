@@ -215,11 +215,11 @@ This blocks the entire world while letting you through seamlessly.
 ## Why no Docker?
 You might be looking for a `Dockerfile` or a Docker Compose guide. Here is why you won't find one:
 
-*   **It's an insult to SpyWeb's existence**: We worked hard to make a **5MB binary** with **zero dependencies**. Putting it in a 100MB Docker container is like putting a racing bike inside a shipping container to drive it across the street.
+*   **It's an insult to SpyWeb's existence**: We worked hard to make a **7MB binary** with **zero dependencies**. Putting it in a 100MB Docker container is like putting a racing bike inside a shipping container to drive it across the street.
 *   **Performance**: Running natively via `systemd` is the lightest possible way to run software. No container overhead, no virtual network layers.
 *   **Developer Experience**: Docker volumes make editing Lua hooks and job configs a nightmare (permissions, laggy file-sync). Native deployment means your editor and your scraper are looking at the exact same files with zero friction.
 
 If you really need isolation, use **systemd sandboxing** or run as a non-root user. Keep it lean.
 
-> If you are managing a team of 50+ engineers sharing the same server which you might need docker, you probably don't need this guide to tell you how to containerize a 5MB binary.
+> If you are managing a team of 50+ engineers sharing the same server which you might need docker, you probably don't need this guide to tell you how to containerize a 7MB binary.
 -->

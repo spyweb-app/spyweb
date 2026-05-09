@@ -155,10 +155,10 @@ fn spyweb_home_dir() -> Option<PathBuf> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        if let Ok(home) = std::env::var("HOME") {
-            if !home.trim().is_empty() {
-                return Some(PathBuf::from(home));
-            }
+        if let Ok(home) = std::env::var("HOME")
+            && !home.trim().is_empty()
+        {
+            return Some(PathBuf::from(home));
         }
     }
 
