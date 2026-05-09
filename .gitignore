@@ -4,6 +4,6 @@ data
 jobs.toml
 test-*
 *.zip
-*.html
+/*.html
 *.json
 /docs/test*

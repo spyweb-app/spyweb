@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SpyWeb — CDP Documentation</title>
+    <link rel="icon" type="image/png" href="/icon.png">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-darcula.min.css">
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #181b24;
+            --surface2: #1e2230;
+            --border: #2a2e3d;
+            --accent: #6c5ce7;
+            --accent2: #a29bfe;
+            --text: #c9d1d9;
+            --text-muted: #8b949e;
+            --green: #00b894;
+            --yellow: #fdcb6e;
+            --red: #ff7675;
+            --blue: #74b9ff;
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        html {
+            background: var(--bg);
+            scroll-behavior: smooth;
+            scroll-padding-top: 80px
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            color: var(--text);
+            background: var(--bg)
+        }
+
+        .navbar {
+            background: var(--surface) !important;
+            border-bottom: 1px solid var(--border)
+        }
+
+        .navbar-item,
+        .navbar-link {
+            color: var(--text) !important
+        }
+
+        .navbar-item:hover {
+            background: var(--surface2) !important;
+            color: #fff !important
+        }
+
+        .hero {
+            background: linear-gradient(135deg, #0f1117 0%, #1a1040 50%, #0f1117 100%)
+        }
+
+        .hero .title {
+            color: #fff
+        }
+
+        .hero .subtitle {
+            color: var(--accent2)
+        }
+
+        .box {
+            background: var(--surface) !important;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            color: var(--text)
+        }
+
+        .title,
+        .label {
+            color: #fff !important
+        }
+
+        .content h1,
+        .content h2,
+        .content h3,
+        .content h4 {
+            color: #fff
+        }
+
+        pre {
+            background: #282a36 !important;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.2em !important;
+            overflow-x: auto;
+            font-size: .85rem;
+            margin: 1.2rem 0;
+        }
+
+        code {
+            background: var(--surface2);
+            color: var(--accent2);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: .9em;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+
+        pre code {
+            background: none !important;
+            padding: 0 !important;
+            color: inherit !important;
+        }
+
+        .tag.is-info {
+            background: var(--accent) !important
+        }
+
+        .tag.is-warning {
+            background: #e17055 !important;
+            color: #fff !important
+        }
+
+        .tag.is-success {
+            background: var(--green) !important
+        }
+
+        table {
+            color: var(--text) !important
+        }
+
+        table th {
+            color: #fff !important;
+            background: var(--surface2) !important;
+            border-color: var(--border) !important
+        }
+
+        table td {
+            border-color: var(--border) !important
+        }
+
+        .menu-label {
+            color: var(--text-muted) !important
+        }
+
+        .menu-list a {
+            color: var(--text) !important;
+            border-radius: 6px
+        }
+
+        .menu-list a:hover {
+            background: var(--surface2) !important;
+            color: #fff !important
+        }
+
+        .menu-list a.is-active {
+            background: var(--accent) !important;
+            color: #fff !important
+        }
+
+        .footer {
+            background: var(--surface) !important;
+            border-top: 1px solid var(--border);
+            color: var(--text-muted)
+        }
+
+        .tabs li.is-active a {
+            border-color: var(--accent) !important;
+            color: var(--accent2) !important
+        }
+
+        .tabs a {
+            color: var(--text-muted) !important;
+            border-color: var(--border) !important
+        }
+
+        .tabs a:hover {
+            color: #fff !important;
+            border-color: var(--accent2) !important
+        }
+
+        .notification {
+            border: 1px solid var(--border)
+        }
+
+        .notification.is-info {
+            background: rgba(108, 92, 231, .15) !important;
+            color: var(--accent2) !important
+        }
+
+        .notification.is-warning {
+            background: rgba(225, 112, 85, .15) !important;
+            color: var(--yellow) !important
+        }
+
+        .notification.is-danger {
+            background: rgba(255, 118, 117, .15) !important;
+            color: var(--red) !important
+        }
+
+        .sidebar {
+            position: sticky;
+            top: 80px;
+            max-height: calc(100vh - 100px);
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+
+        .sidebar::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background: var(--surface2);
+            border-radius: 10px;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb:hover {
+            background: var(--accent);
+        }
+
+        @media(max-width:1023px) {
+            .sidebar {
+                position: static
+            }
+        }
+
+        .section {
+            padding: 2rem 1.5rem
+        }
+
+        .compat-yes { color: var(--green) }
+        .compat-no { color: var(--red) }
+        .compat-warn { color: var(--yellow) }
+
+        .method-block {
+            border-left: 3px solid var(--accent);
+            padding: .8em 1em;
+            margin: .5em 0;
+            background: var(--surface2);
+            border-radius: 0 8px 8px 0;
+            transition: border-color .2s
+        }
+        .method-block:hover { border-color: var(--green) }
+        .method-block .method-name {
+            color: var(--accent2);
+            font-weight: 700;
+            font-family: monospace
+        }
+        .method-block .method-async {
+            font-size: .8em;
+            color: var(--text-muted)
+        }
+    </style>
+</head>
+
+<body x-data="{ activeSection: 'overview', mobileMenu: false }">
+
+    <!-- Navbar -->
+    <nav class="navbar is-fixed-top" role="navigation">
+        <div class="container">
+            <div class="navbar-brand">
+                <a class="navbar-item has-text-weight-bold" href="index.html">
+                    <span style="color:var(--accent2);font-size:1.2em">⚡</span>&nbsp;SpyWeb docs
+                </a>
+                <a role="button" class="navbar-burger" @click="mobileMenu=!mobileMenu"
+                    :class="{'is-active':mobileMenu}">
+                    <span></span><span></span><span></span><span></span>
+                </a>
+            </div>
+            <div class="navbar-menu" :class="{'is-active':mobileMenu}">
+                <div class="navbar-end">
+                    <a class="navbar-item" href="#overview">Overview</a>
+                    <a class="navbar-item" href="#integration">Integration</a>
+                    <a class="navbar-item" href="#browser-api">Browser API</a>
+                    <a class="navbar-item" href="#page-api">Page API</a>
+                    <a class="navbar-item" href="index.html">Master Guide</a>
+                    <a class="navbar-item" href="https://github.com/spyweb-rs/spyweb">GitHub</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main -->
+    <section class="section" style="padding-top:72px">
+        <div class="container">
+            <div class="columns">
+
+                <!-- Sidebar -->
+                <div class="column is-3 is-hidden-mobile">
+                    <div class="sidebar">
+                        <aside class="menu box">
+                            <p class="menu-label">Getting Started</p>
+                            <ul class="menu-list">
+                                <li><a href="#overview">Overview</a></li>
+                                <li><a href="#integration">Integration</a></li>
+                            </ul>
+                            <p class="menu-label">API Reference</p>
+                            <ul class="menu-list">
+                                <li><a href="#browser-api">Browser API</a></li>
+                                <li><a href="#page-api">Page API (Native)</a></li>
+                                <li><a href="#page-api-helpers">Page API (Helpers)</a></li>
+                            </ul>
+                            <p class="menu-label">Specialized Browsers &amp; More</p>
+                            <ul class="menu-list">
+                                <li><a href="#specialized">Lightweight Browsers</a></li>
+                            </ul>
+                        </aside>
+                    </div>
+                </div>
+
+                <!-- Content -->
+                <div class="column is-9">
+
+                    <!-- Hero -->
+                    <div class="mb-6 has-text-centered">
+                        <h1 class="title is-2">SpyWeb CDP Documentation</h1>
+                        <p class="subtitle is-5">Browser automation via Chrome DevTools Protocol</p>
+                        <div class="tags is-centered mt-4" style="gap:.5em">
+                            <span class="tag is-info has-text-white">No bundled browser</span>
+                            <span class="tag is-success has-text-white">Auto-detect</span>
+                            <span class="tag is-warning">JS Rendering</span>
+                        </div>
+                    </div>
+
+                    <!-- Overview (merged: Overview + How It Works + Under the Hood) -->
+                    <div id="overview" class="box mb-5">
+                        <h2 class="title is-3">Overview</h2>
+                        <div class="content">
+                            <p><strong>Spyweb does not bundle a browser.</strong> Unlike tools that download a 300MB+ Chromium binary you don't need, Spyweb uses whatever browser you already have installed to render JavaScript-heavy pages. You don't download anything extra. You don't configure anything special. It just works.</p>
+                            <p>If you need JS rendering in a hook (to scrape a React site, bypass a Cloudflare challenge, click buttons, wait for DOM elements), you use the <code>cdp</code> module. That's it.</p>
+                            <div class="notification is-info">
+                                <strong>All hooks are optional.</strong> CDP is only needed when you require JavaScript rendering. For simple HTML pages, the built-in HTTP client is faster and uses zero extra resources.
+                            </div>
+
+                            <h4 class="title is-5 mt-5">How It Works</h4>
+                            <p>Spyweb can get a browser two ways:</p>
+                            <ol>
+                                <li><strong>Launch one</strong> — <code>cdp.launch()</code> finds Chrome, Edge, or Brave on your system, starts it in headless mode, and connects to it automatically. Zero config. You can also pass <code>{ executable = "/path/to/browser" }</code> to use a specific binary.</li>
+                                <li><strong>Connect to an existing one</strong> — <code>cdp.connect("ws://...")</code> attaches to any browser or CDP-compatible server already running (useful for Lightpanda, Obscura, remote debugging, etc.).</li>
+                            </ol>
+                            <p>Once connected, you call <code>browser:attach()</code> to get a page/tab, then drive it with simple commands like <code>page:open(url)</code>, <code>page:wait_for_selector()</code>, <code>page:click()</code>, and <code>page:content()</code> to get the rendered HTML.</p>
+
+                            <h4 class="title is-5 mt-5">Under the Hood</h4>
+                            <p>When you call <code>cdp.launch()</code>, Spyweb spawns the browser as a child process with <code>--remote-debugging-port=0</code> (which picks a random free port). It reads the DevTools WebSocket URL from the browser's stderr output, connects to it, and gives you a <code>Browser</code> object. Every command and response is sent as JSON-RPC messages over WebSocket — the same protocol Chrome's own DevTools uses.</p>
+                            <p>Each page/tab gets its own dedicated WebSocket connection. This is why <code>browser:attach()</code> doesn't just return a reference — it actually opens a new WebSocket to the page's specific endpoint.</p>
+                            <p>By default, closing the browser kills the process and cleans up the profile. You can override this with <code>keep_alive = true</code> to keep the browser warm across multiple hook calls.</p>
+                        </div>
+                    </div>
+
+                    <!-- Integration (merged: override_fetch + Persistent Browser) -->
+                    <div id="integration" class="box mb-5">
+                        <h2 class="title is-3">Integration</h2>
+                        <div class="content">
+
+                            <h4 class="title is-5">Basic Usage in <code>override_fetch</code></h4>
+                            <p>CDP is available globally via the <code>cdp</code> table. While it can be used in any hook, it is most commonly used in <code>override_fetch</code> to replace the default HTTP client with a real browser.</p>
+                            <pre><code class="language-lua">function override_fetch(request)
+    -- 1. Launch a temporary browser
+    local browser = cdp.launch({})
+
+    -- 2. Attach to a page (tab)
+    local page = browser:attach()
+
+    -- 3. Navigate safely and check for errors
+    local ok, err = page:open(request.url)
+    if not ok then
+        browser:close()
+        return { error = "Navigation failed: " .. tostring(err) }
+    end
+
+    -- 4. Wait for content before extraction
+    local found, wait_err = page:wait_for_selector(".dynamic-content", 10000)
+    if not found then
+        browser:close()
+        return { error = "Selector timeout: " .. tostring(wait_err) }
+    end
+
+    -- 5. Get the rendered HTML and clean up
+    local html = page:content()
+    browser:close()
+
+    -- 6. Pass the html back to the pipeline (triggers extraction or catches in after_fetch)
+    return {
+        status = 200,
+        body = html,
+        url = request.url
+    }
+end</code></pre>
+
+                            <h4 class="title is-5 mt-5">Persistent Browser Pattern</h4>
+                            <p>Launching a new browser for every fetch is slow. Because Spyweb <strong>persists the Lua state</strong> for each job, you can keep a browser instance "warm" across multiple scraper runs. Store the browser in a global variable (without <code>local</code>) to keep it alive between iterations.</p>
+                            <pre><code class="language-lua">-- This runs once when the job is loaded
+if not browser then
+    print("[CDP] Launching persistent browser...")
+    browser = cdp.launch({
+        headless = true,
+        keep_alive = true
+    })
+end
+
+function override_fetch(request)
+    local page = browser:attach()
+    local ok, err = page:open(request.url)
+    if not ok then
+        page:close()
+        return { error = "Failed to load " .. request.url }
+    end
+    if page:wait_for_selector(".item", 5000) then
+        local html = page:content()
+        page:close()
+
+        -- Pass the html back to the pipeline (triggers extraction or catches in after_fetch)
+        return {
+            status = 200,
+            body = html,
+            url = request.url
+        }
+    else
+        page:close()
+        return { error = "Content timeout" }
+    end
+end</code></pre>
+                            <div class="notification is-info">
+                                <strong>keep_alive</strong> prevents the browser from being killed when the Lua variable goes out of scope. Without it, the browser closes when the variable is garbage collected.
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- Browser API Reference -->
+                    <div id="browser-api" class="box mb-5">
+                        <h2 class="title is-3">Browser API Reference</h2>
+                        <div class="content">
+                            <p>These methods are provided directly by the Spyweb Core on the <code>Browser</code> object returned by <code>cdp.launch()</code> or <code>cdp.connect()</code>.</p>
+
+                            <div id="browser-attach" class="method-block">
+                                <span class="method-name">browser:attach([opts])</span> <span class="method-async">async</span>
+                                <br><small>Returns a <code>Page</code> object. Accepts an optional options table.</small>
+                            </div>
+                            <table class="table is-fullwidth">
+                                <thead>
+                                    <tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td><code>opts.url</code></td><td>string</td><td><code>"about:blank"</code></td><td>Initial URL for the new tab.</td></tr>
+                                    <tr><td><code>opts.reuse</code></td><td>boolean</td><td><code>true</code></td><td>Reuse an existing blank tab if available. Only applies to the default context.</td></tr>
+                                    <tr><td><code>opts.browserContextId</code></td><td>string</td><td><em>none</em></td><td>Attach to a specific isolated context created via <code>browser:new_context()</code>.</td></tr>
+                                </tbody>
+                            </table>
+                            <pre><code class="language-lua">-- Attach with a specific URL
+local page = browser:attach({ url = "https://example.com" })
+
+-- Attach within an isolated context
+local ctx = browser:new_context()
+local page = ctx:attach("https://example.com")</code></pre>
+
+                            <div id="browser-new_context" class="method-block">
+                                <span class="method-name">browser:new_context()</span> <span class="method-async">async</span>
+                                <br><small>Creates an isolated browser context (like Chrome's guest profile). Returns a <code>Context</code> object.</small>
+                            </div>
+                            <pre><code class="language-lua">local ctx = browser:new_context()
+local page = ctx:attach("https://example.com")
+-- Cookies/storage in this context are isolated from the default context
+ctx:close()</code></pre>
+
+                            <div id="browser-close" class="method-block">
+                                <span class="method-name">browser:close()</span> <span class="method-async">sync</span>
+                                <br><small>Closes the browser and kills the underlying process. Also releases the profile lock file.</small>
+                            </div>
+                            <pre><code class="language-lua">browser:close()</code></pre>
+
+                            <div id="browser-get_user_data_dir" class="method-block">
+                                <span class="method-name">browser:get_user_data_dir()</span> <span class="method-async">sync</span>
+                                <br><small>Returns the path to the browser's profile directory, or <code>nil</code> if the browser was connected via WebSocket (no local profile).</small>
+                            </div>
+                            <pre><code class="language-lua">local dir = browser:get_user_data_dir()
+print("Profile at: " .. tostring(dir))</code></pre>
+
+                            <div id="browser-call" class="method-block">
+                                <span class="method-name">browser:call(method, params)</span> <span class="method-async">async</span>
+                                <br><small>Sends a raw CDP command at the browser level. Use this for browser-scoped domains like <code>Target</code>, <code>Browser</code>, etc.</small>
+                            </div>
+                            <pre><code class="language-lua">-- List all targets (tabs/pages) in the browser
+local targets = browser:call("Target.getTargets", {})
+for _, t in ipairs(targets.targetInfos) do
+    print(t.targetId, t.url)
+end</code></pre>
+
+                            <div id="browser-wait_event" class="method-block">
+                                <span class="method-name">browser:wait_event(event, [timeout_ms], [predicate])</span> <span class="method-async">async</span>
+                                <br><small>Waits for a browser-level CDP event. Accepts an optional timeout in milliseconds and an optional predicate function.</small>
+                            </div>
+                            <pre><code class="language-lua">-- Wait for a new target to be created (up to 5 seconds)
+local event = browser:wait_event("Target.targetCreated", 5000)
+print("New target: " .. event.params.targetInfo.targetId)</code></pre>
+
+                            <div id="browser-attach_session" class="method-block">
+                                <span class="method-name">browser:attach_session(target_id)</span> <span class="method-async">async</span>
+                                <br><small>Attaches to an existing target by ID and returns a session ID for scoped CDP communication.</small>
+                            </div>
+                            <pre><code class="language-lua">local result = browser:attach_session(target_id)
+local session_id = result.sessionId</code></pre>
+
+                            <div id="browser-call_session" class="method-block">
+                                <span class="method-name">browser:call_session(session_id, method, params)</span> <span class="method-async">async</span>
+                                <br><small>Sends a CDP command scoped to a specific session (target) obtained via <code>attach_session</code>.</small>
+                            </div>
+                            <pre><code class="language-lua">local result = browser:call_session(sid, "Page.navigate", {
+    url = "https://example.com"
+})</code></pre>
+
+                            <div id="browser-wait_session_event" class="method-block">
+                                <span class="method-name">browser:wait_session_event(session_id, event, [opts])</span> <span class="method-async">async</span>
+                                <br><small>Waits for a CDP event scoped to a specific session. <code>opts</code> can include <code>timeout_ms</code> and <code>predicate</code>.</small>
+                            </div>
+                            <pre><code class="language-lua">local ev = browser:wait_session_event(sid, "Page.loadEventFired", {
+    timeout_ms = 10000
+})</code></pre>
+
+                        </div>
+                    </div>
+
+                    <!-- Page API Reference -->
+                    <div id="page-api" class="box mb-5">
+                        <h2 class="title is-3">Page API (Native)</h2>
+                        <div class="content">
+                            <p>The <code>Page</code> object combines native transport methods with high-level Lua helpers. Returned by <code>browser:attach()</code> and <code>context:attach()</code>.</p>
+
+                            <h4 class="title is-5">Native Methods</h4>
+                            <p>Low-level CDP methods available directly on every page object.</p>
+
+                            <div id="page-call" class="method-block">
+                                <span class="method-name">page:call(method, params)</span> <span class="method-async">async</span>
+                                <br><small>Raw page-level CDP command. Sends a JSON-RPC message to the page's dedicated WebSocket.</small>
+                            </div>
+                            <pre><code class="language-lua">local result = page:call("Runtime.evaluate", {
+    expression = "document.title",
+    returnByValue = true
+})
+print(result.result.value)</code></pre>
+
+                            <div id="page-call_save" class="method-block">
+                                <span class="method-name">page:call_save(method, params, path)</span> <span class="method-async">async</span>
+                                <br><small>Like <code>call</code> but optimized for binary responses. Decodes the base64 <code>data</code> field and saves it to <code>path</code>. Returns the JSON result without the massive data string.</small>
+                            </div>
+                            <pre><code class="language-lua">-- Download a PDF and save to disk
+page:call_save("Page.printToPDF", {}, "/tmp/report.pdf")
+-- Result includes { saved_to = "/tmp/report.pdf" } instead of the raw data</code></pre>
+
+                            <div id="page-wait_event" class="method-block">
+                                <span class="method-name">page:wait_event(event, ...)</span> <span class="method-async">async</span>
+                                <br><small>Waits for a page-level CDP event. Accepts variadic arguments: timeout (number), predicate (function), or a table with <code>timeout_ms</code> and <code>predicate</code>.</small>
+                            </div>
+                            <pre><code class="language-lua">-- Wait for page load with default 30s timeout
+local ev = page:wait_event("Page.loadEventFired")
+
+-- With predicate and timeout
+local ev = page:wait_event("Network.responseReceived", 5000, function(params)
+    return params.response.status == 200
+end)</code></pre>
+
+                            <div id="page-close" class="method-block">
+                                <span class="method-name">page:close()</span> <span class="method-async">async</span>
+                                <br><small>Closes the specific tab/page. Does not affect the browser process or other tabs.</small>
+                            </div>
+                            <pre><code class="language-lua">page:close()</code></pre>
+
+                        </div>
+                    </div>
+
+                    <!-- Page API Helpers -->
+                    <div id="page-api-helpers" class="box mb-5">
+                        <h2 class="title is-3">Page API (Helpers)</h2>
+                        <div class="content">
+
+                            <p>Playwright-like convenience methods injected by <code>cdp.lua</code>. These are plain Lua functions — you can override or extend them on any page object.</p>
+
+                            <div id="page-open" class="method-block">
+                                <span class="method-name">page:open(url, [wait_until], [timeout_ms])</span> <span class="method-async">async</span>
+                                <br><small>Navigate to a URL. <code>wait_until</code> is a CDP event name (default <code>"Page.loadEventFired"</code>). Pass <code>false</code> to skip waiting. Returns <code>true</code> or <code>nil, error</code>.</small>
+                            </div>
+                            <pre><code class="language-lua">-- Default: wait for full load (30s timeout)
+local ok, err = page:open("https://example.com")
+
+-- Wait for DOM content instead of full load
+page:open("https://example.com", "Page.domContentEventFired")
+
+-- Custom timeout
+page:open("https://example.com", "Page.loadEventFired", 15000)
+
+-- Fire-and-forget: navigate without waiting
+page:open("https://example.com", false)</code></pre>
+
+                            <div id="page-wait_for_selector" class="method-block">
+                                <span class="method-name">page:wait_for_selector(selector, [opts])</span> <span class="method-async">async</span>
+                                <br><small>Poll the DOM until a CSS selector exists. Supports shadow DOM and iframe traversal. <code>opts</code> can be a number (timeout_ms) or a table.</small>
+                            </div>
+                            <table class="table is-fullwidth">
+                                <thead>
+                                    <tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td><code>timeout_ms</code></td><td>number</td><td><code>10000</code></td><td>Max wait time in milliseconds.</td></tr>
+                                    <tr><td><code>poll_ms</code></td><td>number</td><td><code>100</code></td><td>Poll interval in milliseconds.</td></tr>
+                                    <tr><td><code>visible</code></td><td>boolean</td><td><code>false</code></td><td>Only return <code>true</code> if the element is visible.</td></tr>
+                                    <tr><td><code>scroll</code></td><td>boolean</td><td><code>true</code></td><td>Scroll to the element or scroll down if not found.</td></tr>
+                                </tbody>
+                            </table>
+                            <pre><code class="language-lua">-- Simple timeout
+local found, info = page:wait_for_selector(".content", 5000)
+
+-- Full options
+local found, info = page:wait_for_selector(".product", {
+    timeout_ms = 15000,
+    poll_ms = 200,
+    visible = true,
+    scroll = true
+})
+if found then
+    print("Tag: " .. info.tagName)
+    print("Text: " .. info.text)
+end</code></pre>
+
+                            <div id="page-wait_for_url" class="method-block">
+                                <span class="method-name">page:wait_for_url(pattern, timeout_ms)</span> <span class="method-async">async</span>
+                                <br><small>Polls <code>location.href</code> until it matches the string <code>pattern</code>. Returns the URL or <code>nil, error</code>.</small>
+                            </div>
+                            <pre><code class="language-lua">-- Wait until the URL contains "/success"
+local url = page:wait_for_url("/success", 10000)
+if url then
+    print("Redirected to: " .. url)
+end</code></pre>
+
+                            <div id="page-wait_for_response" class="method-block">
+                                <span class="method-name">page:wait_for_response([predicate], [timeout_ms])</span> <span class="method-async">async</span>
+                                <br><small>Waits for <code>Network.responseReceived</code>. Optional <code>predicate</code> function receives the event params, return <code>true</code> when the desired response is found.</small>
+                            </div>
+                            <pre><code class="language-lua">-- Wait for any response
+local resp = page:wait_for_response(nil, 5000)
+
+-- Wait for a specific API response
+local resp = page:wait_for_response(function(params)
+    return params.response.url:find("/api/data") and params.response.status == 200
+end, 10000)</code></pre>
+
+                            <div id="page-wait_for_idle" class="method-block">
+                                <span class="method-name">page:wait_for_idle([timeout_ms], [quiet_ms])</span> <span class="method-async">async</span>
+                                <br><small>Waits until the network has been quiet for <code>quiet_ms</code> (default 500). Uses <code>performance.getEntriesByType("resource")</code> to check for in-flight requests.</small>
+                            </div>
+                            <pre><code class="language-lua">-- Wait up to 10s for the page to be idle
+page:open("https://example.com", false)
+page:wait_for_idle(10000, 500)</code></pre>
+
+                            <div id="page-scroll" class="method-block">
+                                <span class="method-name">page:scroll([opts])</span> <span class="method-async">async</span>
+                                <br><small>Scrolls the page with configurable behavior. Useful for infinite-scroll pages.</small>
+                            </div>
+                            <table class="table is-fullwidth">
+                                <thead>
+                                    <tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td><code>max_scrolls</code></td><td>number</td><td><code>20</code></td><td>Maximum number of scroll steps.</td></tr>
+                                    <tr><td><code>step</code></td><td>number</td><td><em>80% of viewport</em></td><td>Pixels to scroll per step.</td></tr>
+                                    <tr><td><code>delay_ms</code></td><td>number</td><td><code>250</code></td><td>Delay between scroll steps.</td></tr>
+                                    <tr><td><code>until_selector</code></td><td>string</td><td><em>none</em></td><td>Stop scrolling when this selector appears.</td></tr>
+                                    <tr><td><code>until_bottom</code></td><td>boolean</td><td><code>true</code></td><td>Stop when the bottom of the page is reached.</td></tr>
+                                </tbody>
+                            </table>
+                            <pre><code class="language-lua">-- Scroll until an element appears or bottom is hit
+page:scroll({
+    max_scrolls = 50,
+    delay_ms = 500,
+    until_selector = ".load-more"
+})</code></pre>
+
+                            <div id="page-content" class="method-block">
+                                <span class="method-name">page:content()</span> <span class="method-async">async</span>
+                                <br><small>Returns the full rendered HTML (<code>document.documentElement.outerHTML</code>).</small>
+                            </div>
+                            <pre><code class="language-lua">local html = page:content()
+print(string.sub(html, 1, 500)) -- First 500 chars</code></pre>
+
+                            <div id="page-evaluate" class="method-block">
+                                <span class="method-name">page:evaluate(js)</span> <span class="method-async">async</span>
+                                <br><small>Evaluates JavaScript in the page context and returns the result. Uses <code>Runtime.evaluate</code> with <code>returnByValue = true</code>.</small>
+                            </div>
+                            <pre><code class="language-lua">local title = page:evaluate("document.title")
+local count = page:evaluate("document.querySelectorAll('.item').length")
+local data = page:evaluate("JSON.stringify(window.__INITIAL_STATE__)")</code></pre>
+
+                            <div id="page-click" class="method-block">
+                                <span class="method-name">page:click(selector, [opts])</span> <span class="method-async">async</span>
+                                <br><small>Clicks a CSS selector. By default uses <code>el.click()</code> in JavaScript. <code>opts.real = true</code> dispatches real mouse events via <code>Input.dispatchMouseEvent</code>.</small>
+                            </div>
+                            <pre><code class="language-lua">-- Standard click (JS dispatch)
+page:click(".submit-btn")
+
+-- Real hardware-level mouse events (better anti-bot)
+page:click(".buy-now", { real = true })</code></pre>
+
+                            <div id="page-type" class="method-block">
+                                <span class="method-name">page:type(selector, text, [opts])</span> <span class="method-async">async</span>
+                                <br><small>Types text into a selector. By default sets <code>el.value</code> and dispatches input/change events. <code>opts.real = true</code> uses <code>Input.insertText</code> for true keystroke simulation.</small>
+                            </div>
+                            <pre><code class="language-lua">-- Standard input
+page:type("#search", "hello world")
+
+-- Real keystroke simulation
+page:type("#username", "admin", { real = true })</code></pre>
+
+                            <div id="page-screenshot" class="method-block">
+                                <span class="method-name">page:screenshot(path, [opts])</span> <span class="method-async">async</span>
+                                <br><small>Takes a screenshot and saves it to <code>path</code>. Returns the path on success.</small>
+                            </div>
+                            <table class="table is-fullwidth">
+                                <thead>
+                                    <tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td><code>format</code></td><td>string</td><td><code>"png"</code></td><td>Image format: <code>"png"</code> or <code>"jpeg"</code>.</td></tr>
+                                    <tr><td><code>quality</code></td><td>number</td><td><em>none</em></td><td>JPEG quality (1-100). Only applies to JPEG.</td></tr>
+                                    <tr><td><code>full_page</code></td><td>boolean</td><td><code>false</code></td><td>Capture the full page (not just viewport).</td></tr>
+                                    <tr><td><code>fullPage</code></td><td>boolean</td><td><code>false</code></td><td>Alias for <code>full_page</code>.</td></tr>
+                                    <tr><td><code>fromSurface</code></td><td>boolean</td><td><code>true</code></td><td>Capture from the surface (set to <code>false</code> for DPI-aware capture).</td></tr>
+                                </tbody>
+                            </table>
+                            <pre><code class="language-lua">-- Basic screenshot (PNG)
+page:screenshot("debug.png")
+
+-- Full-page JPEG
+page:screenshot("fullpage.jpg", {
+    format = "jpeg",
+    quality = 80,
+    full_page = true
+})</code></pre>
+
+                            <div id="page-set_extra_headers" class="method-block">
+                                <span class="method-name">page:set_extra_headers(headers)</span> <span class="method-async">async</span>
+                                <br><small>Sets extra HTTP headers for all subsequent requests via <code>Network.setExtraHTTPHeaders</code>.</small>
+                            </div>
+                            <pre><code class="language-lua">page:set_extra_headers({
+    ["Accept-Language"] = "en-US",
+    ["X-Custom"] = "my-value"
+})</code></pre>
+
+                            <div id="page-set_user_agent" class="method-block">
+                                <span class="method-name">page:set_user_agent(user_agent, [opts])</span> <span class="method-async">async</span>
+                                <br><small>Overrides the User-Agent via <code>Network.setUserAgentOverride</code>. <code>opts</code> can include <code>accept_language</code> and <code>platform</code>.</small>
+                            </div>
+                            <pre><code class="language-lua">page:set_user_agent("Mozilla/5.0 ...", {
+    accept_language = "en-US,en;q=0.9",
+    platform = "Linux"
+})</code></pre>
+
+                            <div id="page-cookies" class="method-block">
+                                <span class="method-name">page:cookies([urls])</span> <span class="method-async">async</span>
+                                <br><small>Returns all cookies. If <code>urls</code> is provided, filters cookies by the given URLs. Uses <code>Network.getAllCookies</code> (without URLs) or <code>Network.getCookies</code> (with URLs).</small>
+                            </div>
+                            <pre><code class="language-lua">-- All cookies
+local all = page:cookies()
+
+-- Cookies for specific URLs
+local filtered = page:cookies({ "https://example.com" })
+for _, c in ipairs(filtered) do
+    print(c.name, c.value)
+end</code></pre>
+
+                            <div id="page-set_cookies" class="method-block">
+                                <span class="method-name">page:set_cookies(cookies)</span> <span class="method-async">async</span>
+                                <br><small>Sets cookies via <code>Network.setCookies</code>. Each cookie should have <code>name</code>, <code>value</code>, and optionally <code>domain</code>, <code>path</code>, etc.</small>
+                            </div>
+                            <pre><code class="language-lua">page:set_cookies({
+    { name = "session", value = "abc123", domain = "example.com", path = "/" },
+    { name = "theme", value = "dark", domain = "example.com" }
+})</code></pre>
+
+                            <div id="page-block_resources" class="method-block">
+                                <span class="method-name">page:block_resources(types)</span> <span class="method-async">async</span>
+                                <br><small>Blocks network requests matching resource types or URL patterns. Accepts type names like <code>"image"</code>, <code>"font"</code>, <code>"media"</code>, <code>"stylesheet"</code>, <code>"script"</code>, or custom URL patterns.</small>
+                            </div>
+                            <pre><code class="language-lua">-- Block images and fonts
+page:block_resources({ "image", "font" })
+
+-- Block specific URL patterns
+page:block_resources({ "*.analytics.js", "*.tracking.com/*" })</code></pre>
+
+                        </div>
+                    </div>
+
+                    <!-- Specialized Browsers & More (merged into one box) -->
+                    <div id="specialized" class="box mb-5">
+                        <h2 class="title is-3">Specialized Browsers &amp; Advanced Patterns</h2>
+                        <div class="content">
+
+                            <p>While standard Chromium-based browsers are the most compatible, they are resource-intensive. A single Chrome instance can consume hundreds of megabytes of RAM. For a lighter approach, consider these specialized alternatives designed for scraping and automation. They speak the same CDP protocol.</p>
+
+                            <h4 class="title is-5">Lightpanda</h4>
+                            <p>A high-performance, lightweight browser written in Zig.</p>
+                            <ol>
+                                <li><strong>Launch the server:</strong>
+                                    <pre><code class="language-bash">lightpanda serve --port 9222</code></pre>
+                                </li>
+                                <li><strong>Connect in Lua:</strong>
+                                    <pre><code class="language-lua">local browser = cdp.connect("ws://127.0.0.1:9222")</code></pre>
+                                </li>
+                            </ol>
+
+                            <h4 class="title is-5 mt-5">Obscura</h4>
+                            <p>A headless browser built for AI agents and anti-detection.</p>
+                            <ol>
+                                <li><strong>Launch the server:</strong>
+                                    <pre><code class="language-bash">obscura serve --port 9222 --stealth</code></pre>
+                                </li>
+                                <li><strong>Connect in Lua:</strong>
+                                    <pre><code class="language-lua">local browser = cdp.connect("ws://127.0.0.1:9222/devtools/browser")</code></pre>
+                                </li>
+                            </ol>
+
+                            <h4 class="title is-5 mt-5">Compatibility Note</h4>
+                            <p>These browsers implement CDP but may not support every method. Based on our assessment:</p>
+                            <table class="table is-fullwidth">
+                                <thead>
+                                    <tr><th>Helper</th><th>Lightpanda</th><th>Obscura</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td><code>page:screenshot()</code></td><td><span class="compat-warn">Returns a fake placeholder</span></td><td><span class="compat-no">❌ Not supported</span></td></tr>
+                                    <tr><td><code>page:block_resources()</code></td><td><span class="compat-no">❌ Not supported</span></td><td><span class="compat-no">❌ Not supported</span></td></tr>
+                                    <tr><td><code>page:cookies()</code> (no args)</td><td><span class="compat-yes">✅ Works</span></td><td><span class="compat-no">❌ Use <code>page:cookies({url})</code></span></td></tr>
+                                    <tr><td><code>page:type(text, {real=true})</code></td><td><span class="compat-yes">✅ Works</span></td><td><span class="compat-no">❌ Not supported</span></td></tr>
+                                </tbody>
+                            </table>
+                            <div class="notification is-warning">
+                                There may be other gaps we haven't caught. Test your hooks thoroughly and fall back to a standard browser if something doesn't work.
+                            </div>
+
+                            <h4 class="title is-5 mt-5">Hybrid Human-in-the-Loop</h4>
+                            <p>For sites with aggressive bot detection (Cloudflare, CAPTCHAs, etc.), you can switch from a fast headless browser to a visible Chrome window when a block is detected.</p>
+                            <ol>
+                                <li><strong>Normal Mode:</strong> Scrape headlessly for maximum speed.</li>
+                                <li><strong>Detection:</strong> In <code>override_fetch</code>, check for a "block" selector (e.g., <code>#captcha-container</code>).</li>
+                                <li><strong>Transition:</strong> Close the headless browser and launch a visible Chrome instance using the <strong>same</strong> <code>user_data_dir</code>.</li>
+                                <li><strong>Notification:</strong> Use <code>notify()</code> to alert a human operator.</li>
+                                <li><strong>Intervention:</strong> Wait in a <code>while</code> loop, polling for a "success" selector.</li>
+                                <li><strong>Handback:</strong> Capture the HTML, close the visual browser, and return to headless mode.</li>
+                            </ol>
+                            <p>See <a href="../examples/hybrid-recovery/hooks.lua" style="color:var(--accent2)">examples/hybrid-recovery/hooks.lua</a> for a complete implementation.</p>
+
+                        </div>
+                    </div>
+
+                </div><!-- /column -->
+            </div><!-- /columns -->
+        </div>
+    </section>
+
+    <footer class="footer py-6">
+        <div class="content has-text-centered">
+            <p>SpyWeb — Zero-dependency web monitoring engine &bull; <a href="https://github.com/spyweb-rs/spyweb"
+                    style="color:var(--accent2)">GitHub</a></p>
+        </div>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
+</body>
+
+</html>
