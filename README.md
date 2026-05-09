@@ -47,7 +47,7 @@ keywords = ["rust", "linux", "open source"]
 | **Concurrency** | Async-first engine; slow proxies or large jobs never block others. |
 | **Fault Tolerant** | Lua hook errors are caught and logged without stopping the job, ensuring 100% uptime. |
 | **Hybrid Engine** | Falls back to a spec-compliant DOM parser for broken or complex HTML. |
-| **CDP Automation** | Launch or connect to any Chromium browser for JS rendering, clicking, waiting, screenshots — no bundled browser needed. |
+| **CDP Automation** | Launch or connect to any Chromium browser for JS rendering, clicking, waiting, screenshots. |
 | **Pro Alerting** | Integrated desktop notifications and customizable webhooks for real-time monitoring. |
 
 ## Install & Run

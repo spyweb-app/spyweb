@@ -84,6 +84,16 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Check if pre-release
+        id: check_prerelease
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create Tagged Release
         uses: softprops/action-gh-release@v2
         with:
@@ -91,9 +101,10 @@ jobs:
           files: release-assets/spyweb-v*.*
           generate_release_notes: true
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.check_prerelease.outputs.is_prerelease }}
 
       - name: Create/Update Latest Release
+        if: steps.check_prerelease.outputs.is_prerelease != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
