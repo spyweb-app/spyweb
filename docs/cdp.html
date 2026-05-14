@@ -579,7 +579,7 @@ end)</code></pre>
                         <h2 class="title is-3">Page API (Helpers)</h2>
                         <div class="content">
 
-                            <p>Playwright-like convenience methods injected by <code>cdp.lua</code>. These are plain Lua functions — you can override or extend them on any page object.</p>
+                            <p>Higher-level CDP abstraction methods injected by <code>cdp.lua</code> for convenience. These are plain Lua functions — you can override or extend them on any page object.</p>
 
                             <div id="page-open" class="method-block">
                                 <span class="method-name">page:open(url, [wait_until], [timeout_ms])</span> <span class="method-async">async</span>
@@ -799,7 +799,7 @@ page:block_resources({ "*.analytics.js", "*.tracking.com/*" })</code></pre>
                         <h2 class="title is-3">Specialized Browsers &amp; Advanced Patterns</h2>
                         <div class="content">
 
-                            <p>While standard Chromium-based browsers are the most compatible, they are resource-intensive. A single Chrome instance can consume hundreds of megabytes of RAM. For a lighter approach, consider these specialized alternatives designed for scraping and automation. They speak the same CDP protocol.</p>
+                            <p>While standard Chromium-based browsers are the most compatible, they are resource-intensive. A single Chrome instance can consume hundreds of megabytes of RAM, and its profile directory (<cdoe>user_data_dir</cdoe>) often balloons to 150MB+ immediately upon launch, For a lighter approach, consider these specialized alternatives designed for scraping and automation. They speak the same CDP protocol.</p>
 
                             <h4 class="title is-5">Lightpanda</h4>
                             <p>A high-performance, lightweight browser written in Zig.</p>

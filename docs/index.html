@@ -328,6 +328,8 @@
                                 <li><a href="#dump">dump</a></li>
                                 <li><a href="#notify">notify</a></li>
                                 <li><a href="#log">log</a></li>
+                                <li><a href="#fs_append">fs_append</a></li>
+                                <li><a href="#fs_overwrite">fs_overwrite</a></li>
                                 <li><a href="#env_get">env_get</a></li>
                                 <li><a href="#selector_matches">selector_matches</a></li>
                                 <li><a href="#last_fetch">last_fetch</a></li>
@@ -1292,6 +1294,30 @@ end</code></pre>
     return items
 end</code></pre>
 
+                            <h3 class="title is-4" id="fs_append"><code>fs_append(filename, content)</code></h3>
+                            <p>Appends raw content to a file in the job's directory. All writes are non-blocking and safe.
+                                Files feature <strong>automatic 10MB rotation</strong> with timestamped filenames
+                                (e.g., <code>data.20260514-143005.csv</code>), keeping a history of 5 files.</p>
+                            <pre><code class="language-lua">function after_extract(items)
+    for _, item in ipairs(items) do
+        local row = string.format("%s,%s\n", item.fields.title, item.fields.price)
+        fs_append("data.csv", row)
+    end
+    return items
+end</code></pre>
+
+                            <h3 class="title is-4" id="fs_overwrite"><code>fs_overwrite(filename, content)</code></h3>
+                            <p>Replaces the entire content of a file in the job's directory. Ideal for keeping a "latest" 
+                                snapshot of your scraping results.</p>
+                            <pre><code class="language-lua">function before_store(items)
+    local state = json_encode({ 
+        last_run = os.date(), 
+        count = #items 
+    })
+    fs_overwrite("latest_run.json", state)
+    return items
+end</code></pre>
+
                             <h3 class="title is-4" id="env_get"><code>env_get(key)</code></h3>
                             <p>Retrieves a read-only environment variable from the host system. For security, SpyWeb
                                 automatically prepends the <code>SPYWEB_</code> prefix to any key provided. This
@@ -1319,6 +1345,17 @@ end</code></pre>
                                 all subsequent hooks.</p>
                             <pre><code class="language-lua">function after_extract(items)
     print("Found " .. #items .. " items (out of " .. selector_matches .. " selector hits)")
+    return items
+end</code></pre>
+
+                            <h3 class="title is-4" id="last_fetch"><code>last_fetch</code> (Global)</h3>
+                            <p>A read-only table representing the result of the last network fetch. It contains
+                                <code>ok</code> (boolean), <code>status</code> (number), and <code>response</code> (table with <code>body</code> and <code>headers</code>).
+                                Useful for inspecting raw responses in later hook stages.</p>
+                            <pre><code class="language-lua">function after_extract(items)
+    if last_fetch and last_fetch.status == 200 then
+        log("Fetch was successful")
+    end
     return items
 end</code></pre>
 
@@ -2002,7 +2039,7 @@ end</code></pre>
                                             and
                                             <code>require</code> for code sharing. Modules are searched in the job's
                                             directory first, then in the global <code>shared/</code> folder. The
-                                            <code>io</code> library is disabled; use <code>log()</code> instead.
+                                            <code>io</code> library is disabled; use <code>fs_append()</code> or <code>log()</code> instead.
                                         </td>
                                     </tr>
                                     <tr>

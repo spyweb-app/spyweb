@@ -226,7 +226,7 @@ The `Page` object combines native transport methods with high-level Lua helpers.
 - `page:close()`: (Async) Closes the specific tab.
 
 ### High-Level Helpers (Lua)
-Injected via `cdp.lua` for a Playwright-like experience.
+Injected via `cdp.lua` to provide a higher-level CDP abstraction.
 
 - `page:open(url, [wait_until], [timeout_ms])`: Returns `true` or `nil, error`.
 - `page:wait_for_selector(selector, [opts])`: Returns `true, element_info` or `nil, error`. `opts` can be timeout or `{timeout, poll_ms, visible, scroll}`.

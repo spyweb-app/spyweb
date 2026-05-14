@@ -5,9 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.0] - UNRELEASED
+## [1.2.0] - 2026-05-15
 
 ### Added
+- **Safe Lua File I/O:** Centralized, non-blocking disk operations for Lua hooks. All writes pass through a single-threaded background worker via an MPSC channel to prevent race conditions and disk contention.
+- **Lua API:** New `fs_append(filename, content)` and `fs_overwrite(filename, content)` functions for custom data exports.
+- **Auto-Rotation:** Implemented timestamp-based file rotation (e.g., `data.20260514-143005.csv`). Files feature a hard 10MB limit and maintain a history of 5 files to prevent disk exhaustion.
+- **IO Security:** Strict path validation including absolute path rejection, directory traversal prevention (`../`), and an extension allowlist (.csv, .json, .jsonl, .txt, .log). Operations are confined to the job's directory.
+- **Refactored Logging:** The `log()` function now uses the new safe IO backend, gaining automatic rotation and high-performance async behavior.
 - **CDP Browser Automation:** Native Chrome DevTools Protocol client — launch or connect to any Chromium-based browser (Chrome, Edge, Brave, Lightpanda, Obscura) from Lua hooks. Full page control: navigate, click, wait for selectors, inject JavaScript, capture screenshots, manage cookies, intercept network requests.
 - **Lua API:** New global `cdp` table with `cdp.launch({...})` and `cdp.connect("ws://...")` for browser lifecycle management.
 - **Lua API:** `browser:attach()` — creates a new page/tab with its own WebSocket connection.

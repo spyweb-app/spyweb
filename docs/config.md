@@ -163,4 +163,13 @@ Common use cases for hooks:
 - **`override_extract`**: Parse JSON/XML APIs instead of HTML.
 - **`filter_item`**: Apply complex custom filtering logic per item.
 
-For a full reference of all 9 hook stages and built-in Lua functions like `dump()`, `http_get()`, and `store_set()`, see the [Master Guide](index.html).
+### Safe File I/O
+SpyWeb provides safe, non-blocking file operations for hooks. These operations are strictly scoped to the job's directory and feature automatic 10MB rotation with a 5-file history.
+
+- **`log(message)`**: Appends a timestamped line to `hook.log`.
+- **`fs_append(filename, content)`**: Appends raw content to a file. Useful for CSV/JSONL exports.
+- **`fs_overwrite(filename, content)`**: Replaces a file's content. Ideal for saving `latest_state.json`.
+
+> **Security Note:** Only `.csv`, `.json`, `.jsonl`, `.txt`, and `.log` extensions are allowed. Absolute paths and directory traversal (`../`) are strictly prohibited.
+
+For a full reference of all 9 hook stages and built-in Lua functions like `dump()`, `http_get()`, and `store_set()`, see the [Master Guide](https://docs.spyweb.app/).

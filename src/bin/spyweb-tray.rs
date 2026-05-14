@@ -26,6 +26,8 @@ impl winit::application::ApplicationHandler for App {
 
         if let Ok(event) = MenuEvent::receiver().try_recv() {
             if event.id == self.quit_id {
+                spyweb::services::io::shutdown();
+                std::thread::sleep(std::time::Duration::from_millis(500));
                 event_loop.exit();
             } else if event.id == self.open_id {
                 let url = format!("http://{}", spyweb::config::get_base_url());

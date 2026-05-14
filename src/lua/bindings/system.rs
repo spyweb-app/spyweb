@@ -22,26 +22,69 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
 
     if let Some(dir) = job_dir {
         let log_dir = dir.clone();
-        let log_fn = lua.create_async_function(move |_, msg: String| {
-            let path = log_dir.join("hook.log");
-            async move {
-                smol::unblock(move || {
-                    let mut f = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(path)
-                        .map_err(|e| mlua::Error::runtime(format!("Failed to open log file: {e}")))?;
+        lua.globals().set(
+            "log",
+            lua.create_async_function(move |_, msg: String| {
+                let path = log_dir.join("hook.log");
+                async move {
+                    let task = crate::services::io::IoTask {
+                        path,
+                        content: msg.into_bytes(),
+                        op: crate::services::io::IoOp::Append,
+                        add_timestamp: true,
+                    };
+                    crate::services::io::send_task(task)
+                        .await
+                        .map_err(|e| mlua::Error::runtime(format!("log failed: {e}")))
+                }
+            })?,
+        )?;
 
-                    use std::io::Write;
-                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-                    writeln!(f, "[{}]: {}", timestamp, msg)
-                        .map_err(|e| mlua::Error::runtime(format!("Failed to write to log file: {e}")))?;
-                    Ok(())
-                })
-                .await
-            }
-        })?;
-        lua.globals().set("log", log_fn)?;
+        let fs_dir = dir.clone();
+        lua.globals().set(
+            "fs_append",
+            lua.create_async_function(move |_, (path_str, content): (String, String)| {
+                let fs_dir = fs_dir.clone();
+                async move {
+                    if std::path::Path::new(&path_str).is_absolute() {
+                        return Err(mlua::Error::runtime("Absolute paths are not allowed"));
+                    }
+                    let path = fs_dir.join(path_str);
+                    let task = crate::services::io::IoTask {
+                        path,
+                        content: content.into_bytes(),
+                        op: crate::services::io::IoOp::Append,
+                        add_timestamp: false,
+                    };
+                    crate::services::io::send_task(task)
+                        .await
+                        .map_err(|e| mlua::Error::runtime(format!("fs_append failed: {e}")))
+                }
+            })?,
+        )?;
+
+        let fs_overwrite_dir = dir.clone();
+        lua.globals().set(
+            "fs_overwrite",
+            lua.create_async_function(move |_, (path_str, content): (String, String)| {
+                let fs_overwrite_dir = fs_overwrite_dir.clone();
+                async move {
+                    if std::path::Path::new(&path_str).is_absolute() {
+                        return Err(mlua::Error::runtime("Absolute paths are not allowed"));
+                    }
+                    let path = fs_overwrite_dir.join(path_str);
+                    let task = crate::services::io::IoTask {
+                        path,
+                        content: content.into_bytes(),
+                        op: crate::services::io::IoOp::Overwrite,
+                        add_timestamp: false,
+                    };
+                    crate::services::io::send_task(task)
+                        .await
+                        .map_err(|e| mlua::Error::runtime(format!("fs_overwrite failed: {e}")))
+                }
+            })?,
+        )?;
 
         #[cfg(feature = "luau")]
         {
