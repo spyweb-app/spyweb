@@ -49,10 +49,11 @@ jobs:
           # 2. Build Versioned Assets
           bash ./release.sh
           
-          # 3. Create Generic Copies (for 'latest' release)
+          # 3. Create Generic Copies (for 'latest' and 'beta' releases)
+          # We remove the '-vVERSION' part to make them generic
           for f in spyweb-v*.*; do
             [ -e "$f" ] || continue
-            new_f=$(echo "$f" | sed -E 's/-v[^-]+//')
+            new_f=$(echo "$f" | sed "s/-v$VERSION//")
             echo "Copying $f to $new_f"
             cp "$f" "$new_f"
           done
@@ -95,6 +96,7 @@ jobs:
           fi
 
       - name: Create Tagged Release
+        if: steps.check_prerelease.outputs.is_prerelease != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
@@ -114,9 +116,6 @@ jobs:
             release-assets/spyweb-linux-*.zip
             release-assets/spyweb-macos-*.zip
             release-assets/spyweb-windows-*.zip
-            release-assets/spyweb-linux-*.tar.gz
-            release-assets/spyweb-macos-*.tar.gz
-            release-assets/spyweb-windows-*.tar.gz
           draft: false
           prerelease: false
           make_latest: true
@@ -132,9 +131,6 @@ jobs:
             release-assets/spyweb-linux-*.zip
             release-assets/spyweb-macos-*.zip
             release-assets/spyweb-windows-*.zip
-            release-assets/spyweb-linux-*.tar.gz
-            release-assets/spyweb-macos-*.tar.gz
-            release-assets/spyweb-windows-*.tar.gz
           draft: false
           prerelease: true
           make_latest: false
