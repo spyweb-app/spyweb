@@ -52,7 +52,7 @@ jobs:
           # 3. Create Generic Copies (for 'latest' release)
           for f in spyweb-v*.*; do
             [ -e "$f" ] || continue
-            new_f=$(echo "$f" | sed -E 's/-v[0-9.]+//')
+            new_f=$(echo "$f" | sed -E 's/-v[^-]+//')
             echo "Copying $f to $new_f"
             cp "$f" "$new_f"
           done
@@ -120,3 +120,21 @@ jobs:
           draft: false
           prerelease: false
           make_latest: true
+
+      - name: Create/Update Beta Release
+        if: steps.check_prerelease.outputs.is_prerelease == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: beta
+          name: "Beta Release"
+          body: "Always points to the most recent beta build of SpyWeb."
+          files: |
+            release-assets/spyweb-linux-*.zip
+            release-assets/spyweb-macos-*.zip
+            release-assets/spyweb-windows-*.zip
+            release-assets/spyweb-linux-*.tar.gz
+            release-assets/spyweb-macos-*.tar.gz
+            release-assets/spyweb-windows-*.tar.gz
+          draft: false
+          prerelease: true
+          make_latest: false
