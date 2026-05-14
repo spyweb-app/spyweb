@@ -91,120 +91,141 @@ fn test_http_bindings() {
 fn test_lua_storage_bindings_are_exposed_and_work() {
     let tdb = TestDb::new("test_lua_storage_bindings");
 
-    let lua_job_one = Lua::new();
-    register(&lua_job_one, tdb.db(), "job_one").unwrap();
+    smol::block_on(async {
+        let lua_job_one = Lua::new();
+        register(&lua_job_one, tdb.db(), "job_one").unwrap();
 
-    let lua_job_two = Lua::new();
-    register(&lua_job_two, tdb.db(), "job_two").unwrap();
+        let lua_job_two = Lua::new();
+        register(&lua_job_two, tdb.db(), "job_two").unwrap();
 
-    for name in [
-        "store_set",
-        "store_get",
-        "store_delete",
-        "global_store_set",
-        "global_store_get",
-        "global_store_delete",
-        "global_store_incr",
-    ] {
-        let func = lua_job_one
-            .globals()
-            .get::<Option<mlua::Function>>(name)
+        for name in [
+            "store_set",
+            "store_get",
+            "store_delete",
+            "global_store_set",
+            "global_store_get",
+            "global_store_delete",
+            "global_store_incr",
+        ] {
+            let func = lua_job_one
+                .globals()
+                .get::<Option<mlua::Function>>(name)
+                .unwrap();
+            assert!(
+                func.is_some(),
+                "expected Lua global {name} to be registered"
+            );
+        }
+
+        let missing_job_value: Option<String> = lua_job_one
+            .load(r#"return store_get("page")"#)
+            .eval_async()
+            .await
             .unwrap();
-        assert!(
-            func.is_some(),
-            "expected Lua global {name} to be registered"
-        );
-    }
+        assert_eq!(missing_job_value, None);
 
-    let missing_job_value: Option<String> = lua_job_one
-        .load(r#"return store_get("page")"#)
-        .eval()
-        .unwrap();
-    assert_eq!(missing_job_value, None);
+        let missing_global_value: Option<String> = lua_job_one
+            .load(r#"return global_store_get("shared_counter")"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(missing_global_value, None);
 
-    let missing_global_value: Option<String> = lua_job_one
-        .load(r#"return global_store_get("shared_counter")"#)
-        .eval()
-        .unwrap();
-    assert_eq!(missing_global_value, None);
+        lua_job_one
+            .load(
+                r#"
+                store_set("page", "3")
+                global_store_set("shared_counter", "10")
+            "#,
+            )
+            .exec_async()
+            .await
+            .unwrap();
 
-    lua_job_one
-        .load(
-            r#"
-            store_set("page", "3")
-            global_store_set("shared_counter", "10")
-        "#,
-        )
-        .exec()
-        .unwrap();
+        let job_one_page: Option<String> = lua_job_one
+            .load(r#"return store_get("page")"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(job_one_page.as_deref(), Some("3"));
 
-    let job_one_page: Option<String> = lua_job_one
-        .load(r#"return store_get("page")"#)
-        .eval()
-        .unwrap();
-    assert_eq!(job_one_page.as_deref(), Some("3"));
+        let job_two_page: Option<String> = lua_job_two
+            .load(r#"return store_get("page")"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(job_two_page, None);
 
-    let job_two_page: Option<String> = lua_job_two
-        .load(r#"return store_get("page")"#)
-        .eval()
-        .unwrap();
-    assert_eq!(job_two_page, None);
+        let shared_from_job_two: Option<String> = lua_job_two
+            .load(r#"return global_store_get("shared_counter")"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(shared_from_job_two.as_deref(), Some("10"));
 
-    let shared_from_job_two: Option<String> = lua_job_two
-        .load(r#"return global_store_get("shared_counter")"#)
-        .eval()
-        .unwrap();
-    assert_eq!(shared_from_job_two.as_deref(), Some("10"));
+        lua_job_one
+            .load(r#"store_delete("page")"#)
+            .exec_async()
+            .await
+            .unwrap();
+        lua_job_two
+            .load(r#"global_store_delete("shared_counter")"#)
+            .exec_async()
+            .await
+            .unwrap();
 
-    lua_job_one.load(r#"store_delete("page")"#).exec().unwrap();
-    lua_job_two
-        .load(r#"global_store_delete("shared_counter")"#)
-        .exec()
-        .unwrap();
+        let deleted_job_value: Option<String> = lua_job_one
+            .load(r#"return store_get("page")"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(deleted_job_value, None);
 
-    let deleted_job_value: Option<String> = lua_job_one
-        .load(r#"return store_get("page")"#)
-        .eval()
-        .unwrap();
-    assert_eq!(deleted_job_value, None);
-
-    let deleted_global_value: Option<String> = lua_job_one
-        .load(r#"return global_store_get("shared_counter")"#)
-        .eval()
-        .unwrap();
-    assert_eq!(deleted_global_value, None);
+        let deleted_global_value: Option<String> = lua_job_one
+            .load(r#"return global_store_get("shared_counter")"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(deleted_global_value, None);
+    });
 }
 
 #[test]
 fn test_global_store_incr() {
     let tdb = TestDb::new("test_global_store_incr");
 
-    let lua = Lua::new();
-    register(&lua, tdb.db(), "test_job").unwrap();
+    smol::block_on(async {
+        let lua = Lua::new();
+        register(&lua, tdb.db(), "test_job").unwrap();
 
-    let initial: i64 = lua
-        .load(r#"return global_store_incr("incr_key", 0, 1)"#)
-        .eval()
-        .unwrap();
-    assert_eq!(initial, 1);
+        let initial: i64 = lua
+            .load(r#"return global_store_incr("incr_key", 0, 1)"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(initial, 1);
 
-    let incremented: i64 = lua
-        .load(r#"return global_store_incr("incr_key", 0, 5)"#)
-        .eval()
-        .unwrap();
-    assert_eq!(incremented, 6);
+        let incremented: i64 = lua
+            .load(r#"return global_store_incr("incr_key", 0, 5)"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(incremented, 6);
 
-    let decremented: i64 = lua
-        .load(r#"return global_store_incr("incr_key", 0, -3)"#)
-        .eval()
-        .unwrap();
-    assert_eq!(decremented, 3);
+        let decremented: i64 = lua
+            .load(r#"return global_store_incr("incr_key", 0, -3)"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(decremented, 3);
 
-    let uses_default: i64 = lua
-        .load(r#"return global_store_incr("nonexistent_key", 100, 10)"#)
-        .eval()
-        .unwrap();
-    assert_eq!(uses_default, 110);
+        let uses_default: i64 = lua
+            .load(r#"return global_store_incr("nonexistent_key", 100, 10)"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(uses_default, 110);
+    });
 }
 
 #[test]

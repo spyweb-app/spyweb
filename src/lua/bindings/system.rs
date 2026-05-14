@@ -11,28 +11,35 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
 
     lua.globals().set(
         "notify",
-        lua.create_function(|_, (title, body, timeout): (String, String, Option<u32>)| {
-            notifier::send_notification(&title, &body, timeout.unwrap_or(5000))
-                .map_err(|e| mlua::Error::runtime(format!("notify failed: {e}")))?;
-            Ok(())
+        lua.create_async_function(|_, (title, body, timeout): (String, String, Option<u32>)| async move {
+            smol::unblock(move || {
+                notifier::send_notification(&title, &body, timeout.unwrap_or(5000))
+                    .map_err(|e| mlua::Error::runtime(format!("notify failed: {e}")))
+            })
+            .await
         })?,
     )?;
 
     if let Some(dir) = job_dir {
         let log_dir = dir.clone();
-        let log_fn = lua.create_function(move |_, msg: String| {
+        let log_fn = lua.create_async_function(move |_, msg: String| {
             let path = log_dir.join("hook.log");
-            let mut f = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|e| mlua::Error::runtime(format!("Failed to open log file: {e}")))?;
+            async move {
+                smol::unblock(move || {
+                    let mut f = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                        .map_err(|e| mlua::Error::runtime(format!("Failed to open log file: {e}")))?;
 
-            use std::io::Write;
-            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-            writeln!(f, "[{}]: {}", timestamp, msg)
-                .map_err(|e| mlua::Error::runtime(format!("Failed to write to log file: {e}")))?;
-            Ok(())
+                    use std::io::Write;
+                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+                    writeln!(f, "[{}]: {}", timestamp, msg)
+                        .map_err(|e| mlua::Error::runtime(format!("Failed to write to log file: {e}")))?;
+                    Ok(())
+                })
+                .await
+            }
         })?;
         lua.globals().set("log", log_fn)?;
 

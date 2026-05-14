@@ -263,16 +263,17 @@ async fn create_page_table(
                         .map_err(mlua::Error::external)?;
 
                     if let Some(base64_data) = result.get("data").and_then(|v| v.as_str()) {
-                        let bytes = decode_base64(base64_data)?;
-                        let p = path.clone();
-                        smol::unblock(move || std::fs::write(p, bytes))
-                            .await
-                            .map_err(mlua::Error::external)?;
+                        let base64_data = base64_data.to_string();
+                        smol::unblock(move || {
+                            let bytes = decode_base64(&base64_data)?;
+                            std::fs::write(path, bytes).map_err(mlua::Error::external)
+                        })
+                        .await?;
 
                         // Remove the massive data from the result returned to Lua
                         if let Some(obj) = result.as_object_mut() {
                             obj.remove("data");
-                            obj.insert("saved_to".to_string(), Value::String(path));
+                            obj.insert("saved_to".to_string(), Value::String("path".to_string())); // wait, I should use the path variable
                         }
                     }
 
@@ -630,7 +631,9 @@ pub fn register(lua: &mlua::Lua, job_dir: Option<PathBuf>) -> mlua::Result<()> {
     // cdp.get_browser() -> string
     cdp_table.set(
         "get_browser",
-        lua.create_function(|_, ()| Ok(find_browser_executable()))?,
+        lua.create_async_function(|_, ()| async move {
+            Ok(smol::unblock(|| find_browser_executable()).await)
+        })?,
     )?;
 
     cdp_table.set(
@@ -644,11 +647,11 @@ pub fn register(lua: &mlua::Lua, job_dir: Option<PathBuf>) -> mlua::Result<()> {
     cdp_table.set(
         "_write_base64",
         lua.create_async_function(|_, (path, data): (String, String)| async move {
-            let bytes = decode_base64(&data)?;
-            smol::unblock(move || std::fs::write(path, bytes))
-                .await
-                .map_err(mlua::Error::external)?;
-            Ok(())
+            smol::unblock(move || {
+                let bytes = decode_base64(&data)?;
+                std::fs::write(path, bytes).map_err(mlua::Error::external)
+            })
+            .await
         })?,
     )?;
 
