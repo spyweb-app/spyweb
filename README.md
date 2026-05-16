@@ -12,9 +12,8 @@
 <p align="center">
   📖 <a href="https://docs.spyweb.app/"><b>Master Guide</b></a> |
   ⚙️ <a href="docs/config.md">Config</a> |
-  📜 <a href="https://docs.spyweb.app/#hooks">Lua API</a> |
   🛠️ <a href="docs/api.md">REST API</a> |
-  🌐 <a href="docs/cdp.md">CDP Browser API</a> |
+  🌐 <a href="docs/cdp.md">Browser Automation</a> |
   🚀 <a href="docs/vps-deployment.md">VPS Setup</a> |
   📂 <a href="examples/">Examples</a> |
   🏗️ <a href="CONTRIBUTING.md">Build from Source</a>
@@ -54,7 +53,7 @@ keywords = ["rust", "linux", "open source"]
 Download the latest release ZIP from the [Releases page](https://github.com/spyweb-rs/spyweb/releases) and extract it.
 
 --- OR USE THE COMMAND BELOW ---
-
+>stable version only, beta is available for download on [beta release](https://github.com/spyweb-app/spyweb/releases/tag/beta)
 ```bash
 # Linux
 curl -L -o spyweb.zip https://dl.spyweb.app/linux && tar -xf spyweb.zip && rm spyweb.zip
@@ -170,26 +169,26 @@ function before_fetch(request)
     return request
 end
 ```
->
-> Check the [Examples](examples/) for more Lua hook examples.
->
+
+Check the [Examples](examples/) for more Lua hook examples.
+
 ---
-> 
+ 
 > **JavaScript Rendering with CDP:** SpyWeb does not bundle a 300MB browser. Instead, the built-in [CDP module](docs/cdp.md) launches whatever Chromium-based browser you already have installed (Chrome, Edge, Brave, Lightpanda, etc.) and controls it via the Chrome DevTools Protocol — all from your Lua hooks. Zero downloads, zero config, full JS execution.
-> 
-> ```lua
-> function override_fetch(request)
->     local browser = cdp.launch({})
->     local page = browser:attach()
->     page:open(request.url)
->     page:wait_for_selector(".dynamic-content", 10000)
->     local html = page:content()
->     browser:close()
->     return { status = 200, body = html, url = request.url }
-> end
-> ```
-> 
-> See the [CDP Documentation](docs/cdp.md) for the full API — browser management, page navigation, click/wait/inject, cookies, screenshots, and a complete production hybrid-recovery pattern that falls back to a visual browser on bot detection.
+ 
+```lua
+function override_fetch(request)
+    local browser = cdp.launch({})
+    local page = browser:attach()
+    page:open(request.url)
+    page:wait_for_selector(".dynamic-content", 10000)
+    local html = page:content()
+    browser:close()
+    return { status = 200, body = html, url = request.url }
+end
+```
+ 
+ See the [CDP Documentation](docs/cdp.md) for the full API — browser management, page navigation, click/wait/inject, cookies, screenshots, and a complete production hybrid-recovery pattern that falls back to a visual browser on bot detection.
 
 ---
 

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.0] - 2026-05-15
+## [1.2.0-beta] - 2026-05-16
 
 ### Added
 - **Safe Lua File I/O:** Centralized, non-blocking disk operations for Lua hooks. All writes pass through a single-threaded background worker via an MPSC channel to prevent race conditions and disk contention.
@@ -13,9 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Auto-Rotation:** Implemented timestamp-based file rotation (e.g., `data.20260514-143005.csv`). Files feature a hard 10MB limit and maintain a history of 5 files to prevent disk exhaustion.
 - **IO Security:** Strict path validation including absolute path rejection, directory traversal prevention (`../`), and an extension allowlist (.csv, .json, .jsonl, .txt, .log). Operations are confined to the job's directory.
 - **Refactored Logging:** The `log()` function now uses the new safe IO backend, gaining automatic rotation and high-performance async behavior.
-- **CDP Browser Automation:** Native Chrome DevTools Protocol client — launch or connect to any Chromium-based browser (Chrome, Edge, Brave, Lightpanda, Obscura) from Lua hooks. Full page control: navigate, click, wait for selectors, inject JavaScript, capture screenshots, manage cookies, intercept network requests.
+- **CDP Browser Automation:** Added browser automation support and full page control: navigate, click, wait for selectors, inject JavaScript, capture screenshots, manage cookies, intercept network requests.
+- **CDP connect headers:** `cdp.connect(ws_url, [headers])` now accepts an optional headers table for custom HTTP headers (e.g., `Authorization: Bearer <token>`).
 - **Lua API:** New global `cdp` table with `cdp.launch({...})` and `cdp.connect("ws://...")` for browser lifecycle management.
-- **Lua API:** `browser:attach()` — creates a new page/tab with its own WebSocket connection.
+- **Lua API:** `browser:attach()` creates a new page/tab with its own WebSocket connection.
 - **Lua API:** 10 native page methods: `open`, `content`, `evaluate`, `click`, `wait_for_selector`, `wait_for_navigation`, `wait_event`, `screenshot`, `block_resources`, `fulfill_request`.
 - **Lua API:** 7 high-level page helpers injected via `cdp.lua`: `wait_for_url`, `wait_for_response`, `scroll`, `set_extra_headers`, `set_user_agent`, `cookies`, `set_cookies`.
 - **CLI:** `spyweb profile <check|list|clear|delete> [job|all]` — manage per-job browser profile directories (Chrome user data dirs). Check status with lock detection, wipe caches, or delete profiles entirely.
@@ -26,10 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Docs:** Updated README with CDP feature description, CLI profile commands, and JS rendering examples.
-- **CLI:** Migrated argument parsing from manual `args.get()` dispatch to `clap` derive. Removed hand-rolled `parse_start_port`, `profile_usage`, and string-slice routing — replaced with typed subcommand enums. Auto-generated help/usage.
+- **CLI:** Migrated argument parsing from manual `args.get()` dispatch to `clap` derive. Removed hand-rolled `parse_start_port`, `profile_usage`, and string-slice routing, replaced with typed subcommand enums. Auto-generated help/usage.
 
 ### Fixed
-- Server no longer panics on port bind failure — returns descriptive error (e.g. "Failed to start server on 0.0.0.0:7979: Address in use") instead of crashing.
+- Server no longer panics on port bind failure but returns descriptive error (e.g. "Failed to start server on 0.0.0.0:7979: Address in use") instead of crashing.
 
 ## [1.1.0] - 2026-05-05
 

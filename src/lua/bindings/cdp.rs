@@ -614,18 +614,20 @@ impl mlua::UserData for Browser {
 pub fn register(lua: &mlua::Lua, job_dir: Option<PathBuf>) -> mlua::Result<()> {
     let cdp_table = lua.create_table()?;
 
-    // cdp.connect("ws://127.0.0.1:9222/...")
+    // cdp.connect("ws://127.0.0.1:9222/...", { ["Authorization"] = "Bearer ..." })
     cdp_table.set(
         "connect",
-        lua.create_async_function(|_, ws_url: String| async move {
-            match Browser::connect(&ws_url).await {
-                Ok(browser) => Ok(browser),
-                Err(e) => {
-                    crate::t_eprintln!("WS connection failed: {}", e);
-                    Err(mlua::Error::external(anyhow::anyhow!("{e}")))
+        lua.create_async_function(
+            |_, (ws_url, headers): (String, Option<std::collections::HashMap<String, String>>)| async move {
+                match Browser::connect_with_headers(&ws_url, headers).await {
+                    Ok(browser) => Ok(browser),
+                    Err(e) => {
+                        crate::t_eprintln!("WS connection failed: {}", e);
+                        Err(mlua::Error::external(anyhow::anyhow!("{e}")))
+                    }
                 }
-            }
-        })?,
+            },
+        )?,
     )?;
 
     // cdp.get_browser() -> string

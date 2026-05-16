@@ -129,9 +129,18 @@ end
     - `args`: (Table) List of extra flags like `{"--proxy-server=..."}`.
     - `keep_alive`: (Boolean) If `true`, the browser process persists until Spyweb exits. Default `false`.
 
-### `cdp.connect(ws_url)`
-Connects to an existing browser via its DevTools WebSocket URL. Takes exactly one string argument.
-- **Example**: `cdp.connect("ws://127.0.0.1:9222/devtools/browser/...")`
+### `cdp.connect(ws_url, [headers])`
+Connects to an existing browser via its DevTools WebSocket URL.
+- `ws_url`: (String, **required**) The WebSocket URL.
+- `headers`: (Table, **optional**) Custom HTTP headers for the connection (e.g., for Authorization).
+
+**Example (Cloudflare Browser Rendering)**:
+```lua
+local ws_url = "wss://api.cloudflare.com/client/v4/accounts/<ID>/browser-rendering/devtools/browser"
+local browser = cdp.connect(ws_url, {
+    ["Authorization"] = "Bearer <TOKEN>"
+})
+```
 
 ### `cdp.get_browser()`
 Returns the path to the auto-detected browser executable.

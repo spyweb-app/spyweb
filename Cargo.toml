@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Kosher Kenn <kosherkenn12@gmail.com>"]
 description = "A lightweight, configurable scraper with Lua customization support"
 license = "MIT OR Apache-2.0"       
-repository = "https://github.com/spyweb-rs/spyweb"   
+repository = "https://github.com/spyweb-app/spyweb"   
 readme = "README.md"
 keywords = ["scraper", "web-scraping", "list-scraper", "job-scraper", "lua"]
 categories = ["command-line-utilities", "web-programming"]
@@ -26,6 +26,7 @@ serde_json = "1.0.145"
 # smallvec = "1.15.1"
 smol = "2.0.2"
 toml = "1.1.2"
+http = "1"
 ureq = { version = "3.3.0", default-features = false, features = ["rustls", "gzip", "socks-proxy", "brotli", "json"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] } 
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

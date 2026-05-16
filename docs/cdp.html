@@ -342,8 +342,15 @@
                             <p>Spyweb can get a browser two ways:</p>
                             <ol>
                                 <li><strong>Launch one</strong> — <code>cdp.launch()</code> finds Chrome, Edge, or Brave on your system, starts it in headless mode, and connects to it automatically. Zero config. You can also pass <code>{ executable = "/path/to/browser" }</code> to use a specific binary.</li>
-                                <li><strong>Connect to an existing one</strong> — <code>cdp.connect("ws://...")</code> attaches to any browser or CDP-compatible server already running (useful for Lightpanda, Obscura, remote debugging, etc.).</li>
+                                <li><strong>Connect to an existing one</strong> — <code>cdp.connect("ws://...", [headers])</code> attaches to any browser or CDP-compatible server already running. The optional <code>headers</code> table allows for custom HTTP headers like <code>Authorization</code>.</li>
                             </ol>
+                            <div class="notification is-success is-light mt-4">
+                                <strong>Example: Cloudflare Browser Rendering</strong><br>
+                                <pre><code class="language-lua">local ws_url = "wss://api.cloudflare.com/client/v4/accounts/&lt;ID&gt;/browser-rendering/devtools/browser"
+local browser = cdp.connect(ws_url, {
+    ["Authorization"] = "Bearer &lt;TOKEN&gt;"
+})</code></pre>
+                            </div>
                             <p>Once connected, you call <code>browser:attach()</code> to get a page/tab, then drive it with simple commands like <code>page:open(url)</code>, <code>page:wait_for_selector()</code>, <code>page:click()</code>, and <code>page:content()</code> to get the rendered HTML.</p>
 
                             <h4 class="title is-5 mt-5">Under the Hood</h4>

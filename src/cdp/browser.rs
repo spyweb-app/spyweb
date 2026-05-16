@@ -24,11 +24,18 @@ impl Browser {
     }
 
     pub async fn connect(ws_url: &str) -> Result<Self> {
+        Self::connect_with_headers(ws_url, None).await
+    }
+
+    pub async fn connect_with_headers(
+        ws_url: &str,
+        headers: Option<std::collections::HashMap<String, String>>,
+    ) -> Result<Self> {
         if !ws_url.starts_with("ws://") && !ws_url.starts_with("wss://") {
             bail!("Invalid WebSocket URL: must start with ws:// or wss://");
         }
 
-        let transport = CdpTransport::connect(ws_url).await?;
+        let transport = CdpTransport::connect_with_headers(ws_url, headers).await?;
 
         Ok(Self {
             transport: Arc::new(transport),

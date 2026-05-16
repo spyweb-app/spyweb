@@ -28,9 +28,28 @@ pub struct CdpTransport {
 impl CdpTransport {
     /// Connect to a CDP WebSocket endpoint and spawn read/write loops.
     pub async fn connect(ws_url: &str) -> anyhow::Result<Self> {
-        use anyhow::Context;
+        Self::connect_with_headers(ws_url, None).await
+    }
 
-        let (ws_stream, _response) = async_tungstenite::smol::connect_async(ws_url)
+    pub async fn connect_with_headers(
+        ws_url: &str,
+        headers: Option<HashMap<String, String>>,
+    ) -> anyhow::Result<Self> {
+        use anyhow::Context;
+        use async_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let mut request = ws_url.into_client_request()?;
+        if let Some(headers) = headers {
+            let h = request.headers_mut();
+            for (k, v) in headers {
+                h.insert(
+                    k.parse::<http::header::HeaderName>()?,
+                    v.parse::<http::HeaderValue>()?,
+                );
+            }
+        }
+
+        let (ws_stream, _response) = async_tungstenite::smol::connect_async(request)
             .await
             .context(format!("Failed to connect WebSocket to {}", ws_url))?;
 
