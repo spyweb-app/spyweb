@@ -19,15 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Lua API:** `browser:attach()` creates a new page/tab with its own WebSocket connection.
 - **Lua API:** 10 native page methods: `open`, `content`, `evaluate`, `click`, `wait_for_selector`, `wait_for_navigation`, `wait_event`, `screenshot`, `block_resources`, `fulfill_request`.
 - **Lua API:** 7 high-level page helpers injected via `cdp.lua`: `wait_for_url`, `wait_for_response`, `scroll`, `set_extra_headers`, `set_user_agent`, `cookies`, `set_cookies`.
-- **CLI:** `spyweb profile <check|list|clear|delete> [job|all]` — manage per-job browser profile directories (Chrome user data dirs). Check status with lock detection, wipe caches, or delete profiles entirely.
+- **CLI:** `spyweb profile <check|list|clear|delete> [job|all]` manage per-job browser profile directories (Chrome user data dirs). Check status with lock detection, wipe caches, or delete profiles entirely.
 - **Browser Auto-Detection:** Finds Chrome, Chromium, Edge, and Brave on Linux, macOS, and Windows without any configuration. Supports `$BROWSER` environment variable to override detection.
 - **CDP Transport:** Session-level targeting (`call_session`), timeout-aware event waiting (`wait_event_timeout`), and clean shutdown that drains pending requests with errors.
-- **CDP API:** `browser:close()` — explicitly kills the browser process, closes the WebSocket transport, and releases the profile lock file.
-- **Examples:** Added `hybrid-recovery/` — production-grade pattern that uses headless CDP by default, detects bot blocks, launches a visible browser for human intervention, then captures the recovered session.
+- **CDP API:** `browser:close()` explicitly kills the browser process, closes the WebSocket transport, and releases the profile lock file.
+- **Examples:** Added `hybrid-recovery/` pattern that uses headless CDP by default, detects bot blocks, launches a visible browser for human intervention, then captures the recovered session.
 
 ### Changed
 - **Docs:** Updated README with CDP feature description, CLI profile commands, and JS rendering examples.
 - **CLI:** Migrated argument parsing from manual `args.get()` dispatch to `clap` derive. Removed hand-rolled `parse_start_port`, `profile_usage`, and string-slice routing, replaced with typed subcommand enums. Auto-generated help/usage.
+- **HTTP client:** Replaced `spyweb/x.x.x` User-Agent with real Chrome 148 UA. Added browser-like default headers (`Accept`, `Accept-Language`, `Accept-Encoding`, `sec-ch-ua*`, `Upgrade-Insecure-Requests`, `Sec-Fetch-*`, `Priority`) visible to `before_fetch` hook. Switched to `IndexMap` for deterministic header ordering.
 
 ### Fixed
 - Server no longer panics on port bind failure but returns descriptive error (e.g. "Failed to start server on 0.0.0.0:7979: Address in use") instead of crashing.

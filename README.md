@@ -11,9 +11,8 @@
 
 <p align="center">
   📖 <a href="https://docs.spyweb.app/"><b>Master Guide</b></a> |
-  ⚙️ <a href="docs/config.md">Config</a> |
-  🛠️ <a href="docs/api.md">REST API</a> |
   🌐 <a href="docs/cdp.md">Browser Automation</a> |
+  ⚙️ <a href="docs/config.md">Config</a> |
   🚀 <a href="docs/vps-deployment.md">VPS Setup</a> |
   📂 <a href="examples/">Examples</a> |
   🏗️ <a href="CONTRIBUTING.md">Build from Source</a>
@@ -105,22 +104,22 @@ Right-click the tray icon to open the web UI or quit the app.
 ### Recommended Workflow
 A typical workflow is to use the **Terminal Version** for your initial setup, debugging Lua hooks, and verifying selectors. Once you are happy with the results, switch to the **Tray Version** to let it run silently in the background without cluttering your taskbar or terminal.
 
-Both binaries serve the admin dashboard at **http://127.0.0.1:7979** and will loop each enabled job at its configured interval.
+Both binaries serve the admin dashboard at **http://127.0.0.1:7979** and will loop each enabled job at its configured interval. check <a href="docs/api.md">REST API</a> for more details
 
 > **Tip:** You can customize the port with `--port` or the `SPYWEB_PORT` environment variable:
-> ```bash
-> # Linux / macOS
-> ./spyweb start --port 9000
-> 
-> # Or:
-> SPYWEB_PORT=9000 ./spyweb start
-> 
-> # Windows (PowerShell)
-> .\spyweb.exe start --port 9000
-> 
-> # Or:
-> $env:SPYWEB_PORT=9000; .\spyweb.exe start
-> ```
+```bash
+# Linux / macOS
+./spyweb start --port 9000
+
+# Or:
+SPYWEB_PORT=9000 ./spyweb start
+
+# Windows (PowerShell)
+.\spyweb.exe start --port 9000
+
+# Or:
+$env:SPYWEB_PORT=9000; .\spyweb.exe start
+```
 
 ## CLI Tools
 The terminal binary includes helpful developer tools:

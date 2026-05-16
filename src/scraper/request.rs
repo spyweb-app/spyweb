@@ -3,25 +3,51 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use indexmap::IndexMap;
 use ureq::http::HeaderMap;
 use ureq::{Agent, Proxy};
 
 use crate::config::types::{JobConfig, Rotate};
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
-const DEFAULT_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+
+const DEFAULT_HEADERS: &[(&str, &str)] = &[
+    ("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"),
+    ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"),
+    ("Accept-Language", "en-US,en;q=0.9"),
+    ("Accept-Encoding", "gzip, deflate, br"),
+    ("sec-ch-ua", r#""Chromium";v="148", "Google Chrome";v="148", "Not-A.Brand";v="24""#),
+    ("sec-ch-ua-mobile", "?0"),
+    ("sec-ch-ua-platform", "\"Windows\""),
+    ("Upgrade-Insecure-Requests", "1"),
+    ("Sec-Fetch-Dest", "document"),
+    ("Sec-Fetch-Mode", "navigate"),
+    ("Sec-Fetch-Site", "none"),
+    ("Sec-Fetch-User", "?1"),
+    ("Priority", "u=0, i"),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestConfig {
     pub url: String,
-    pub headers: HashMap<String, String>,
+    pub headers: IndexMap<String, String>,
 }
 
 impl RequestConfig {
     pub fn from_job(job: &JobConfig) -> Self {
+        let mut headers = IndexMap::new();
+        for (name, value) in DEFAULT_HEADERS {
+            headers.insert(name.to_string(), value.to_string());
+        }
+        if let Some(job_headers) = &job.headers {
+            for (name, value) in job_headers {
+                headers.shift_remove(name.as_str());
+                headers.insert(name.clone(), value.clone());
+            }
+        }
         Self {
             url: job.url.clone(),
-            headers: job.headers.clone().unwrap_or_default(),
+            headers,
         }
     }
 }
@@ -91,7 +117,10 @@ impl RequestHandler {
         let agent = self.build_agent(selected_proxy.as_deref())?;
 
         let mut request = agent.get(&job.url);
-        request = request.header("User-Agent", DEFAULT_USER_AGENT);
+
+        for (name, value) in DEFAULT_HEADERS {
+            request = request.header(*name, *value);
+        }
 
         if let Some(headers) = &job.headers {
             for (name, value) in headers {
@@ -135,7 +164,6 @@ impl RequestHandler {
         };
 
         let mut request = agent.get(&req.url);
-        request = request.header("User-Agent", DEFAULT_USER_AGENT);
 
         for (name, value) in &req.headers {
             request = request.header(name, value);

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use indexmap::IndexMap;
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 use std::collections::HashMap;
 
@@ -23,9 +24,9 @@ pub fn request_to_lua(lua: &Lua, req: &RequestConfig) -> Result<Table> {
 pub fn lua_to_request(table: Table, original: RequestConfig) -> Result<RequestConfig> {
     let url: String = table.get::<Option<String>>("url")?.unwrap_or(original.url);
 
-    let headers: HashMap<String, String> = match table.get::<Option<Table>>("headers")? {
+    let headers: IndexMap<String, String> = match table.get::<Option<Table>>("headers")? {
         Some(h) => {
-            let mut map = HashMap::new();
+            let mut map = IndexMap::new();
             for pair in h.pairs::<String, String>() {
                 let (k, v) = pair?;
                 map.insert(k, v);

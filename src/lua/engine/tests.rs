@@ -1,13 +1,14 @@
 use crate::lua::conversions::*;
 use crate::scraper::extractor::ExtractedItem;
 use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
+use indexmap::IndexMap;
 use mlua::{Lua, Table};
 use std::collections::HashMap;
 
 #[test]
 fn test_request_config_roundtrip() {
     let lua = Lua::new();
-    let mut headers = HashMap::new();
+    let mut headers = IndexMap::new();
     headers.insert("User-Agent".into(), "SpyWeb".into());
     let req = RequestConfig {
         url: "https://example.com".into(),
@@ -51,7 +52,7 @@ fn test_response_roundtrip() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com".into(),
-            headers: HashMap::from([("User-Agent".into(), "SpyWeb".into())]),
+            headers: IndexMap::from([("User-Agent".into(), "SpyWeb".into())]),
         },
         proxy: None,
         result: Ok(res.clone()),
@@ -87,7 +88,7 @@ fn test_fetch_error_envelope_can_be_turned_into_response() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com/products".into(),
-            headers: HashMap::from([("Accept".into(), "text/html".into())]),
+            headers: IndexMap::from([("Accept".into(), "text/html".into())]),
         },
         proxy: Some("http://proxy-1:8080".into()),
         result: Err("request failed for job 'test': dns lookup failed".into()),
@@ -134,7 +135,7 @@ fn test_fetch_error_backcompat_top_level_response_still_works() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com".into(),
-            headers: HashMap::new(),
+            headers: IndexMap::new(),
         },
         proxy: None,
         result: Err("request failed for job 'test': timed out".into()),
@@ -168,7 +169,7 @@ fn test_http_error_response_has_response_and_not_ok() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com/protected".into(),
-            headers: HashMap::new(),
+            headers: IndexMap::new(),
         },
         proxy: None,
         result: Ok(RequestResult {

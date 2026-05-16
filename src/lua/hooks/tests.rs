@@ -1,6 +1,7 @@
 use super::*;
 use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
 use crate::services::db::Db;
+use indexmap::IndexMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,7 +36,7 @@ end
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com".into(),
-            headers: std::collections::HashMap::new(),
+            headers: IndexMap::new(),
         },
         proxy: None,
         result: Ok(RequestResult {

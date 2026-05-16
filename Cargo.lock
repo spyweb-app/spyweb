@@ -3478,6 +3478,7 @@ dependencies = [
  "futures-channel",
  "futures-lite",
  "http",
+ "indexmap",
  "mlua",
  "notify",
  "notify-rust",
