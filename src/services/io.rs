@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use smol::channel::{bounded, Receiver, Sender};
+use smol::channel::{Receiver, Sender, bounded};
 
 static IO_SENDER: OnceLock<Sender<IoTask>> = OnceLock::new();
 
@@ -35,8 +35,13 @@ pub fn init() {
 }
 
 pub async fn send_task(task: IoTask) -> anyhow::Result<()> {
-    let sender = IO_SENDER.get().ok_or_else(|| anyhow::anyhow!("IO system not initialized"))?;
-    sender.send(task).await.map_err(|_| anyhow::anyhow!("IO worker channel closed"))
+    let sender = IO_SENDER
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("IO system not initialized"))?;
+    sender
+        .send(task)
+        .await
+        .map_err(|_| anyhow::anyhow!("IO worker channel closed"))
 }
 
 pub fn shutdown() {
@@ -97,7 +102,12 @@ fn handle_task(files: &mut HashMap<PathBuf, File>, task: IoTask) -> anyhow::Resu
 
             if task.add_timestamp {
                 let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-                writeln!(file, "[{}]: {}", timestamp, String::from_utf8_lossy(&task.content))?;
+                writeln!(
+                    file,
+                    "[{}]: {}",
+                    timestamp,
+                    String::from_utf8_lossy(&task.content)
+                )?;
             } else {
                 file.write_all(&task.content)?;
             }
@@ -145,7 +155,10 @@ fn validate_path(path: &Path) -> anyhow::Result<()> {
         let path_str = path.to_string_lossy();
         // Allow writes to 'jobs' or 'data' or 'logs'
         if !path_str.contains("jobs") && !path_str.contains("data") && !path_str.contains("logs") {
-            return Err(anyhow::anyhow!("Path must be within project scope: {:?}", path));
+            return Err(anyhow::anyhow!(
+                "Path must be within project scope: {:?}",
+                path
+            ));
         }
     }
 
@@ -165,7 +178,7 @@ fn rotate_file(path: &Path) -> anyhow::Result<()> {
         format!("{}.{}.{}", stem, timestamp, extension)
     };
     let rotated_path = parent.join(rotated_name);
-    
+
     fs::rename(path, rotated_path)?;
 
     // 2. Cleanup: Keep only MAX_ROTATIONS
@@ -174,9 +187,9 @@ fn rotate_file(path: &Path) -> anyhow::Result<()> {
         for entry in read_dir.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             // Match files that start with "stem." and end with ".extension" (if any)
-            if name.starts_with(&format!("{}.", stem)) && 
-               (extension.is_empty() || name.ends_with(&format!(".{}", extension))) &&
-               name != path.file_name().unwrap_or_default().to_string_lossy() 
+            if name.starts_with(&format!("{}.", stem))
+                && (extension.is_empty() || name.ends_with(&format!(".{}", extension)))
+                && name != path.file_name().unwrap_or_default().to_string_lossy()
             {
                 if let Ok(metadata) = entry.metadata() {
                     if metadata.is_file() {
@@ -219,31 +232,39 @@ mod tests {
         smol::block_on(async {
             let dir = TempDir::new().unwrap();
             let file_path = dir.path().join("test.log");
-            
+
             let (tx, _rx) = bounded(1024);
-            let _ = IO_SENDER.set(tx); 
+            let _ = IO_SENDER.set(tx);
 
             let mut files = HashMap::new();
 
             // 1. Write until limit
             let large_content = vec![b'a'; (MAX_FILE_SIZE - 5) as usize];
-            handle_task(&mut files, IoTask {
-                path: file_path.clone(),
-                content: large_content,
-                op: IoOp::Append,
-                add_timestamp: false,
-            }).unwrap();
+            handle_task(
+                &mut files,
+                IoTask {
+                    path: file_path.clone(),
+                    content: large_content,
+                    op: IoOp::Append,
+                    add_timestamp: false,
+                },
+            )
+            .unwrap();
 
             assert!(file_path.exists());
             assert_eq!(fs::metadata(&file_path).unwrap().len(), MAX_FILE_SIZE - 5);
 
             // 2. Trigger rotation
-            handle_task(&mut files, IoTask {
-                path: file_path.clone(),
-                content: vec![b'b'; 10],
-                op: IoOp::Append,
-                add_timestamp: false,
-            }).unwrap();
+            handle_task(
+                &mut files,
+                IoTask {
+                    path: file_path.clone(),
+                    content: vec![b'b'; 10],
+                    op: IoOp::Append,
+                    add_timestamp: false,
+                },
+            )
+            .unwrap();
 
             assert!(file_path.exists());
             assert_eq!(fs::metadata(&file_path).unwrap().len(), 10);
@@ -260,8 +281,7 @@ mod tests {
                 }
             }
             assert!(rotated_found, "Timestamped rotated file not found");
-            }
-);
+        });
     }
 
     #[test]
@@ -271,21 +291,29 @@ mod tests {
             let file_path = dir.path().join("state.json");
             let mut files = HashMap::new();
 
-            handle_task(&mut files, IoTask {
-                path: file_path.clone(),
-                content: b"first".to_vec(),
-                op: IoOp::Overwrite,
-                add_timestamp: false,
-            }).unwrap();
+            handle_task(
+                &mut files,
+                IoTask {
+                    path: file_path.clone(),
+                    content: b"first".to_vec(),
+                    op: IoOp::Overwrite,
+                    add_timestamp: false,
+                },
+            )
+            .unwrap();
 
             assert_eq!(fs::read_to_string(&file_path).unwrap(), "first");
 
-            handle_task(&mut files, IoTask {
-                path: file_path.clone(),
-                content: b"second".to_vec(),
-                op: IoOp::Overwrite,
-                add_timestamp: false,
-            }).unwrap();
+            handle_task(
+                &mut files,
+                IoTask {
+                    path: file_path.clone(),
+                    content: b"second".to_vec(),
+                    op: IoOp::Overwrite,
+                    add_timestamp: false,
+                },
+            )
+            .unwrap();
 
             assert_eq!(fs::read_to_string(&file_path).unwrap(), "second");
         });

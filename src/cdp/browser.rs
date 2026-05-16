@@ -57,9 +57,11 @@ impl Browser {
         // Step 1: Validate/create user_data_dir and acquire exclusive lock (unblocked)
         if let Some(ref dir) = options.user_data_dir {
             let dir_clone = dir.clone();
-            let (file, _) = smol::unblock(move || -> Result<(std::fs::File, ())>{
-                std::fs::create_dir_all(&dir_clone)
-                    .context(format!("Failed to create user_data_dir: {}", dir_clone.display()))?;
+            let (file, _) = smol::unblock(move || -> Result<(std::fs::File, ())> {
+                std::fs::create_dir_all(&dir_clone).context(format!(
+                    "Failed to create user_data_dir: {}",
+                    dir_clone.display()
+                ))?;
 
                 let lock_path = dir_clone.join(".spyweb.lock");
                 let file = std::fs::File::create(&lock_path).context(format!(
@@ -68,11 +70,15 @@ impl Browser {
                 ))?;
 
                 file.try_lock_exclusive().map_err(|_| {
-                    anyhow::anyhow!("User data directory already in use: {}", dir_clone.display())
+                    anyhow::anyhow!(
+                        "User data directory already in use: {}",
+                        dir_clone.display()
+                    )
                 })?;
                 Ok((file, ()))
-            }).await?;
-            
+            })
+            .await?;
+
             lock_file = Some(file);
         }
 

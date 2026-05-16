@@ -253,7 +253,7 @@ async fn create_page_table(
         "call_save",
         lua.create_async_function(
             move |lua,
-                  (_self, method, params, path): (mlua::Value, String, mlua::Value, String)| {
+                (_self, method, params, path): (mlua::Value, String, mlua::Value, String)| {
                 let ct = ct_save.clone();
                 async move {
                     let params_json: Value = lua.from_value(params)?;
@@ -264,16 +264,16 @@ async fn create_page_table(
 
                     if let Some(base64_data) = result.get("data").and_then(|v| v.as_str()) {
                         let base64_data = base64_data.to_string();
+                        let saved_path = path.clone();
                         smol::unblock(move || {
                             let bytes = decode_base64(&base64_data)?;
                             std::fs::write(path, bytes).map_err(mlua::Error::external)
                         })
                         .await?;
 
-                        // Remove the massive data from the result returned to Lua
                         if let Some(obj) = result.as_object_mut() {
                             obj.remove("data");
-                            obj.insert("saved_to".to_string(), Value::String("path".to_string())); // wait, I should use the path variable
+                            obj.insert("saved_to".to_string(), Value::String(saved_path) ); 
                         }
                     }
 

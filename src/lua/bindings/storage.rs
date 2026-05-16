@@ -85,9 +85,7 @@ fn register_store_get(lua: &Lua, db: Arc<Db>, prefix: String) -> anyhow::Result<
                         }
                     };
                     match table.get(prefixed.as_str()) {
-                        Ok(value) => {
-                            value.map(|v: redb::AccessGuard<&str>| v.value().to_string())
-                        }
+                        Ok(value) => value.map(|v: redb::AccessGuard<&str>| v.value().to_string()),
                         Err(err) => {
                             log_storage_error("store_get", err);
                             None
@@ -206,9 +204,7 @@ fn register_global_store_get(lua: &Lua, db: Arc<Db>) -> anyhow::Result<()> {
                         }
                     };
                     match table.get(key.as_str()) {
-                        Ok(value) => {
-                            value.map(|v: redb::AccessGuard<&str>| v.value().to_string())
-                        }
+                        Ok(value) => value.map(|v: redb::AccessGuard<&str>| v.value().to_string()),
                         Err(err) => {
                             log_storage_error("global_store_get", err);
                             None
@@ -249,7 +245,9 @@ fn register_global_store_incr(lua: &Lua, db: Arc<Db>) -> anyhow::Result<()> {
 
                         let current = match table.get(key.as_str()) {
                             Ok(value) => value
-                                .and_then(|v: redb::AccessGuard<&str>| v.value().parse::<i64>().ok())
+                                .and_then(|v: redb::AccessGuard<&str>| {
+                                    v.value().parse::<i64>().ok()
+                                })
                                 .unwrap_or(default),
                             Err(err) => {
                                 log_storage_error("global_store_incr", err);

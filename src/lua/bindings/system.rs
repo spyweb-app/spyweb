@@ -11,13 +11,15 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
 
     lua.globals().set(
         "notify",
-        lua.create_async_function(|_, (title, body, timeout): (String, String, Option<u32>)| async move {
-            smol::unblock(move || {
-                notifier::send_notification(&title, &body, timeout.unwrap_or(5000))
-                    .map_err(|e| mlua::Error::runtime(format!("notify failed: {e}")))
-            })
-            .await
-        })?,
+        lua.create_async_function(
+            |_, (title, body, timeout): (String, String, Option<u32>)| async move {
+                smol::unblock(move || {
+                    notifier::send_notification(&title, &body, timeout.unwrap_or(5000))
+                        .map_err(|e| mlua::Error::runtime(format!("notify failed: {e}")))
+                })
+                .await
+            },
+        )?,
     )?;
 
     if let Some(dir) = job_dir {

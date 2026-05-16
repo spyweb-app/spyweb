@@ -116,18 +116,10 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum ProfileCommands {
-    Check {
-        job: Option<String>,
-    },
-    List {
-        job: Option<String>,
-    },
-    Clear {
-        target: String,
-    },
-    Delete {
-        target: String,
-    },
+    Check { job: Option<String> },
+    List { job: Option<String> },
+    Clear { target: String },
+    Delete { target: String },
 }
 
 fn load_jobs_for_profiles() -> anyhow::Result<Jobs> {
