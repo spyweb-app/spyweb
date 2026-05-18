@@ -67,14 +67,7 @@ impl Notif {
     }
 }
 
-// pub fn build_template_tags(
-//     fields: &HashMap<String, String>,
-//     data: &NotificationData,
-// ) -> HashMap<String, String> {
-//     let mut tags = fields.clone();
-//     tags.extend(data.template_fields());
-//     tags
-// }
+
 
 fn _field_names(fields: &[Field]) -> Vec<String> {
     fields
@@ -167,7 +160,6 @@ fn send_config_notification(
     let Some((title, body)) = config.render(field_order, items, data) else {
         return Ok(false);
     };
-    //body = format!("{}\n{}", body, crate::config::get_base_url());
     send_notification(&title, &body, config.timeout)?;
     Ok(true)
 }
@@ -203,39 +195,6 @@ fn default_title(data: &NotificationData, items: &[ExtractedItem]) -> String {
     }
 }
 
-fn _default_body(
-    field_order: &[String],
-    items: &[ExtractedItem],
-    // data: &NotificationData,
-) -> String {
-    let mut parts: Vec<String> = items
-        .iter()
-        .take(BODY_ITEM_CAP)
-        .map(|item| {
-            let mut lines = Vec::new();
-            for field_name in unique_field_names(field_order) {
-                let Some(value) = item.fields.get(&field_name).map(String::as_str) else {
-                    continue;
-                };
-                if value.trim().is_empty() {
-                    continue;
-                }
-                lines.push(format!("{}: {}", format_label(&field_name), value));
-                if lines.len() >= 3 {
-                    break;
-                }
-            }
-            lines.join("\n")
-        })
-        .collect();
-
-    let overflow = items.len().saturating_sub(BODY_ITEM_CAP);
-    if overflow > 0 {
-        parts.push(format!("+ {} more", overflow));
-    }
-
-    parts.join("\n---\n")
-}
 
 fn default_body(field_order: &[String], items: &[ExtractedItem]) -> String {
     let mut parts: Vec<String> = items

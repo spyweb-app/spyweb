@@ -43,6 +43,7 @@ fs4 = "0.8.2"
 futures-lite = "2.6.1"
 clap = { version = "4.6.1", default-features = false, features = ["derive", "std", "help", "usage"] }
 ctrlc = "3.4"
+fastrand = "2.4.1"
 
 [features]
 luau = ["mlua/luau"]

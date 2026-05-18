@@ -46,7 +46,7 @@ impl Db {
 
     // ── Records ──────────────────────────────────────────────────────────────
 
-    pub fn insert_record1(
+    pub fn insert_record(
         &self,
         job: &JobConfig,
         fields: HashMap<String, String>,
@@ -423,7 +423,7 @@ mod tests {
 
         // Insert
         tdb.db()
-            .insert_record1(&job, fields.clone(), "hash1")
+            .insert_record(&job, fields.clone(), "hash1")
             .unwrap();
 
         // Get records

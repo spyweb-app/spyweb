@@ -9,7 +9,6 @@ use crate::services::db::Db;
 
 #[derive(Debug, Clone)]
 pub struct JobRunResult {
-    // pub config: JobConfig,
     pub url: String,
     pub status: u16,
     pub item_count: usize,
@@ -38,8 +37,6 @@ impl Runner {
             .filter(|job| job.config.enabled)
             .map(|job| self.run_job(&job.config, job.dir.as_deref()))
             .collect()
-        // futures
-        // futures::future::join_all(futures)
     }
 
     pub fn run_job(&self, config: &JobConfig, dir: Option<&Path>) -> Result<JobRunResult> {
@@ -87,12 +84,6 @@ impl Runner {
         if keywords.is_none_or(|kw| kw.is_empty()) {
             return items;
         }
-
-        // match keywords {
-        //     None => return items,
-        //     Some(kw) if kw.is_empty() => return items,
-        //     _ => {}
-        // }
 
         items
             .into_iter()

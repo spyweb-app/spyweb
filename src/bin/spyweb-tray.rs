@@ -30,7 +30,8 @@ impl winit::application::ApplicationHandler for App {
                 spyweb::services::io::shutdown();
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 event_loop.exit();
-            } else if event.id == self.open_id {                let url = format!("http://{}", spyweb::config::get_base_url());
+            } else if event.id == self.open_id {
+                let url = format!("http://{}", spyweb::config::get_base_url());
                 let _ = open::that(&url);
             }
         }

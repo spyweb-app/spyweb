@@ -14,9 +14,7 @@ static REGISTRY: OnceLock<Mutex<Vec<Arc<Mutex<Option<Child>>>>>> = OnceLock::new
 fn register_process(child: Arc<Mutex<Option<Child>>>) {
     let registry = REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
     let mut guard = registry.lock().unwrap();
-    guard.retain(|arc| {
-        arc.lock().map(|inner| inner.is_some()).unwrap_or(false)
-    });
+    guard.retain(|arc| arc.lock().map(|inner| inner.is_some()).unwrap_or(false));
     guard.push(child);
 }
 

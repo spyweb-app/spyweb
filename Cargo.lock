@@ -3474,6 +3474,7 @@ dependencies = [
  "chrono",
  "clap",
  "ctrlc",
+ "fastrand",
  "fs4",
  "futures-channel",
  "futures-lite",
