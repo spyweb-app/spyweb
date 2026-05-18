@@ -148,160 +148,174 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
 
     println!("Debug run for job: {}", crate::color::c_job(job_name));
 
-    let runner = Runner::new();
-    let request = RequestConfig::from_job(&job.config);
+    let result = async {
+        let runner = Runner::new();
+        let request = RequestConfig::from_job(&job.config);
 
-    // 1. before_fetch
-    let request = match job.hooks.as_ref() {
-        Some(h) => match h.before_fetch(request).await? {
+        // 1. before_fetch
+        let request = match job.hooks.as_ref() {
+            Some(h) => match h.before_fetch(request).await? {
+                None => {
+                    println!(
+                        "Request aborted by {} hook.",
+                        crate::color::c_warn("before_fetch")
+                    );
+                    return Ok(());
+                }
+                Some(r) => r,
+            },
+            None => request,
+        };
+
+        // 2. fetch
+        let fetch_attempt = match job.hooks.as_ref().filter(|h| h.has_override_fetch()) {
+            Some(h) => {
+                println!("{}", crate::color::c_info("Using override_fetch hook"));
+                h.override_fetch(request.clone()).await?
+            }
             None => {
+                println!("Fetching URL: {}", crate::color::c_info(&request.url));
+                runner.fetch(&job.config, &request)
+            }
+        };
+
+        if let Ok(response) = &fetch_attempt.result {
+            if response.status >= 200 && response.status < 300 {
                 println!(
-                    "Request aborted by {} hook.",
-                    crate::color::c_warn("before_fetch")
+                    "{} (Status: {})",
+                    crate::color::c_ok("FETCH OK"),
+                    response.status
                 );
-                return Ok(());
-            }
-            Some(r) => r,
-        },
-        None => request,
-    };
-
-    // 2. fetch
-    let fetch_attempt = match job.hooks.as_ref().filter(|h| h.has_override_fetch()) {
-        Some(h) => {
-            println!("{}", crate::color::c_info("Using override_fetch hook"));
-            h.override_fetch(request.clone()).await?
-        }
-        None => {
-            println!("Fetching URL: {}", crate::color::c_info(&request.url));
-            runner.fetch(&job.config, &request)
-        }
-    };
-
-    if let Ok(response) = &fetch_attempt.result {
-        if response.status >= 200 && response.status < 300 {
-            println!(
-                "{} (Status: {})",
-                crate::color::c_ok("FETCH OK"),
-                response.status
-            );
-        } else {
-            println!(
-                "{} (Status: {})",
-                crate::color::c_err("FETCH FAILED"),
-                response.status
-            );
-        }
-    }
-
-    // 3. after_fetch
-    let response = match job.hooks.as_ref() {
-        Some(h) => match h.after_fetch(fetch_attempt).await? {
-            None => {
+            } else {
                 println!(
-                    "Response aborted by {} hook.",
-                    crate::color::c_warn("after_fetch")
+                    "{} (Status: {})",
+                    crate::color::c_err("FETCH FAILED"),
+                    response.status
                 );
-                return Ok(());
-            }
-            Some(r) => r,
-        },
-        None => fetch_attempt.result.map_err(anyhow::Error::msg)?,
-    };
-
-    // 4. extract
-    let extraction = match job.hooks.as_ref().filter(|h| h.has_override_extract()) {
-        Some(h) => {
-            println!("{}", crate::color::c_info("Using override_extract hook"));
-            let items = h.override_extract(&response).await?;
-            let count = items.len();
-            crate::scraper::extractor::ExtractionResult {
-                items,
-                selector_matches: count,
             }
         }
-        None => runner.extract(&job.config, job.dir.as_deref(), &response)?,
-    };
 
-    println!(
-        "Extracted {} item(s) (out of {} selector matches)",
-        crate::color::c_info(&extraction.items.len().to_string()),
-        crate::color::c_info(&extraction.selector_matches.to_string())
-    );
+        // 3. after_fetch
+        let response = match job.hooks.as_ref() {
+            Some(h) => match h.after_fetch(fetch_attempt).await? {
+                None => {
+                    println!(
+                        "Response aborted by {} hook.",
+                        crate::color::c_warn("after_fetch")
+                    );
+                    return Ok(());
+                }
+                Some(r) => r,
+            },
+            None => fetch_attempt.result.map_err(anyhow::Error::msg)?,
+        };
 
-    if let Some(h) = job.hooks.as_ref() {
-        h.set_selector_matches(extraction.selector_matches).await?;
-    }
-
-    let items = extraction.items;
-
-    // 5. after_extract
-    let items = match job.hooks.as_ref() {
-        Some(h) => h.after_extract(items).await?,
-        None => items,
-    };
-
-    // 6. filter_item / keyword_filter
-    let items = match job.hooks.as_ref() {
-        Some(h) if h.has_filter_item() => {
-            let mut filtered = Vec::new();
-            for item in items {
-                if let Some(i) = h.filter_item(item).await? {
-                    filtered.push(i);
+        // 4. extract
+        let extraction = match job.hooks.as_ref().filter(|h| h.has_override_extract()) {
+            Some(h) => {
+                println!("{}", crate::color::c_info("Using override_extract hook"));
+                let items = h.override_extract(&response).await?;
+                let count = items.len();
+                crate::scraper::extractor::ExtractionResult {
+                    items,
+                    selector_matches: count,
                 }
             }
-            filtered
-        }
-        _ => runner.keyword_filter(&job.config, items),
-    };
+            None => runner.extract(&job.config, job.dir.as_deref(), &response)?,
+        };
 
-    // 7. before_store
-    let items = match job.hooks.as_ref() {
-        Some(h) => match h.before_store(items).await? {
-            None => {
-                println!(
-                    "Items aborted by {} hook.",
-                    crate::color::c_warn("before_store")
-                );
-                return Ok(());
+        println!(
+            "Extracted {} item(s) (out of {} selector matches)",
+            crate::color::c_info(&extraction.items.len().to_string()),
+            crate::color::c_info(&extraction.selector_matches.to_string())
+        );
+
+        if let Some(h) = job.hooks.as_ref() {
+            h.set_selector_matches(extraction.selector_matches).await?;
+        }
+
+        let items = extraction.items;
+
+        // 5. after_extract
+        let items = match job.hooks.as_ref() {
+            Some(h) => h.after_extract(items).await?,
+            None => items,
+        };
+
+        // 6. filter_item / keyword_filter
+        let items = match job.hooks.as_ref() {
+            Some(h) if h.has_filter_item() => {
+                let mut filtered = Vec::new();
+                for item in items {
+                    if let Some(i) = h.filter_item(item).await? {
+                        filtered.push(i);
+                    }
+                }
+                filtered
             }
-            Some(i) => i,
-        },
-        None => items,
-    };
+            _ => runner.keyword_filter(&job.config, items),
+        };
 
-    println!(
-        "\n{}",
-        crate::color::c_bold(&format!("Final pipeline output ({} items):", items.len()))
-    );
-    for (i, item) in items.iter().enumerate() {
-        println!("\n  Item {}:", crate::color::c_info(&(i + 1).to_string()));
-        for (k, v) in &item.fields {
-            println!("    {}: {}", crate::color::c_bold(k), v);
+        // 7. before_store
+        let items = match job.hooks.as_ref() {
+            Some(h) => match h.before_store(items).await? {
+                None => {
+                    println!(
+                        "Items aborted by {} hook.",
+                        crate::color::c_warn("before_store")
+                    );
+                    return Ok(());
+                }
+                Some(i) => i,
+            },
+            None => items,
+        };
+
+        println!(
+            "\n{}",
+            crate::color::c_bold(&format!("Final pipeline output ({} items):", items.len()))
+        );
+        for (i, item) in items.iter().enumerate() {
+            println!("\n  Item {}:", crate::color::c_info(&(i + 1).to_string()));
+            for (k, v) in &item.fields {
+                println!("    {}: {}", crate::color::c_bold(k), v);
+            }
+            if !item.matches.is_empty() {
+                println!("    matches: {:?}", item.matches);
+            }
         }
-        if !item.matches.is_empty() {
-            println!("    matches: {:?}", item.matches);
+
+        let html_path = job
+            .dir
+            .as_deref()
+            .unwrap_or(std::path::Path::new("."))
+            .join(format!("{}-response.html", job.config.id()));
+        let fields_path = job
+            .dir
+            .as_deref()
+            .unwrap_or(std::path::Path::new("."))
+            .join(format!("{}-fields.json", job.config.id()));
+
+        println!(
+            "\nHTML source and extracted fields written in: {}, {}",
+            crate::color::c_dim(&html_path.display().to_string()),
+            crate::color::c_dim(&fields_path.display().to_string())
+        );
+
+        Ok(())
+    }
+    .await;
+
+    if let Some(h) = job.hooks.as_ref() {
+        match &result {
+            Ok(()) => h.run_on_success().await,
+            Err(e) => h.run_on_error(e).await,
         }
+        h.run_on_finally().await;
+        h.cleanup_cycle_state().await;
     }
 
-    let html_path = job
-        .dir
-        .as_deref()
-        .unwrap_or(std::path::Path::new("."))
-        .join(format!("{}-response.html", job.config.id()));
-    let fields_path = job
-        .dir
-        .as_deref()
-        .unwrap_or(std::path::Path::new("."))
-        .join(format!("{}-fields.json", job.config.id()));
-
-    println!(
-        "\nHTML source and extracted fields written in: {}, {}",
-        crate::color::c_dim(&html_path.display().to_string()),
-        crate::color::c_dim(&fields_path.display().to_string())
-    );
-
-    Ok(())
+    result
 }
 
 #[cfg(test)]

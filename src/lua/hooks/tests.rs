@@ -211,3 +211,189 @@ end
     let _ = fs::remove_file(&hook_path);
     let _ = fs::remove_dir(&dir);
 }
+
+#[test]
+fn test_defer_lua_lifecycle_hooks_share_vm_state() {
+    let dir = unique_test_dir("defer-lua-lifecycle");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    let defer_path = dir.join("defer.lua");
+
+    fs::write(
+        &hook_path,
+        r#"
+function before_fetch(request)
+    _G.log = { "hook" }
+    _G.shared_url = request.url
+    return request
+end
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        &defer_path,
+        r#"
+function on_success()
+    table.insert(_G.log, "success:" .. _G.shared_url)
+end
+
+function on_error(err)
+    table.insert(_G.log, "error:" .. err)
+end
+
+function on_finally()
+    table.insert(_G.log, "finally")
+    defer(function() table.insert(_G.log, "deferred-from-finally") end)
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+    assert!(hooks.has_on_success);
+    assert!(hooks.has_on_error);
+    assert!(hooks.has_on_finally);
+
+    let req = RequestConfig {
+        url: "https://example.com".into(),
+        headers: Default::default(),
+    };
+
+    let _ = smol::block_on(hooks.before_fetch(req)).unwrap();
+    smol::block_on(async {
+        hooks.run_on_success().await;
+        hooks.run_on_finally().await;
+
+        let lua = hooks.lua.lock().await;
+        let log: Vec<String> = lua
+            .globals()
+            .get::<mlua::Table>("_G")
+            .unwrap()
+            .get("log")
+            .unwrap();
+        assert_eq!(log, vec!["hook", "success:https://example.com", "finally"]);
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_file(&defer_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_defer_lua_error_hook_and_cycle_cleanup() {
+    let dir = unique_test_dir("defer-lua-error");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    let defer_path = dir.join("defer.lua");
+
+    fs::write(&hook_path, "").unwrap();
+    fs::write(
+        &defer_path,
+        r#"
+_G.log = {}
+
+function on_error(err)
+    table.insert(_G.log, "error:" .. err)
+end
+
+function on_finally()
+    table.insert(_G.log, "finally")
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+    smol::block_on(async {
+        {
+            let lua = hooks.lua.lock().await;
+            lua.globals().set("last_fetch", "stale").unwrap();
+            lua.globals().set("selector_matches", 3).unwrap();
+            lua.globals()
+                .set("__deferred", lua.create_table().unwrap())
+                .unwrap();
+        }
+
+        hooks.run_on_error(&anyhow::anyhow!("boom")).await;
+        hooks.run_on_finally().await;
+
+        {
+            let lua = hooks.lua.lock().await;
+            let log: Vec<String> = lua
+                .globals()
+                .get::<mlua::Table>("_G")
+                .unwrap()
+                .get("log")
+                .unwrap();
+            assert_eq!(log, vec!["error:boom", "finally"]);
+        }
+
+        hooks.cleanup_cycle_state().await;
+
+        let lua = hooks.lua.lock().await;
+        assert!(matches!(
+            lua.globals().get::<mlua::Value>("last_fetch").unwrap(),
+            mlua::Value::Nil
+        ));
+        assert!(matches!(
+            lua.globals()
+                .get::<mlua::Value>("selector_matches")
+                .unwrap(),
+            mlua::Value::Nil
+        ));
+        assert!(matches!(
+            lua.globals().get::<mlua::Value>("__deferred").unwrap(),
+            mlua::Value::Nil
+        ));
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_file(&defer_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_lifecycle_hooks_require_defer_lua_file() {
+    let dir = unique_test_dir("defer-lua-required");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+
+    fs::write(
+        &hook_path,
+        r#"
+_G.log = {}
+
+function on_success()
+    table.insert(_G.log, "should-not-run")
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+    assert!(!hooks.has_on_success);
+
+    smol::block_on(async {
+        hooks.run_on_success().await;
+
+        let lua = hooks.lua.lock().await;
+        let log: Vec<String> = lua
+            .globals()
+            .get::<mlua::Table>("_G")
+            .unwrap()
+            .get("log")
+            .unwrap();
+        assert!(log.is_empty());
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}

@@ -20,6 +20,9 @@ pub struct JobHooks {
     pub(crate) has_before_store: bool,
     pub(crate) has_before_notify: bool,
     pub(crate) has_before_webhook: bool,
+    pub(crate) has_on_success: bool,
+    pub(crate) has_on_error: bool,
+    pub(crate) has_on_finally: bool,
 }
 
 impl std::fmt::Debug for JobHooks {
@@ -36,6 +39,9 @@ impl std::fmt::Debug for JobHooks {
             .field("has_before_store", &self.has_before_store)
             .field("has_before_notify", &self.has_before_notify)
             .field("has_before_webhook", &self.has_before_webhook)
+            .field("has_on_success", &self.has_on_success)
+            .field("has_on_error", &self.has_on_error)
+            .field("has_on_finally", &self.has_on_finally)
             .finish()
     }
 }
@@ -76,6 +82,17 @@ impl JobHooks {
         let chunk_name = path.to_string_lossy();
         lua.load(&source).set_name(chunk_name.as_ref()).exec()?;
 
+        let defer_path = path.with_file_name("defer.lua");
+        let has_defer_lua = defer_path.exists();
+        if has_defer_lua {
+            let defer_source = std::fs::read_to_string(&defer_path)
+                .map_err(|e| anyhow::anyhow!("failed to read defer.lua: {e}"))?;
+            lua.load(&defer_source)
+                .set_name("defer.lua")
+                .exec()
+                .map_err(|e| anyhow::anyhow!("defer.lua load error for job '{job_name}': {e}"))?;
+        }
+
         let has = |name: &str| -> bool {
             lua.globals()
                 .get::<Option<mlua::Function>>(name)
@@ -95,6 +112,9 @@ impl JobHooks {
             has_before_store: has("before_store"),
             has_before_notify: has("before_notify"),
             has_before_webhook: has("before_webhook"),
+            has_on_success: has_defer_lua && has("on_success"),
+            has_on_error: has_defer_lua && has("on_error"),
+            has_on_finally: has_defer_lua && has("on_finally"),
             lua: Mutex::new(lua),
         })
     }
@@ -105,6 +125,10 @@ impl JobHooks {
 
     pub fn has_before_webhook(&self) -> bool {
         self.has_before_webhook
+    }
+
+    pub fn has_cycle_cleanup(&self) -> bool {
+        self.has_on_success || self.has_on_error || self.has_on_finally
     }
 
     pub(crate) fn format_hook_error(&self, hook_name: &'static str, err: anyhow::Error) -> String {
@@ -134,6 +158,84 @@ impl JobHooks {
         let lua = self.lua.lock().await;
         lua.globals().set("selector_matches", count)?;
         Ok(())
+    }
+
+    pub async fn run_on_success(&self) {
+        if !self.has_on_success {
+            return;
+        }
+
+        let lua = self.lua.lock().await;
+        match lua.globals().get::<mlua::Function>("on_success") {
+            Ok(f) => {
+                if let Err(e) = f.call_async::<()>(()).await {
+                    crate::t_eprintln!(
+                        "defer.lua on_success error for job '{}': {e}",
+                        self.job_name
+                    );
+                }
+            }
+            Err(e) => {
+                crate::t_eprintln!(
+                    "defer.lua: on_success not callable for job '{}': {e}",
+                    self.job_name
+                );
+            }
+        }
+    }
+
+    pub async fn run_on_error(&self, err: &anyhow::Error) {
+        if !self.has_on_error {
+            return;
+        }
+
+        let lua = self.lua.lock().await;
+        let err = err.to_string();
+        match lua.globals().get::<mlua::Function>("on_error") {
+            Ok(f) => {
+                if let Err(e) = f.call_async::<()>(err).await {
+                    crate::t_eprintln!("defer.lua on_error error for job '{}': {e}", self.job_name);
+                }
+            }
+            Err(e) => {
+                crate::t_eprintln!(
+                    "defer.lua: on_error not callable for job '{}': {e}",
+                    self.job_name
+                );
+            }
+        }
+    }
+
+    pub async fn run_on_finally(&self) {
+        if !self.has_on_finally {
+            return;
+        }
+
+        let lua = self.lua.lock().await;
+        match lua.globals().get::<mlua::Function>("on_finally") {
+            Ok(f) => {
+                if let Err(e) = f.call_async::<()>(()).await {
+                    crate::t_eprintln!(
+                        "defer.lua on_finally error for job '{}': {e}",
+                        self.job_name
+                    );
+                }
+            }
+            Err(e) => {
+                crate::t_eprintln!(
+                    "defer.lua: on_finally not callable for job '{}': {e}",
+                    self.job_name
+                );
+            }
+        }
+    }
+
+    pub async fn cleanup_cycle_state(&self) {
+        let lua = self.lua.lock().await;
+        let _ = lua.globals().set("last_fetch", mlua::Value::Nil);
+        let _ = lua.globals().set("selector_matches", mlua::Value::Nil);
+        let _ = lua.globals().set("__deferred", mlua::Value::Nil);
+        let _ = lua.gc_collect();
     }
 }
 

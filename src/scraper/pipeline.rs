@@ -13,17 +13,52 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
         crate::t_println!("Running job: {}", color::c_job(&job.config.name));
         let started = std::time::Instant::now();
 
-        if let Err(e) = run_once(&job, &db, &runner).await {
+        let result = run_once(&job, &db, &runner).await;
+        let pipeline_elapsed = started.elapsed();
+        let cleanup_started = std::time::Instant::now();
+
+        let ran_cycle_cleanup = job.hooks.as_ref().is_some_and(|h| h.has_cycle_cleanup());
+
+        if let Some(h) = job.hooks.as_ref() {
+            match &result {
+                Ok(()) => h.run_on_success().await,
+                Err(e) => h.run_on_error(e).await,
+            }
+            h.run_on_finally().await;
+            h.cleanup_cycle_state().await;
+        }
+
+        let cleanup_elapsed = cleanup_started.elapsed();
+
+        if let Err(e) = result {
             crate::t_eprintln!("Job '{}' error: {}", color::c_job(&job.config.name), e);
         }
 
+        let cleanup_msg = if ran_cycle_cleanup {
+            format!(
+                ", cleanup finished in {}",
+                color::c_info(&format_duration(cleanup_elapsed))
+            )
+        } else {
+            String::new()
+        };
+
         crate::t_println!(
-            "Job [{}] finished in {}, sleeping for {}",
+            "Job [{}] finished in {}{}, sleeping for {}",
             color::c_job(&job.config.name),
-            color::c_info(&format!("{:.2}s", started.elapsed().as_secs_f64())),
+            color::c_info(&format_duration(pipeline_elapsed)),
+            cleanup_msg,
             color::c_info(&format!("{}s", job.config.interval))
         );
         Timer::after(interval).await;
+    }
+}
+
+fn format_duration(duration: Duration) -> String {
+    if duration.as_secs() > 0 {
+        format!("{:.2}s", duration.as_secs_f64())
+    } else {
+        format!("{:.2}ms", duration.as_secs_f64() * 1000.0)
     }
 }
 
