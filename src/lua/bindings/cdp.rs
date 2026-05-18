@@ -439,7 +439,14 @@ impl mlua::UserData for Browser {
                                 && t["url"].as_str() == Some("about:blank")
                         })
                     }) {
-                        let target_id = existing["targetId"].as_str().unwrap().to_string();
+                        let target_id = existing["targetId"]
+                            .as_str()
+                            .ok_or_else(|| {
+                                mlua::Error::runtime(
+                                    "missing or invalid targetId in CDP response".to_string(),
+                                )
+                            })?
+                            .to_string();
                         return create_page_table(
                             &lua,
                             Arc::clone(&this.transport),
@@ -634,7 +641,7 @@ pub fn register(lua: &mlua::Lua, job_dir: Option<PathBuf>) -> mlua::Result<()> {
     cdp_table.set(
         "get_browser",
         lua.create_async_function(|_, ()| async move {
-            Ok(smol::unblock(|| find_browser_executable()).await)
+            Ok(smol::unblock(find_browser_executable).await)
         })?,
     )?;
 

@@ -71,10 +71,10 @@ fn handle_task(files: &mut HashMap<PathBuf, File>, task: IoTask) -> anyhow::Resu
     validate_path(&task.path)?;
 
     // 2. Ensure parent directory exists
-    if let Some(parent) = task.path.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = task.path.parent()
+        && !parent.exists()
+    {
+        fs::create_dir_all(parent)?;
     }
 
     match task.op {
@@ -190,12 +190,10 @@ fn rotate_file(path: &Path) -> anyhow::Result<()> {
             if name.starts_with(&format!("{}.", stem))
                 && (extension.is_empty() || name.ends_with(&format!(".{}", extension)))
                 && name != path.file_name().unwrap_or_default().to_string_lossy()
+                && let Ok(metadata) = entry.metadata()
+                && metadata.is_file()
             {
-                if let Ok(metadata) = entry.metadata() {
-                    if metadata.is_file() {
-                        entries.push((name, entry.path()));
-                    }
-                }
+                entries.push((name, entry.path()));
             }
         }
     }

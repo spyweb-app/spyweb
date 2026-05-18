@@ -21,6 +21,7 @@ pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
 
     ctrlc::set_handler(move || {
         crate::t_println!("\nShutting down gracefully...");
+        crate::cdp::browser::shutdown_all();
         crate::services::io::shutdown();
         // Give it a moment to drain
         std::thread::sleep(std::time::Duration::from_millis(500));

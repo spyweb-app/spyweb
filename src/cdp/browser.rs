@@ -1,17 +1,41 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
+use async_process::Child;
 use fs4::FileExt;
 use futures_lite::StreamExt;
 
 use crate::cdp::transport::CdpTransport;
 use crate::cdp::types::LaunchOptions;
 
+static REGISTRY: OnceLock<Mutex<Vec<Arc<Mutex<Option<Child>>>>>> = OnceLock::new();
+
+fn register_process(child: Arc<Mutex<Option<Child>>>) {
+    let registry = REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let mut guard = registry.lock().unwrap();
+    guard.retain(|arc| {
+        arc.lock().map(|inner| inner.is_some()).unwrap_or(false)
+    });
+    guard.push(child);
+}
+
+pub fn shutdown_all() {
+    if let Some(registry) = REGISTRY.get() {
+        let mut guard = registry.lock().unwrap();
+        for arc in guard.drain(..) {
+            if let Ok(mut child_guard) = arc.lock() {
+                if let Some(mut child) = child_guard.take() {
+                    let _ = child.kill();
+                }
+            }
+        }
+    }
+}
+
 pub struct Browser {
     pub(crate) transport: Arc<CdpTransport>,
-
-    process: Option<async_process::Child>,
+    process: Option<Arc<Mutex<Option<Child>>>>,
     user_data_dir: Option<PathBuf>,
     pub(crate) _lock_file: Option<std::fs::File>,
     pub(crate) keep_alive: bool,
@@ -182,9 +206,12 @@ impl Browser {
         };
 
         // Step 6: Return Browser (browser-level transport — use b:attach() for page access)
+        let child_arc = Arc::new(Mutex::new(Some(child)));
+        register_process(Arc::clone(&child_arc));
+
         Ok(Self {
             transport: Arc::new(transport),
-            process: Some(child),
+            process: Some(child_arc),
             user_data_dir: options.user_data_dir,
             _lock_file: lock_file,
             keep_alive: options.keep_alive,
@@ -194,8 +221,12 @@ impl Browser {
 
     pub fn close(&mut self) {
         self.transport.close();
-        if let Some(mut child) = self.process.take() {
-            let _ = child.kill();
+        if let Some(child_mutex) = self.process.take() {
+            if let Ok(mut child_guard) = child_mutex.lock() {
+                if let Some(mut child) = child_guard.take() {
+                    let _ = child.kill();
+                }
+            }
         }
         self._lock_file.take();
     }
