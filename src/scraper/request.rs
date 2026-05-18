@@ -245,28 +245,24 @@ impl RequestHandler {
 }
 
 fn flatten_headers(headers: &HeaderMap) -> HashMap<String, String> {
-    headers
-        .iter()
-        .map(|(name, value)| {
-            (
-                name.as_str().to_owned(),
-                value.to_str().unwrap_or_default().to_owned(),
-            )
-        })
-        .collect()
+    let mut map = HashMap::new();
+    for (name, value) in headers.iter() {
+        let v = value.to_str().unwrap_or_default();
+        map.entry(name.as_str().to_owned())
+            .and_modify(|existing: &mut String| {
+                existing.push_str(", ");
+                existing.push_str(v);
+            })
+            .or_insert_with(|| v.to_owned());
+    }
+    map
 }
 
 fn random_index(len: usize) -> usize {
     if len == 0 {
         return 0;
     }
-
-    let nanos = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => duration.subsec_nanos() as usize,
-        Err(_) => 0,
-    };
-
-    nanos % len
+    fastrand::usize(..len)
 }
 
 pub fn fetch_job(job: &JobConfig) -> Result<RequestResult> {
