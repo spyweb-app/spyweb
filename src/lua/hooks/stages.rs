@@ -4,6 +4,38 @@ use crate::scraper::extractor::ExtractedItem;
 use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
 use anyhow::Result;
 
+fn run_deferred(lua: &mlua::Lua, hook_name: &str) {
+    loop {
+        let queue = match lua.globals().get::<mlua::Table>("__deferred") {
+            Ok(t) => t,
+            Err(_) => return, // no queue, nothing to do
+        };
+
+        let len = queue.raw_len();
+        if len == 0 {
+            return;
+        }
+
+        if let Ok(fresh) = lua.create_table() {
+            let _ = lua.globals().set("__deferred", fresh);
+        }
+
+        // Drain LIFO
+        for i in (1..=len).rev() {
+            match queue.get::<mlua::Function>(i) {
+                Ok(f) => {
+                    if let Err(e) = f.call::<()>(()) {
+                        crate::t_eprintln!("deferred fn #{i} error in hook '{hook_name}': {e}");
+                    }
+                }
+                Err(e) => {
+                    crate::t_eprintln!("deferred fn #{i} not callable in hook '{hook_name}': {e}");
+                }
+            }
+        }
+    }
+}
+
 impl JobHooks {
     pub async fn before_fetch(&self, req: RequestConfig) -> Result<Option<RequestConfig>> {
         if !self.has_before_fetch {
@@ -25,7 +57,9 @@ impl JobHooks {
         let lua = self.lua.lock().await;
         let func: mlua::Function = lua.globals().get("before_fetch")?;
         let table = conversions::request_to_lua(&lua, req)?;
-        match func.call_async::<mlua::Value>(table).await? {
+        let ret = func.call_async::<mlua::Value>(table).await;
+        run_deferred(&lua, "before_fetch");
+        match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => Ok(Some(conversions::lua_to_request(t, req.clone())?)),
             _ => Ok(Some(req.clone())),
@@ -54,9 +88,10 @@ impl JobHooks {
         let lua = self.lua.lock().await;
         let func: mlua::Function = lua.globals().get("override_fetch")?;
         let table = conversions::request_to_lua(&lua, req)?;
-        let ret = func.call_async::<mlua::Value>(table).await?;
+        let ret = func.call_async::<mlua::Value>(table).await;
         let _ = lua.gc_collect();
-        match ret {
+        run_deferred(&lua, "override_fetch");
+        match ret? {
             mlua::Value::Table(t) => {
                 if let Some(err_msg) = t.get::<Option<String>>("error")? {
                     Ok(FetchAttempt {
@@ -110,7 +145,9 @@ impl JobHooks {
         let lua = self.lua.lock().await;
         let func: mlua::Function = lua.globals().get("after_fetch")?;
         let table = conversions::fetch_result_to_lua(&lua, attempt)?;
-        match func.call_async::<mlua::Value>(table).await? {
+        let ret = func.call_async::<mlua::Value>(table).await;
+        run_deferred(&lua, "after_fetch");
+        match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => match &attempt.result {
                 Ok(original) => Ok(Some(conversions::lua_to_after_fetch_success_response(
@@ -147,8 +184,9 @@ impl JobHooks {
         let lua = self.lua.lock().await;
         let func: mlua::Function = lua.globals().get("override_extract")?;
         let table = conversions::response_to_lua(&lua, response)?;
-        let ret = func.call_async::<mlua::Value>(table).await?;
-        match ret {
+        let ret = func.call_async::<mlua::Value>(table).await;
+        run_deferred(&lua, "override_extract");
+        match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(vec![]),
             mlua::Value::Table(t) => conversions::lua_to_items(t, vec![]),
             _ => Ok(vec![]),
@@ -175,7 +213,9 @@ impl JobHooks {
         let lua = self.lua.lock().await;
         let func: mlua::Function = lua.globals().get("after_extract")?;
         let table = conversions::items_to_lua(&lua, items)?;
-        match func.call_async::<mlua::Value>(table).await? {
+        let ret = func.call_async::<mlua::Value>(table).await;
+        run_deferred(&lua, "after_extract");
+        match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(vec![]),
             mlua::Value::Table(t) => conversions::lua_to_items(t, items.to_vec()),
             _ => Ok(items.to_vec()),
@@ -202,7 +242,9 @@ impl JobHooks {
         let lua = self.lua.lock().await;
         let func: mlua::Function = lua.globals().get("filter_item")?;
         let table = conversions::item_to_lua(&lua, item)?;
-        match func.call_async::<mlua::Value>(table).await? {
+        let ret = func.call_async::<mlua::Value>(table).await;
+        run_deferred(&lua, "filter_item");
+        match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => Ok(Some(conversions::lua_to_item(t, item.clone())?)),
             _ => Ok(Some(item.clone())),
@@ -232,7 +274,9 @@ impl JobHooks {
         let lua = self.lua.lock().await;
         let func: mlua::Function = lua.globals().get("before_store")?;
         let table = conversions::items_to_lua(&lua, items)?;
-        match func.call_async::<mlua::Value>(table).await? {
+        let ret = func.call_async::<mlua::Value>(table).await;
+        run_deferred(&lua, "before_store");
+        match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => Ok(Some(conversions::lua_to_items(t, items.to_vec())?)),
             _ => Ok(Some(items.to_vec())),
@@ -262,7 +306,9 @@ impl JobHooks {
         let lua = self.lua.lock().await;
         let func: mlua::Function = lua.globals().get("before_notify")?;
         let table = conversions::items_to_lua(&lua, items)?;
-        match func.call_async::<mlua::Value>(table).await? {
+        let ret = func.call_async::<mlua::Value>(table).await;
+        run_deferred(&lua, "before_notify");
+        match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => Ok(Some(conversions::lua_to_items(t, items.to_vec())?)),
             _ => Ok(Some(items.to_vec())),
@@ -292,7 +338,9 @@ impl JobHooks {
         let lua = self.lua.lock().await;
         let func: mlua::Function = lua.globals().get("before_webhook")?;
         let table = conversions::json_to_lua(&lua, payload)?;
-        match func.call_async::<mlua::Value>(table).await? {
+        let ret = func.call_async::<mlua::Value>(table).await;
+        run_deferred(&lua, "before_webhook");
+        match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => Ok(Some(conversions::lua_to_json(&mlua::Value::Table(t))?)),
             _ => Ok(Some(payload.clone())),

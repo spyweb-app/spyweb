@@ -153,3 +153,61 @@ end
     let _ = fs::remove_file(&hook_path);
     let _ = fs::remove_dir(&dir);
 }
+
+#[test]
+fn test_defer_binding() {
+    let dir = unique_test_dir("defer-binding");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(
+        &hook_path,
+        r#"
+function before_fetch(request)
+    _G.log = {}
+    defer(function() table.insert(_G.log, "first") end)
+    defer(function() table.insert(_G.log, "second") end)
+    defer(function() 
+        table.insert(_G.log, "third")
+        error("simulated error in third") 
+    end)
+    defer(function() 
+        table.insert(_G.log, "fourth")
+        defer(function() table.insert(_G.log, "re-entrant") end)
+    end)
+    return request
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+    let req = RequestConfig {
+        url: "https://example.com".into(),
+        headers: Default::default(),
+    };
+
+    let _ = smol::block_on(hooks.before_fetch(req)).unwrap();
+
+    smol::block_on(async {
+        let lua = hooks.lua.lock().await;
+        let log: Vec<String> = lua
+            .globals()
+            .get::<mlua::Table>("_G")
+            .unwrap()
+            .get("log")
+            .unwrap();
+        // LIFO: fourth -> third (errors, logs, continues) -> second -> first
+        // Re-entrant: "re-entrant" is pushed during "fourth"'s execution,
+        // but the current queue was swapped. It is drained in the next loop iteration.
+        assert_eq!(
+            log,
+            vec!["fourth", "third", "second", "first", "re-entrant"]
+        );
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
