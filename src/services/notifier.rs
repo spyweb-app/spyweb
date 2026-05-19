@@ -67,8 +67,6 @@ impl Notif {
     }
 }
 
-
-
 fn _field_names(fields: &[Field]) -> Vec<String> {
     fields
         .iter()
@@ -194,7 +192,6 @@ fn default_title(data: &NotificationData, items: &[ExtractedItem]) -> String {
         format!("{} new matches from {}", items.len(), data.job_name.clone())
     }
 }
-
 
 fn default_body(field_order: &[String], items: &[ExtractedItem]) -> String {
     let mut parts: Vec<String> = items

@@ -6,6 +6,9 @@ use smol::lock::Mutex;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 pub mod stages;
+pub(crate) mod telemetry;
+
+pub(crate) use telemetry::TelemetrySample;
 
 pub struct JobHooks {
     pub(crate) lua: Mutex<Lua>,
@@ -150,10 +153,6 @@ impl JobHooks {
         }
     }
 
-    pub(crate) fn log_hook_error(&self, hook_name: &'static str, err: anyhow::Error) {
-        crate::t_eprintln!("{}, skipping hook", self.format_hook_error(hook_name, err));
-    }
-
     pub async fn set_selector_matches(&self, count: usize) -> Result<()> {
         let lua = self.lua.lock().await;
         lua.globals().set("selector_matches", count)?;
@@ -234,6 +233,8 @@ impl JobHooks {
         let lua = self.lua.lock().await;
         let _ = lua.globals().set("last_fetch", mlua::Value::Nil);
         let _ = lua.globals().set("selector_matches", mlua::Value::Nil);
+        let _ = lua.globals().set("spyweb_telemetry", mlua::Value::Nil);
+        let _ = lua.globals().set("__spyweb_filter_error", mlua::Value::Nil);
         let _ = lua.globals().set("__deferred", mlua::Value::Nil);
         let _ = lua.gc_collect();
     }

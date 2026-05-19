@@ -41,10 +41,19 @@ impl JobHooks {
         if !self.has_before_fetch {
             return Ok(Some(req));
         }
+        let sample = self.telemetry_stage_start().await?;
         match self.try_before_fetch(&req).await {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                let _ = self
+                    .record_telemetry_stage("before_fetch", sample, "success", None)
+                    .await;
+                Ok(result)
+            }
             Err(e) => {
-                self.log_hook_error("before_fetch", e);
+                let rendered = self.render_and_log_hook_error("before_fetch", e);
+                let _ = self
+                    .record_telemetry_stage("before_fetch", sample, "error", Some(rendered))
+                    .await;
                 Ok(Some(req))
             }
         }
@@ -71,10 +80,23 @@ impl JobHooks {
     }
 
     pub async fn override_fetch(&self, req: RequestConfig) -> Result<FetchAttempt> {
+        let sample = self.telemetry_stage_start().await?;
         match self.try_override_fetch(&req).await {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                let (status, error) = match &result.result {
+                    Ok(_) => ("success", None),
+                    Err(err) => ("error", Some(err.clone())),
+                };
+                let _ = self
+                    .record_telemetry_stage("override_fetch", sample, status, error)
+                    .await;
+                Ok(result)
+            }
             Err(e) => {
-                self.log_hook_error("override_fetch", e);
+                let rendered = self.render_and_log_hook_error("override_fetch", e);
+                let _ = self
+                    .record_telemetry_stage("override_fetch", sample, "error", Some(rendered))
+                    .await;
                 Ok(FetchAttempt {
                     request: req,
                     proxy: None,
@@ -119,10 +141,19 @@ impl JobHooks {
         if !self.has_after_fetch {
             return attempt.result.map(Some).map_err(anyhow::Error::msg);
         }
+        let sample = self.telemetry_stage_start().await?;
         match self.try_after_fetch(&attempt).await {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                let _ = self
+                    .record_telemetry_stage("after_fetch", sample, "success", None)
+                    .await;
+                Ok(result)
+            }
             Err(e) => {
-                self.log_hook_error("after_fetch", e);
+                let rendered = self.render_and_log_hook_error("after_fetch", e);
+                let _ = self
+                    .record_telemetry_stage("after_fetch", sample, "error", Some(rendered))
+                    .await;
                 match attempt.result {
                     Ok(res) => Ok(Some(res)),
                     Err(err) => Err(anyhow::Error::msg(err)),
@@ -168,10 +199,19 @@ impl JobHooks {
     }
 
     pub async fn override_extract(&self, response: &RequestResult) -> Result<Vec<ExtractedItem>> {
+        let sample = self.telemetry_stage_start().await?;
         match self.try_override_extract(response).await {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                let _ = self
+                    .record_telemetry_stage("override_extract", sample, "success", None)
+                    .await;
+                Ok(result)
+            }
             Err(e) => {
-                self.log_hook_error("override_extract", e);
+                let rendered = self.render_and_log_hook_error("override_extract", e);
+                let _ = self
+                    .record_telemetry_stage("override_extract", sample, "error", Some(rendered))
+                    .await;
                 Ok(vec![])
             }
         }
@@ -197,10 +237,19 @@ impl JobHooks {
         if !self.has_after_extract {
             return Ok(items);
         }
+        let sample = self.telemetry_stage_start().await?;
         match self.try_after_extract(&items).await {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                let _ = self
+                    .record_telemetry_stage("after_extract", sample, "success", None)
+                    .await;
+                Ok(result)
+            }
             Err(e) => {
-                self.log_hook_error("after_extract", e);
+                let rendered = self.render_and_log_hook_error("after_extract", e);
+                let _ = self
+                    .record_telemetry_stage("after_extract", sample, "error", Some(rendered))
+                    .await;
                 Ok(items)
             }
         }
@@ -229,7 +278,8 @@ impl JobHooks {
         match self.try_filter_item(&item).await {
             Ok(result) => Ok(result),
             Err(e) => {
-                self.log_hook_error("filter_item", e);
+                let rendered = self.render_and_log_hook_error("filter_item", e);
+                self.remember_filter_error(rendered).await;
                 Ok(Some(item))
             }
         }
@@ -258,10 +308,19 @@ impl JobHooks {
         if !self.has_before_store {
             return Ok(Some(items));
         }
+        let sample = self.telemetry_stage_start().await?;
         match self.try_before_store(&items).await {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                let _ = self
+                    .record_telemetry_stage("before_store", sample, "success", None)
+                    .await;
+                Ok(result)
+            }
             Err(e) => {
-                self.log_hook_error("before_store", e);
+                let rendered = self.render_and_log_hook_error("before_store", e);
+                let _ = self
+                    .record_telemetry_stage("before_store", sample, "error", Some(rendered))
+                    .await;
                 Ok(Some(items))
             }
         }
@@ -290,10 +349,19 @@ impl JobHooks {
         if !self.has_before_notify {
             return Ok(Some(items));
         }
+        let sample = self.telemetry_stage_start().await?;
         match self.try_before_notify(&items).await {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                let _ = self
+                    .record_telemetry_stage("before_notify", sample, "success", None)
+                    .await;
+                Ok(result)
+            }
             Err(e) => {
-                self.log_hook_error("before_notify", e);
+                let rendered = self.render_and_log_hook_error("before_notify", e);
+                let _ = self
+                    .record_telemetry_stage("before_notify", sample, "error", Some(rendered))
+                    .await;
                 Ok(Some(items))
             }
         }
@@ -322,10 +390,19 @@ impl JobHooks {
         if !self.has_before_webhook {
             return Ok(Some(payload));
         }
+        let sample = self.telemetry_stage_start().await?;
         match self.try_before_webhook(&payload).await {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                let _ = self
+                    .record_telemetry_stage("before_webhook", sample, "success", None)
+                    .await;
+                Ok(result)
+            }
             Err(e) => {
-                self.log_hook_error("before_webhook", e);
+                let rendered = self.render_and_log_hook_error("before_webhook", e);
+                let _ = self
+                    .record_telemetry_stage("before_webhook", sample, "error", Some(rendered))
+                    .await;
                 Ok(Some(payload))
             }
         }

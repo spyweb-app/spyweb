@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn unique_test_dir(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -391,6 +391,72 @@ end
             .get("log")
             .unwrap();
         assert!(log.is_empty());
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn telemetry_table_records_active_stages_and_cleans_up() {
+    let dir = unique_test_dir("telemetry-table");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(&hook_path, "").unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+    smol::block_on(async {
+        hooks.init_telemetry().await.unwrap();
+        let sample = hooks.telemetry_stage_start().await.unwrap();
+        hooks
+            .record_telemetry_stage("fetch", sample, "success", None)
+            .await
+            .unwrap();
+        hooks
+            .finalize_telemetry(Duration::from_millis(42))
+            .await
+            .unwrap();
+
+        {
+            let lua = hooks.lua.lock().await;
+            let telemetry: mlua::Table = lua.globals().get("spyweb_telemetry").unwrap();
+            let stages: mlua::Table = telemetry.get("stages").unwrap();
+            let map: mlua::Table = telemetry.get("map").unwrap();
+
+            assert_eq!(telemetry.get::<String>("job_name").unwrap(), "test_job");
+            assert_eq!(stages.raw_len(), 14);
+            assert_eq!(telemetry.get::<f64>("total_duration_ms").unwrap(), 42.0);
+
+            let fetch: mlua::Table = map.get("fetch").unwrap();
+            assert_eq!(fetch.get::<String>("status").unwrap(), "success");
+            assert!(fetch.get::<f64>("duration_ms").unwrap() >= 0.0);
+            assert!(fetch.get::<f64>("offset_ms").unwrap() >= 0.0);
+            assert!(fetch.get::<i64>("lua_mem_bytes").unwrap() > 0);
+            assert!(fetch.get::<i64>("browsers").unwrap() >= 0);
+
+            let before_fetch: mlua::Table = map.get("before_fetch").unwrap();
+            assert_eq!(before_fetch.get::<String>("status").unwrap(), "inactive");
+            assert!(matches!(
+                before_fetch.get::<mlua::Value>("duration_ms").unwrap(),
+                mlua::Value::Nil
+            ));
+            assert!(matches!(
+                before_fetch.get::<mlua::Value>("offset_ms").unwrap(),
+                mlua::Value::Nil
+            ));
+        }
+
+        hooks.cleanup_cycle_state().await;
+        let lua = hooks.lua.lock().await;
+        assert!(matches!(
+            lua.globals()
+                .get::<mlua::Value>("spyweb_telemetry")
+                .unwrap(),
+            mlua::Value::Nil
+        ));
     });
 
     let _ = fs::remove_file(dir.join("test.redb"));

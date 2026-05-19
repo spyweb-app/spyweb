@@ -139,6 +139,11 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
 
     println!("Debug run for job: {}", crate::color::c_job(job_name));
 
+    if let Some(h) = job.hooks.as_ref() {
+        h.init_telemetry().await?;
+    }
+    let started = std::time::Instant::now();
+
     let result = async {
         let runner = Runner::new();
         let request = RequestConfig::from_job(&job.config);
@@ -303,6 +308,9 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     .await;
 
     if let Some(h) = job.hooks.as_ref() {
+        let _ = h.finalize_telemetry(started.elapsed()).await;
+        h.print_telemetry().await;
+
         match &result {
             Ok(()) => h.run_on_success().await,
             Err(e) => h.run_on_error(e).await,

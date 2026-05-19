@@ -18,6 +18,16 @@ fn register_process(child: Arc<Mutex<Option<Child>>>) {
     guard.push(child);
 }
 
+pub fn active_count() -> usize {
+    let Some(registry) = REGISTRY.get() else {
+        return 0;
+    };
+
+    let mut guard = registry.lock().unwrap();
+    guard.retain(|arc| arc.lock().map(|inner| inner.is_some()).unwrap_or(false));
+    guard.len()
+}
+
 pub fn shutdown_all() {
     if let Some(registry) = REGISTRY.get() {
         let mut guard = registry.lock().unwrap();

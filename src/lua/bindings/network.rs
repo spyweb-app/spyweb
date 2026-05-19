@@ -29,9 +29,7 @@ impl RawResponse {
     }
 }
 
-fn collect_headers(
-    headers: &ureq::http::HeaderMap,
-) -> std::collections::HashMap<String, String> {
+fn collect_headers(headers: &ureq::http::HeaderMap) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     for (name, value) in headers.iter() {
         let v = value.to_str().unwrap_or_default();
