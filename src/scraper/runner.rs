@@ -238,7 +238,12 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
             Some(h) if h.has_filter_item() => {
                 let mut filtered = Vec::new();
                 for item in items {
-                    if let Some(i) = h.filter_item(item).await? {
+                    if let Some(mut i) = h.filter_item(item).await? {
+                        i.matches = crate::scraper::extractor::matching_keywords(
+                            &i.fields,
+                            job.config.keywords.as_deref(),
+                            job.config.search_fields.as_deref(),
+                        );
                         filtered.push(i);
                     }
                 }

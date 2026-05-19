@@ -41,7 +41,13 @@ pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
     let ex = Arc::new(Executor::new());
     let (_s, r) = smol::channel::unbounded::<()>();
 
-    for _ in 0..2 {
+    let thread_count = std::env::var("SPYWEB_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(2)
+        .clamp(1, 64);
+
+    for _ in 0..thread_count {
         let ex = Arc::clone(&ex);
         let s = r.clone();
         thread::spawn(move || smol::block_on(ex.run(s.recv())));
