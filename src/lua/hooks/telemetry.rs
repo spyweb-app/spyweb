@@ -214,10 +214,13 @@ impl JobHooks {
                     "inactive" => crate::color::c_dim("[ SKIP ]"),
                     _ => crate::color::c_warn(&format!("[ {:^4} ]", status)),
                 };
-
                 let duration_ms = entry.get::<f64>("duration_ms").unwrap_or(0.0);
                 let duration_padded = if duration_ms > 0.0 {
-                    format!("{:>8.1} ms", duration_ms)
+                    if duration_ms >= 1000.0 {
+                        format!("{:>9.2} s", duration_ms / 1000.0)
+                    } else {
+                        format!("{:>8.1} ms", duration_ms)
+                    }
                 } else {
                     format!("{:>11}", "-")
                 };
@@ -234,13 +237,22 @@ impl JobHooks {
                 let lua_mem = entry.get::<i64>("lua_mem_bytes").unwrap_or(0) as f64;
                 let mem_delta = entry.get::<i64>("mem_delta_bytes").unwrap_or(0) as f64;
                 let mem_padded = if lua_mem > 0.0 {
+                    let mem_val = lua_mem / 1024.0;
+                    let mem_str = if mem_val >= 1024.0 {
+                        format!("{:.2} MB", mem_val / 1024.0)
+                    } else {
+                        format!("{:.1} KB", mem_val)
+                    };
+
                     let sign = if mem_delta > 0.0 { "+" } else { "" };
-                    let formatted = format!(
-                        "{:.1} KB ({}{:.1} KB)",
-                        lua_mem / 1024.0,
-                        sign,
-                        mem_delta / 1024.0
-                    );
+                    let delta_val = mem_delta / 1024.0;
+                    let delta_str = if delta_val.abs() >= 1024.0 {
+                        format!("{}{:.2} MB", sign, delta_val / 1024.0)
+                    } else {
+                        format!("{}{:.1} KB", sign, delta_val)
+                    };
+
+                    let formatted = format!("{} ({})", mem_str, delta_str);
                     format!("{:>20}", formatted)
                 } else {
                     format!("{:>20}", "-")
@@ -277,10 +289,15 @@ impl JobHooks {
             )
         );
         if let Ok(total) = telemetry.get::<f64>("total_duration_ms") {
+            let total_str = if total >= 1000.0 {
+                format!("{:.2} s", total / 1000.0)
+            } else {
+                format!("{:.1} ms", total)
+            };
             println!(
                 "{:<27} {}",
                 crate::color::c_bold("Total Duration:"),
-                crate::color::c_info(&format!("{:.1} ms", total))
+                crate::color::c_info(&total_str)
             );
         }
         println!();

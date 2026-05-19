@@ -59,21 +59,6 @@ impl PageHandle {
         .detach();
     }
 
-    async fn close_async(&self) {
-        if self.inner.closed.swap(true, Ordering::SeqCst) {
-            return;
-        }
-
-        let _ = self
-            .inner
-            .browser_transport
-            .call(
-                "Target.closeTarget",
-                serde_json::json!({ "targetId": self.inner.target_id.clone() }),
-            )
-            .await;
-        self.inner.page_transport.close();
-    }
 }
 
 impl Drop for PageHandle {
@@ -84,8 +69,8 @@ impl Drop for PageHandle {
 
 impl mlua::UserData for PageHandle {
     fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_async_method("close", |_, this, ()| async move {
-            this.close_async().await;
+        methods.add_method("close", |_, this, ()| {
+            this.close_best_effort();
             Ok(())
         });
     }
@@ -297,10 +282,10 @@ async fn create_page_table(
         )?,
     )?;
 
-    let close_handle = lua.create_async_function(move |_, page: mlua::Table| async move {
+    let close_handle = lua.create_function(move |_, page: mlua::Table| {
         let handle: mlua::AnyUserData = page.get("__handle")?;
         let handle = handle.borrow::<PageHandle>()?.clone();
-        handle.close_async().await;
+        handle.close_best_effort();
         Ok(())
     })?;
     page.set("close", close_handle)?;
@@ -518,19 +503,19 @@ impl mlua::UserData for Browser {
             let close_transport = Arc::clone(&this.transport);
             context.set(
                 "close",
-                lua.create_async_function(move |_, _self: mlua::Value| {
+                lua.create_function(move |_, _self: mlua::Value| {
                     let close_transport = close_transport.clone();
                     let context_id = context_id.clone();
-                    async move {
-                        close_transport
+                    smol::spawn(async move {
+                        let _ = close_transport
                             .call(
                                 "Target.disposeBrowserContext",
                                 serde_json::json!({ "browserContextId": context_id }),
                             )
-                            .await
-                            .map_err(mlua::Error::external)?;
-                        Ok(())
-                    }
+                            .await;
+                    })
+                    .detach();
+                    Ok(())
                 })?,
             )?;
 

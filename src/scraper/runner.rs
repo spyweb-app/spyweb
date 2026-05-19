@@ -171,7 +171,19 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
             }
             None => {
                 println!("Fetching URL: {}", crate::color::c_info(&request.url));
-                runner.fetch(&job.config, &request)
+                let sample = match job.hooks.as_ref() {
+                    Some(h) => Some(h.telemetry_stage_start().await?),
+                    None => None,
+                };
+                let attempt = runner.fetch(&job.config, &request);
+                if let (Some(h), Some(s)) = (job.hooks.as_ref(), sample) {
+                    let (status, error) = match &attempt.result {
+                        Ok(_) => ("success", None),
+                        Err(err) => ("error", Some(err.clone())),
+                    };
+                    let _ = h.record_telemetry_stage("fetch", s, status, error).await;
+                }
+                attempt
             }
         };
 
@@ -217,7 +229,17 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
                     selector_matches: count,
                 }
             }
-            None => runner.extract(&job.config, job.dir.as_deref(), &response)?,
+            None => {
+                let sample = match job.hooks.as_ref() {
+                    Some(h) => Some(h.telemetry_stage_start().await?),
+                    None => None,
+                };
+                let result = runner.extract(&job.config, job.dir.as_deref(), &response)?;
+                if let (Some(h), Some(s)) = (job.hooks.as_ref(), sample) {
+                    let _ = h.record_telemetry_stage("extract", s, "success", None).await;
+                }
+                result
+            }
         };
 
         println!(
@@ -239,6 +261,10 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
         };
 
         // 6. filter_item / keyword_filter
+        let filter_sample = match job.hooks.as_ref() {
+            Some(h) => Some(h.telemetry_stage_start().await?),
+            None => None,
+        };
         let items = match job.hooks.as_ref() {
             Some(h) if h.has_filter_item() => {
                 let mut filtered = Vec::new();
@@ -256,6 +282,11 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
             }
             _ => runner.keyword_filter(&job.config, items),
         };
+        if let (Some(h), Some(s)) = (job.hooks.as_ref(), filter_sample) {
+            let error = h.take_filter_error().await;
+            let status = if error.is_some() { "error" } else { "success" };
+            let _ = h.record_telemetry_stage("filter", s, status, error).await;
+        }
 
         // 7. before_store
         let items = match job.hooks.as_ref() {
