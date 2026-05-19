@@ -26,3 +26,9 @@ pub fn nanos_to_zulu(time: Option<u64>) -> String {
 pub fn now_zulu() -> String {
     nanos_to_zulu(None)
 }
+
+pub fn shutdown_system() {
+    crate::cdp::browser::shutdown_all();
+    crate::services::io::shutdown();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+}

@@ -250,7 +250,10 @@ pub fn listen_command() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::Debug { job_name } => {
-            smol::block_on(crate::scraper::runner::debug_job(&job_name))
+            crate::services::io::init();
+            let res = smol::block_on(crate::scraper::runner::debug_job(&job_name));
+            crate::services::utils::shutdown_system();
+            res
         }
         Commands::Profile { command } => handle_profile_command(command),
         Commands::Version => {

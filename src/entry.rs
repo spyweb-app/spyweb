@@ -21,10 +21,7 @@ pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
 
     ctrlc::set_handler(move || {
         crate::t_println!("\nShutting down gracefully...");
-        crate::cdp::browser::shutdown_all();
-        crate::services::io::shutdown();
-        // Give it a moment to drain
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        crate::services::utils::shutdown_system();
         std::process::exit(0);
     })
     .expect("Error setting Ctrl-C handler");
@@ -125,6 +122,7 @@ async fn job_manager(
         match loader::load_all_jobs("jobs.toml", "jobs", Arc::clone(&db)) {
             Ok(new_jobs) => {
                 drop(handles);
+                crate::cdp::browser::shutdown_all();
 
                 if let Ok(mut lock) = active_job_ids.write() {
                     *lock = new_jobs.list.iter().map(|j| j.config.id()).collect();
