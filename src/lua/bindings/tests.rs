@@ -64,26 +64,30 @@ fn test_http_bindings() {
         register_http_and_fs(&lua, None).unwrap();
 
         let code_get = format!(r#"http_get("http://127.0.0.1:{}/")"#, port);
-        let body: String = lua.load(&code_get).eval_async().await.unwrap();
-        assert_eq!(body, "GET-OK!");
+        let res: mlua::Table = lua.load(&code_get).eval_async().await.unwrap();
+        assert_eq!(res.get::<String>("body").unwrap(), "GET-OK!");
+        assert_eq!(res.get::<u16>("status").unwrap(), 200);
 
         let code_get_headers = format!(
             r#"http_get("http://127.0.0.1:{}/", {{ ["X-Custom-Auth"] = "secret-123" }})"#,
             port
         );
-        let body: String = lua.load(&code_get_headers).eval_async().await.unwrap();
-        assert_eq!(body, "GET-OK-AUTH!");
+        let res: mlua::Table = lua.load(&code_get_headers).eval_async().await.unwrap();
+        assert_eq!(res.get::<String>("body").unwrap(), "GET-OK-AUTH!");
+        assert_eq!(res.get::<u16>("status").unwrap(), 200);
 
         let code_post = format!(r#"http_post("http://127.0.0.1:{}/", "my-body")"#, port);
-        let body: String = lua.load(&code_post).eval_async().await.unwrap();
-        assert_eq!(body, "POST-OK!");
+        let res: mlua::Table = lua.load(&code_post).eval_async().await.unwrap();
+        assert_eq!(res.get::<String>("body").unwrap(), "POST-OK!");
+        assert_eq!(res.get::<u16>("status").unwrap(), 200);
 
         let code_post_headers = format!(
             r#"http_post("http://127.0.0.1:{}/", "my-body", {{ ["Content-Type"] = "application/json" }})"#,
             port
         );
-        let body: String = lua.load(&code_post_headers).eval_async().await.unwrap();
-        assert_eq!(body, "POST-OK-JSON!");
+        let res: mlua::Table = lua.load(&code_post_headers).eval_async().await.unwrap();
+        assert_eq!(res.get::<String>("body").unwrap(), "POST-OK-JSON!");
+        assert_eq!(res.get::<u16>("status").unwrap(), 200);
     });
 }
 
