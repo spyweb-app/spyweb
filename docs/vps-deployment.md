@@ -25,7 +25,7 @@ chmod +x spyweb
 
 ## 2. Running in the Background
 
-On a VPS, you want SpyWeb to stay alive even if the server reboots or the process crashes. The most lightweight and "bullet-proof" way to do this is using a **systemd service**.
+On a VPS, you want SpyWeb to stay alive even if the server reboots or the process crashes. The most lightweight and reliable way to do this is using a **systemd service**.
 
 ### Create the Service File
 Use Helix (the recommended editor below) to create and edit the service file:
@@ -90,11 +90,9 @@ sudo journalctl -u spyweb -f
 
 ---
 
-## 3. Remote Editor Setup (Recommended for complex setup with heavy lua logic)
+## 3. Remote Editor Setup (Optional)
 
-If you are building complex monitoring stations with **heavy Lua logic** and frequent updates, setting up a proper remote environment is a game-changer. I personally recommend the **Helix Editor** + **LSP** workflow because it gives you an IDE-like experience on a remote VPS.
-
-This setup ensures that you catch errors in your **hooks and configs** before you even hit save.
+For setups with complex Lua hooks and frequent configuration edits, configuring a remote editor with Language Server Protocol (LSP) integration is highly recommended. It provides an IDE-like experience directly on the VPS, ensuring that syntax errors in your scripts or TOML configs are caught immediately.
 
 ### A. Helix Editor
 A modern, modal terminal editor with built-in LSP support and no editor configuration required—Helix auto-detects installed language servers automatically.
@@ -153,10 +151,9 @@ chmod +x taplo-full-linux-x86_64
 sudo mv taplo-full-linux-x86_64 /usr/local/bin/taplo
 ```
 ### Why use this setup?
-SpyWeb features **Hot Reloading**. When you save a file (`.lua`, `.toml`), SpyWeb instantly detects the change and attempts to respawn the job.
-
-*   **For Power Users:** Using LSPs prevents **"Hook Bypassing."** If your Lua script has a syntax error, SpyWeb will log the error but *continue* the job by skipping the broken hook. Without LSPs, your custom filters or transformations might be silently ignored, and you'd only know by checking the logs.
-*   **For Minimalists:** If you only have 1-2 simple jobs or touch your setup once every few months, don't feel forced into this setup. You can always stick with `nano` (or whatever you prefer) and just keep `journalctl -u spyweb -f` open in a separate terminal to check for errors after you save.
+Because SpyWeb supports hot-reloading, saving any configuration or Lua script will instantly reload the job. Using an LSP is beneficial for two reasons:
+1. **Immediate Syntax Validation:** If a Lua script contains a syntax error, the engine logs the error and continues the job by bypassing the broken hook stage. An LSP ensures you catch typos before reloading.
+2. **Autocompletion:** Simplifies writing custom hooks by showing available variables and APIs.
 
 ---
 
@@ -210,16 +207,3 @@ sudo ufw allow from YOUR_HOME_IP to any port 7979
 ```
 
 This blocks the entire world while letting you through seamlessly.
-
-<!--
-## Why no Docker?
-You might be looking for a `Dockerfile` or a Docker Compose guide. Here is why you won't find one:
-
-*   **It's an insult to SpyWeb's existence**: We worked hard to make a **7MB binary** with **zero dependencies**. Putting it in a 100MB Docker container is like putting a racing bike inside a shipping container to drive it across the street.
-*   **Performance**: Running natively via `systemd` is the lightest possible way to run software. No container overhead, no virtual network layers.
-*   **Developer Experience**: Docker volumes make editing Lua hooks and job configs a nightmare (permissions, laggy file-sync). Native deployment means your editor and your scraper are looking at the exact same files with zero friction.
-
-If you really need isolation, use **systemd sandboxing** or run as a non-root user. Keep it lean.
-
-> If you are managing a team of 50+ engineers sharing the same server which you might need docker, you probably don't need this guide to tell you how to containerize a 7MB binary.
--->

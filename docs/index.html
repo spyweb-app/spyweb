@@ -281,7 +281,7 @@
                     <a class="navbar-item" href="#config">Config</a>
                     <a class="navbar-item" href="#examples">Examples</a>
                     <a class="navbar-item" href="cdp.html">CDP</a>
-                    <a class="navbar-item" href="https://github.com/spyweb-rs/spyweb">GitHub</a>
+                    <a class="navbar-item" target="_blank" href="https://github.com/spyweb-app/spyweb">GitHub</a>
                 </div>
             </div>
         </div>
@@ -323,6 +323,7 @@
                                 <li><a href="#http_post">http_post</a></li>
                                 <li><a href="#json_encode">json_encode</a></li>
                                 <li><a href="#json_decode">json_decode</a></li>
+                                <li><a href="#defer">defer</a></li>
                                 <li><a href="#copy">copy</a></li>
                                 <li><a href="#deep_copy">deep_copy</a></li>
                                 <li><a href="#dump">dump</a></li>
@@ -333,9 +334,13 @@
                                 <li><a href="#env_get">env_get</a></li>
                                 <li><a href="#selector_matches">selector_matches</a></li>
                                 <li><a href="#last_fetch">last_fetch</a></li>
+                                <li><a href="#spyweb_telemetry">spyweb_telemetry</a></li>
                             </ul>
                             <p class="menu-label">More</p>
                             <ul class="menu-list">
+                                <li><a target="_blank"
+                                        href="https://github.com/spyweb-app/spyweb/blob/beta/docs/lifecycle.md">Execution
+                                        Lifecycle</a></li>
                                 <li><a href="#config">Config Reference</a></li>
                                 <li><a href="#rest-api">REST API</a></li>
                                 <li><a href="#examples">Examples</a></li>
@@ -1238,6 +1243,31 @@ local resp = http_post("https://api.rendering-service.com/render", body, {["Cont
                             <pre><code class="language-lua">local data = json_decode('{"status": "ok", "count": 42}')
 log("Status is: " .. data.status)</code></pre>
 
+                            <h3 class="title is-4" id="defer"><code>defer(fn)</code></h3>
+                            <p>Registers a cleanup function to run <strong>immediately after the top-level Hook
+                                    exits</strong>. Essential for preventing zombie processes and memory leaks.</p>
+                            <div class="notification is-info is-light py-2 px-4 mb-3" style="font-size:0.9rem">
+                                <strong>💡 Hook-Scoped:</strong> Cleanup runs when the main stage (e.g.,
+                                <code>before_fetch</code>) finishes, even if <code>defer</code> was called inside a
+                                helper function.
+                            </div>
+                            <div class="notification is-warning is-light py-2 px-4 mb-3" style="font-size:0.9rem">
+                                <strong>⚠️ Synchronous Only:</strong> You cannot use async functions (like
+                                <code>http_post</code> or <code>cdp.launch</code>) inside <code>defer</code>. Resource
+                                close methods (such as <code>browser:close()</code> or <code>page:close()</code>) are
+                                synchronous and **fully safe** to use. For async orchestration and post-cycle tasks, use
+                                <code>defer.lua</code>.
+                            </div>
+                            <pre><code class="language-lua">function override_fetch(request)
+    local browser = cdp.launch({ headless = true })
+    defer(function() browser:close() end) -- Always closes
+
+    local page = browser:attach()
+    page:open(request.url)
+    return { status = 200, body = page:content() }
+end</code></pre>
+                            <p class="is-size-7"><a href="lifecycle.md">View full Execution Lifecycle guide →</a></p>
+
                             <h3 class="title is-4" id="dump"><code>dump(value)</code></h3>
                             <p>Formats any Lua value into a readable string for debugging. This is especially
                                 useful for nested hook payloads like <code>fetch_result</code> or
@@ -1295,7 +1325,8 @@ end</code></pre>
 end</code></pre>
 
                             <h3 class="title is-4" id="fs_append"><code>fs_append(filename, content)</code></h3>
-                            <p>Appends raw content to a file in the job's directory. All writes are non-blocking and safe.
+                            <p>Appends raw content to a file in the job's directory. All writes are non-blocking and
+                                safe.
                                 Files feature <strong>automatic 10MB rotation</strong> with timestamped filenames
                                 (e.g., <code>data.20260514-143005.csv</code>), keeping a history of 5 files.</p>
                             <pre><code class="language-lua">function after_extract(items)
@@ -1307,7 +1338,8 @@ end</code></pre>
 end</code></pre>
 
                             <h3 class="title is-4" id="fs_overwrite"><code>fs_overwrite(filename, content)</code></h3>
-                            <p>Replaces the entire content of a file in the job's directory. Ideal for keeping a "latest" 
+                            <p>Replaces the entire content of a file in the job's directory. Ideal for keeping a
+                                "latest"
                                 snapshot of your scraping results.</p>
                             <pre><code class="language-lua">function before_store(items)
     local state = json_encode({ 
@@ -1350,13 +1382,62 @@ end</code></pre>
 
                             <h3 class="title is-4" id="last_fetch"><code>last_fetch</code> (Global)</h3>
                             <p>A read-only table representing the result of the last network fetch. It contains
-                                <code>ok</code> (boolean), <code>status</code> (number), and <code>response</code> (table with <code>body</code> and <code>headers</code>).
-                                Useful for inspecting raw responses in later hook stages.</p>
+                                <code>ok</code> (boolean), <code>status</code> (number), and <code>response</code>
+                                (table with <code>body</code> and <code>headers</code>).
+                                Useful for inspecting raw responses in later hook stages.
+                            </p>
                             <pre><code class="language-lua">function after_extract(items)
     if last_fetch and last_fetch.status == 200 then
         log("Fetch was successful")
     end
     return items
+end</code></pre>
+
+                            <h3 class="title is-4" id="spyweb_telemetry"><code>spyweb_telemetry</code> (Global)</h3>
+                            <p>A read-only table containing performance telemetry for the current scraping cycle. It is
+                                initialized at cycle start and updated dynamically as each stage executes, allowing
+                                scripts to inspect stage-by-stage resource usage and execution status.</p>
+                            <p><strong>Table Structure:</strong></p>
+                            <ul>
+                                <li><code>job_name</code> (string): The name of the job.</li>
+                                <li><code>start_time</code> (number): Epoch timestamp in seconds when the cycle started.
+                                </li>
+                                <li><code>total_duration_ms</code> (number): Total duration of the cycle (set at the end
+                                    of the run).</li>
+                                <li><code>stages</code> (array of tables): Sequence of stages in execution order. Each
+                                    stage table contains:
+                                    <ul>
+                                        <li><code>name</code> (string): The name of the stage (e.g.,
+                                            <code>before_fetch</code>, <code>fetch</code>,
+                                            <code>override_extract</code>).
+                                        </li>
+
+                                        <li><code>status</code> (string): <code>success</code>, <code>error</code>, or
+                                            <code>inactive</code>.
+                                        </li>
+                                        <li><code>type</code> (string): <code>hook</code> for Lua hooks or
+                                            <code>internal</code> for engine-native stages.
+                                        </li>
+                                        <li><code>duration_ms</code> (number): Stage execution time in milliseconds.
+                                        </li>
+                                        <li><code>lua_mem_bytes</code> (number): Total Lua memory usage after the stage.
+                                        </li>
+                                        <li><code>mem_delta_bytes</code> (number): Change in Lua memory during this
+                                            stage.</li>
+                                        <li><code>browsers</code> (number): Number of active browser processes.</li>
+                                        <li><code>error</code> (string/nil): The error message if the stage failed.</li>
+                                    </ul>
+                                </li>
+                            </ul>
+                            <pre><code class="language-lua">function on_success()
+    if spyweb_telemetry then
+        log("Job completed in " .. spyweb_telemetry.total_duration_ms .. "ms")
+        for _, stage in ipairs(spyweb_telemetry.stages) do
+            if stage.status == "error" then
+                log("Stage " .. stage.name .. " failed: " .. tostring(stage.error))
+            end
+        end
+    end
 end</code></pre>
 
                         </div>
@@ -2030,7 +2111,7 @@ end</code></pre>
                                         <td><strong>Luau dialect</strong></td>
                                         <td>SpyWeb uses Luau by default for stability. For standard Lua 5.4 support
                                             (enabling C-modules), see the <a target="blank"
-                                                href="https://github.com/spyweb-rs/spyweb/blob/main/CONTRIBUTING.md#building-from-source"
+                                                href="https://github.com/spyweb-app/spyweb/blob/main/CONTRIBUTING.md#building-from-source"
                                                 style="color:var(--accent2)">Building from Source</a> guide.</td>
                                     </tr>
                                     <tr>
@@ -2039,7 +2120,8 @@ end</code></pre>
                                             and
                                             <code>require</code> for code sharing. Modules are searched in the job's
                                             directory first, then in the global <code>shared/</code> folder. The
-                                            <code>io</code> library is disabled; use <code>fs_append()</code> or <code>log()</code> instead.
+                                            <code>io</code> library is disabled; use <code>fs_append()</code> or
+                                            <code>log()</code> instead.
                                         </td>
                                     </tr>
                                     <tr>
@@ -2092,11 +2174,10 @@ end</code></pre>
 
     <footer class="footer py-6">
         <div class="content has-text-centered">
-            <p>SpyWeb — Zero-dependency web monitoring engine &bull; <a href="https://github.com/spyweb-rs/spyweb"
-                    style="color:var(--accent2)">GitHub</a></p>
+            <p>SpyWeb — Zero-dependency web monitoring engine &bull; <a target="_blank"
+                    href="https://github.com/spyweb-app/spyweb" style="color:var(--accent2)">GitHub</a></p>
         </div>
     </footer>
-
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
 </body>

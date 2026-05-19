@@ -138,25 +138,39 @@ Shows how to completely replace the built-in keyword filter with custom Lua logi
 
 ### [`js-rendering/`](js-rendering/)
 
-Demonstrates how to handle JS-heavy or client-rendered pages by proxying the request through an external rendering service.
+Demonstrates how to render JavaScript-heavy or client-side rendered pages using the built-in Chrome DevTools Protocol (CDP) module.
 
 **What it does:**
-- Intercepts the request in `before_fetch`
-- Changes the URL to your rendering provider's endpoint
-- Sets the payload to the original target URL
-- Returns the modified request, so SpyWeb fetches the fully rendered DOM!
+- Overrides the default HTTP client using `override_fetch`
+- Launches a local headless Chromium browser (or uses an existing one)
+- Navigates to the target page and waits for a specific CSS selector to appear
+- Captures a screenshot of the page and extracts the fully rendered HTML DOM
+
+---
+
+### [`hybrid-recovery/`](hybrid-recovery/)
+
+Demonstrates a hybrid automation pattern to bypass bot detection. If a headless scrape run fails or hits a CAPTCHA/block page, it automatically spawns a visible browser window to allow human intervention.
+
+**What it does:**
+- Runs headlessly for normal iterations
+- Checks for blocker elements or CAPTCHAs in `override_fetch`
+- Closes the headless browser and spawns a visible browser process on detection
+- Uses `notify()` to alert the operator
+- Polls for a successful page state before closing the browser and handing the rendered HTML back to the pipeline
 
 ---
 
 ### [`external-db-exit/`](external-db-exit/)
 
-Demonstrates the "Clean Exit" pattern — bypassing SpyWeb's internal database entirely and pushing directly to your own infrastructure.
+Demonstrates how to bypass SpyWeb's internal database entirely and send extracted items directly to your own external API or database.
 
 **What it does:**
-- Uses `before_store` to intercept items just before they enter the internal DB.
-- Formats the items to match a custom external schema.
-- Pushes the payload to an external API using `http_post`.
-- Returns `nil` to drop the items from SpyWeb's pipeline, ensuring no internal storage or notifications trigger.
+- Uses `before_store` to intercept items before they enter the internal database
+- Formats the items to match a custom schema
+- Sends the payload to an external endpoint via `http_post`
+- Returns `nil` to drop the items from SpyWeb's pipeline, preventing internal storage or notifications from triggering
+- Includes a companion `defer.lua` file to demonstrate cycle-scoped orchestration hooks (`on_success`, `on_error`, `on_finally`)
 
 ---
 

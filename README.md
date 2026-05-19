@@ -21,7 +21,7 @@
 ---
 
 ## What is spyweb?
-**SpyWeb** is a zero-dependency web monitoring engine built for speed and precision. Track listings, job boards, classifieds, price drops, restocks, public records, and anything that lives on an HTML page with simple TOML configs. Inject custom Lua logic for advanced workflows, and receive real-time alerts via desktop or webhooks—all packaged as two self-contained binaries that sip under 5MB of RAM at idle.
+**SpyWeb** is a zero-dependency web monitoring engine built for speed and simplicity. Track listings, job boards, classifieds, price drops, restocks, public records, and anything that lives on an HTML page with simple TOML configs. Inject custom Lua logic for advanced workflows, and receive real-time alerts via desktop or webhooks, all packaged as two self-contained binaries that use under 5MB of RAM at idle.
 
 ## Quick Demo
 ```toml
@@ -37,37 +37,38 @@ keywords = ["rust", "linux", "open source"]
 
 | Feature | Description |
 | :--- | :--- |
-| **Zero Dependencies** | ~7MB self-contained. Completely portable, no runtime required. |
+| **Zero Dependencies** | ~7MB self-contained binary. Completely portable, no runtime required. |
 | **Lua Scripting** | 9 hook stages plus persistent Lua storage for counters, cursors, and shared state. |
 | **Hot Reload** | Save a config or Lua script and SpyWeb respawns the job instantly. |
 | **Internal DB** | Built-in deduplication ensures you never see the same item twice. |
 | **Dual Binary** | Choice of a headless CLI or a silent system tray app for background runs. |
 | **Concurrency** | Async-first engine; slow proxies or large jobs never block others. |
-| **Fault Tolerant** | Lua hook errors are caught and logged without stopping the job, ensuring 100% uptime. |
+| **Fault Tolerant** | Lua hook errors are caught and logged without stopping the job, preventing process crashes. |
 | **Hybrid Engine** | Falls back to a spec-compliant DOM parser for broken or complex HTML. |
 | **CDP Automation** | Launch or connect to any Chromium browser for JS rendering, clicking, waiting, screenshots. |
-| **Pro Alerting** | Integrated desktop notifications and customizable webhooks for real-time monitoring. |
+| **Alerting** | Integrated desktop notifications and customizable webhooks for monitoring. |
+| **Pipeline Telemetry** | Stage-by-stage tracking of execution time, memory usage, and active browsers. |
 
 ## Install & Run
-Download the latest release ZIP from the [Releases page](https://github.com/spyweb-rs/spyweb/releases) and extract it.
+Download the latest ZIP from the [Beta Release](https://github.com/spyweb-app/spyweb/releases/tag/beta) and extract it.
 
 --- OR USE THE COMMAND BELOW ---
->stable version only, beta is available for download on [beta release](https://github.com/spyweb-app/spyweb/releases/tag/beta)
+
 ```bash
 # Linux
-curl -L -o spyweb.zip https://dl.spyweb.app/linux && tar -xf spyweb.zip && rm spyweb.zip
+curl -L -o spyweb.zip https://beta.spyweb.app/linux && tar -xf spyweb.zip && rm spyweb.zip
 
 # macOS (Intel)
-curl -L -o spyweb.zip https://dl.spyweb.app/mac-intel && tar -xf spyweb.zip && rm spyweb.zip
+curl -L -o spyweb.zip https://beta.spyweb.app/mac-intel && tar -xf spyweb.zip && rm spyweb.zip
 
 # macOS (Apple Silicon)
-curl -L -o spyweb.zip https://dl.spyweb.app/mac-arm && tar -xf spyweb.zip && rm spyweb.zip
+curl -L -o spyweb.zip https://beta.spyweb.app/mac-arm && tar -xf spyweb.zip && rm spyweb.zip
 
 # Windows (CMD, Windows 10 or later)
-curl -L -o spyweb.zip https://dl.spyweb.app/windows && tar -xf spyweb.zip && del spyweb.zip
+curl -L -o spyweb.zip https://beta.spyweb.app/windows && tar -xf spyweb.zip && del spyweb.zip
 
 # Windows (PowerShell)
-Invoke-WebRequest -Uri https://dl.spyweb.app/windows -OutFile spyweb.zip; Expand-Archive spyweb.zip; Remove-Item spyweb.zip
+Invoke-WebRequest -Uri https://beta.spyweb.app/windows -OutFile spyweb.zip; Expand-Archive spyweb.zip; Remove-Item spyweb.zip
 
 ```
 
@@ -128,7 +129,7 @@ The terminal binary includes helpful developer tools:
 # Validate your jobs.toml without running the scraper
 ./spyweb check
 
-# Run a single job instantly (bypasses interval and runs the full async Lua pipeline)
+# Run a single job instantly (bypasses interval and runs the 7 core stages of the Lua pipeline up to before_store)
 # Saves '{job_location}/{job-id}-response.html' and '{job_location}/{job-id}-fields.json' for easy inspection!
 ./spyweb debug "My Job Name"
 
@@ -173,21 +174,21 @@ Check the [Examples](examples/) for more Lua hook examples.
 
 ---
  
-> **JavaScript Rendering with CDP:** SpyWeb does not bundle a 300MB browser. Instead, the built-in [CDP module](docs/cdp.md) launches whatever Chromium-based browser you already have installed (Chrome, Edge, Brave, Lightpanda, etc.) and controls it via the Chrome DevTools Protocol — all from your Lua hooks. Zero downloads, zero config, full JS execution.
+> **JavaScript Rendering with CDP:** SpyWeb does not bundle a browser. Instead, the built-in [CDP module](docs/cdp.md) launches or connects to a Chromium-based or CDP-compatible browser already installed on your system (Chrome, Edge, Brave, Lightpanda, etc.) and controls it via the Chrome DevTools Protocol, all from your Lua hooks.
  
 ```lua
 function override_fetch(request)
     local browser = cdp.launch({})
+    defer(function() browser:close() end)
+
     local page = browser:attach()
     page:open(request.url)
     page:wait_for_selector(".dynamic-content", 10000)
-    local html = page:content()
-    browser:close()
-    return { status = 200, body = html, url = request.url }
+    return { status = 200, body = page:content(), url = request.url }
 end
 ```
  
- See the [CDP Documentation](docs/cdp.md) for the full API — browser management, page navigation, click/wait/inject, cookies, screenshots, and a complete production hybrid-recovery pattern that falls back to a visual browser on bot detection.
+ See the [CDP Documentation](docs/cdp.md) for the full API — browser management, page navigation, click/wait/inject, cookies, screenshots, and a complete hybrid-recovery pattern that falls back to a visual browser on bot detection.
 
 ---
 

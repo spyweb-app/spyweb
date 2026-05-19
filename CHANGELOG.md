@@ -5,54 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0-beta] - 2026-05-19
+
+### Added
+- **Telemetry:** Implemented comprehensive pipeline telemetry exposed via the `spyweb_telemetry` Lua global, tracking stage duration, memory usage, browser counts, and execution status for advanced job observability.
+- **Lua API:** Added `defer(fn)` for synchronous hook-scoped cleanup.
+- **Pipeline Cleanup:** Added `defer.lua` handler for async lifecycle and post-cycle cleanup.
+- **Concurrency Control:** Added `SPYWEB_THREADS` environment variable (defaults to 2, max 64) to configure executor thread pool size.
+- **Process Management:** Added global browser registry to terminate headless processes on unexpected exit.
+- **Shutdown Helper:** Added a centralized `shutdown_system` utility helper in `services/utils` for clean process teardown.
+
+### Fixed
+- **Proxy Rotation:** Fixed clock bias in proxy rotation by switching to `fastrand`.
+- **Header Parsing:** Fixed dropped duplicate HTTP headers in `flatten_headers` by joining values per RFC 9110.
+- **Debug:** Fixed `debug_job` skipping keyword re-tagging during item filtering.
+- **Process Management:** Fixed browser process leaks during `debug` CLI execution and daemon hot-reloads by ensuring all running browsers are terminated.
+- **File I/O:** Fixed Lua File I/O functions (like `log()`, `fs_append()`, `fs_overwrite()`) failing in the `debug` CLI tool by properly initializing the IO subsystem.
+
+### Changed
+- **Lua HTTP Bindings:** `http_get` and `http_post` now return `{status, headers, body}` instead of a raw body string.
+- **CDP Automation:** Changed logical CDP `close` methods (`page:close()` and `context:close()`) to be synchronous (fire-and-forget in the background) to prevent yielding errors when called inside synchronous `defer` hooks.
+- **Graceful Shutdown:** Standardized Ctrl-C, tray exit, and debug commands to use the centralized shutdown helper.
+- Cleaned up redundant template functions and unused code blocks.
+
 ## [1.2.0-beta] - 2026-05-16
 
 ### Added
-- **Safe Lua File I/O:** Centralized, non-blocking disk operations for Lua hooks. All writes pass through a single-threaded background worker via an MPSC channel to prevent race conditions and disk contention.
-- **Lua API:** New `fs_append(filename, content)` and `fs_overwrite(filename, content)` functions for custom data exports.
-- **Auto-Rotation:** Implemented timestamp-based file rotation (e.g., `data.20260514-143005.csv`). Files feature a hard 10MB limit and maintain a history of 5 files to prevent disk exhaustion.
-- **IO Security:** Strict path validation including absolute path rejection, directory traversal prevention (`../`), and an extension allowlist (.csv, .json, .jsonl, .txt, .log). Operations are confined to the job's directory.
-- **Refactored Logging:** The `log()` function now uses the new safe IO backend, gaining automatic rotation and high-performance async behavior.
-- **CDP Browser Automation:** Added browser automation support and full page control: navigate, click, wait for selectors, inject JavaScript, capture screenshots, manage cookies, intercept network requests.
-- **CDP connect headers:** `cdp.connect(ws_url, [headers])` now accepts an optional headers table for custom HTTP headers (e.g., `Authorization: Bearer <token>`).
-- **Lua API:** New global `cdp` table with `cdp.launch({...})` and `cdp.connect("ws://...")` for browser lifecycle management.
-- **Lua API:** `browser:attach()` creates a new page/tab with its own WebSocket connection.
-- **Lua API:** 10 native page methods: `open`, `content`, `evaluate`, `click`, `wait_for_selector`, `wait_for_navigation`, `wait_event`, `screenshot`, `block_resources`, `fulfill_request`.
-- **Lua API:** 7 high-level page helpers injected via `cdp.lua`: `wait_for_url`, `wait_for_response`, `scroll`, `set_extra_headers`, `set_user_agent`, `cookies`, `set_cookies`.
-- **CLI:** `spyweb profile <check|list|clear|delete> [job|all]` manage per-job browser profile directories (Chrome user data dirs). Check status with lock detection, wipe caches, or delete profiles entirely.
-- **Browser Auto-Detection:** Finds Chrome, Chromium, Edge, and Brave on Linux, macOS, and Windows without any configuration. Supports `$BROWSER` environment variable to override detection.
-- **CDP Transport:** Session-level targeting (`call_session`), timeout-aware event waiting (`wait_event_timeout`), and clean shutdown that drains pending requests with errors.
-- **CDP API:** `browser:close()` explicitly kills the browser process, closes the WebSocket transport, and releases the profile lock file.
-- **Examples:** Added `hybrid-recovery/` pattern that uses headless CDP by default, detects bot blocks, launches a visible browser for human intervention, then captures the recovered session.
+- **Lua File I/O:** Added background worker and MPSC channel for non-blocking disk operations.
+- **Lua API:** Added `fs_append(filename, content)` and `fs_overwrite(filename, content)`.
+- **Auto-Rotation:** Added timestamp-based file rotation with 10MB limit and 5-file history.
+- **IO Security:** Added path validation (rejects absolute paths, directory traversal) and extension allowlist (.csv, .json, .jsonl, .txt, .log).
+- **Logging:** Updated `log()` to use the new IO backend.
+- **CDP Automation:** Added browser automation support (navigate, click, JS injection, screenshots, cookies, network interception).
+- **CDP Connect:** Added optional headers argument to `cdp.connect()`.
+- **Lua API:** Added `cdp` global with `launch()` and `connect()`.
+- **Lua API:** Added `browser:attach()` to create new pages.
+- **Lua API:** Added page methods: `open`, `content`, `evaluate`, `click`, `wait_for_selector`, `wait_for_navigation`, `wait_event`, `screenshot`, `block_resources`, `fulfill_request`.
+- **Lua API:** Added page helpers: `wait_for_url`, `wait_for_response`, `scroll`, `set_extra_headers`, `set_user_agent`, `cookies`, `set_cookies`.
+- **CLI:** Added `spyweb profile <check|list|clear|delete> [job|all]` to manage Chrome user data directories.
+- **Browser Auto-Detection:** Added detection for Chrome, Chromium, Edge, and Brave, with `$BROWSER` override.
+- **CDP Transport:** Added session-level targeting, timeout-aware waiting, and clean shutdown.
+- **CDP API:** Added `browser:close()`.
+- **Examples:** Added `hybrid-recovery/` example.
 
 ### Changed
-- **Docs:** Updated README with CDP feature description, CLI profile commands, and JS rendering examples.
-- **CLI:** Migrated argument parsing from manual `args.get()` dispatch to `clap` derive. Removed hand-rolled `parse_start_port`, `profile_usage`, and string-slice routing, replaced with typed subcommand enums. Auto-generated help/usage.
-- **HTTP client:** Replaced `spyweb/x.x.x` User-Agent with real Chrome 148 UA. Added browser-like default headers (`Accept`, `Accept-Language`, `Accept-Encoding`, `sec-ch-ua*`, `Upgrade-Insecure-Requests`, `Sec-Fetch-*`, `Priority`) visible to `before_fetch` hook. Switched to `IndexMap` for deterministic header ordering.
+- **Docs:** Updated README with CDP and JS rendering examples.
+- **CLI:** Migrated argument parsing to `clap`.
+- **HTTP client:** Updated default User-Agent to Chrome 148, added default browser headers, and switched to `IndexMap` for header ordering.
 
 ### Fixed
-- Server no longer panics on port bind failure but returns descriptive error (e.g. "Failed to start server on 0.0.0.0:7979: Address in use") instead of crashing.
+- Server now returns a descriptive error on port bind failure instead of panicking.
 
 ## [1.1.0] - 2026-05-05
 
 ### Added
-- Added `--port` CLI flag and `SPYWEB_PORT` environment variable to override the default REST API port.
-- Introduced `dump()`, `copy()`, and `deep_copy()` global helper functions in Lua for managing tables during debugging and state persistence.
-- Added a `selector_matches` global variable in Lua, allowing hooks to see how many elements matched the main selector (even if they were later filtered out).
-- Added comprehensive semantic terminal colors and a unified logging system for a better CLI experience.
-- **Lua API:** Added `override_fetch` hook to bypass the built-in HTTP client for custom fetching (e.g. headless browsers).
-- **Lua API:** Added `override_extract` hook to bypass the built-in HTML/CSS parser for custom extraction (e.g. JSON/XML scraping).
-- **CLI:** Enhanced the `debug` command to support the full 9-stage Lua pipeline, providing detailed console output for `override_fetch` and `override_extract` stages.
-- **Examples:** Added new high-level examples including `set-and-forget` (autonomous Sentinel pattern) and `js-rendering`.
+- Added `--port` flag and `SPYWEB_PORT` environment variable to override REST API port.
+- **Lua API:** Added `dump()`, `copy()`, and `deep_copy()` globals.
+- **Lua API:** Added `selector_matches` global variable.
+- Added terminal colors and unified logging.
+- **Lua API:** Added `override_fetch` and `override_extract` hooks.
+- **CLI:** Updated `debug` command to support the 7 core stages of the Lua pipeline (safely bypassing notification and webhook stages).
+- **Examples:** Added `set-and-forget` and `js-rendering` examples.
 
 ### Changed
-- **Lua API:** Refactored the `after_fetch` hook to receive a unified `fetch_result` envelope (`{ ok, request, response, error }`). The built-in HTTP agent now treats 4xx/5xx status codes as valid responses to enable hook interception.
-- Terminal output now automatically detects TTY environments and strips ANSI colors when logging is piped to a file.
-- `Runner::fetch` now preserves full error contexts instead of swallowing early failures.
-- **Refactor:** Decoupled unit tests from core modules into dedicated `tests.rs` files across the Lua engine and scraper modules.
-- **Refactor:** Overhauled the Lua engine architecture by centralizing VM lifecycle in `engine.rs` and extracting data conversion logic into `conversions.rs`.
-- **Refactor:** Modularized Lua bindings into a granular directory structure: `bindings/network.rs` (HTTP), `bindings/storage.rs` (DB), and `bindings/system.rs` (OS utilities).
-- **Refactor:** Decomposed the monolithic `hooks.rs` into a structured module (`hooks/mod.rs`, `hooks/stages.rs`) to separate hook orchestration from individual stage execution logic.
+- **Lua API:** Changed `after_fetch` hook to receive `{ ok, request, response, error }`. The HTTP agent now passes 4xx/5xx responses to hooks.
+- Output now automatically strips ANSI colors when piped to a file.
+- `Runner::fetch` preserves full error contexts.
+- **Refactor:** Moved unit tests to dedicated `tests.rs` files.
+- **Refactor:** Centralized Lua VM lifecycle in `engine.rs` and conversion logic in `conversions.rs`.
+- **Refactor:** Modularized Lua bindings into `network.rs`, `storage.rs`, and `system.rs`.
+- **Refactor:** Decomposed `hooks.rs` into `hooks/mod.rs` and `hooks/stages.rs`.
 
 ### Fixed
 - Isolated the notification service to prevent execution failures from affecting subsequent webhook delivery.

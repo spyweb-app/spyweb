@@ -101,10 +101,10 @@ function override_fetch(request)
     end
 
     local page = browser:attach()
-    local ok, err = page:open(request.url)
+    defer(function() page:close() end)
     
+    local ok, err = page:open(request.url)
     if not ok then
-        page:close()
         return { error = "Initial navigation failed: " .. tostring(err) }
     end
 
@@ -115,7 +115,6 @@ function override_fetch(request)
     if found then
         -- SUCCESS: Data is present.
         local html = page:content()
-        page:close()
         return { status = 200, body = html, url = request.url }
     end
 
@@ -126,8 +125,7 @@ function override_fetch(request)
     if blocked then
         print("💀 [HYBRID] Bot block confirmed. Triggering human intervention.")
         
-        -- Cleanup headless
-        page:close()
+        -- Cleanup headless browser (page is closed automatically by defer)
         browser:close()
         browser = nil
         
@@ -150,6 +148,5 @@ function override_fetch(request)
     end
 
     -- STEP 3: Not blocked, but no data. This is a real site error or layout change.
-    page:close()
     return { error = "Timeout: Data not found and no block detected. Selector: " .. DATA_SELECTOR }
 end

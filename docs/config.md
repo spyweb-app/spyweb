@@ -38,7 +38,7 @@ The Raw Parser is the default engine. It is a high-performance, non-standard str
 ### 2. DOM Parser (Fallback)
 If the Raw Parser finds **zero items** for the main `selector`, SpyWeb automatically switches to the DOM Parser.
 - **Compliance:** It uses a full HTML5-compliant engine. It "understands" complex structures and allows for advanced CSS selectors.
-- **"God Mode":** Because it follows the HTML5 spec, it will "fix" badly formatted HTML. This can sometimes move elements around (e.g., closing a tag early if it shouldn't be there), which might change the tree structure.
+- **Standard Parsing Compliance:** Because it follows the HTML5 spec, it will resolve and "fix" badly formatted HTML. This can sometimes restructure elements (e.g., closing an unclosed tag early), which might alter the resulting DOM tree.
 - **Usage:** This mode is triggered automatically if the Raw Parser fails or if a selector is used that the Raw Parser does not recognize.
  
 ### Selector Tips: Self-Selection
@@ -68,7 +68,7 @@ While the `debug = true` flag saves files during normal scheduled runs, you can 
 This command is ideal for iterative development because:
 - **Ignores `enabled` flag:** It will run the job even if it is set to `enabled = false` in your config.
 - **Instant Feedback:** It prints the final extracted items and their fields directly to your terminal.
-- **Pipeline Transparency:** It explicitly shows each stage of the extraction (Fetch → Extract → Hooks) so you can see exactly where an item might be getting dropped.
+- **Pipeline Transparency:** It explicitly shows the core stages of the pipeline (Fetch → Extract → Hook filtering, up to `before_store`) so you can see exactly where an item might be getting dropped, while safely bypassing the store, notification, and webhook phases.
 - **Saves Artifacts:** Just like the config flag, it generates the response HTML and JSON fields in the job's directory for deep inspection.
 
 

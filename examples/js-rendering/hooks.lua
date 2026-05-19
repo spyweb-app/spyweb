@@ -23,10 +23,12 @@ function override_fetch(request)
     -- Attach to a new page (tab)
     local page = browser:attach()
     
+    -- Automatically close the page when the hook exits
+    defer(function() page:close() end)
+    
     -- 1. Open the URL and wait for the load event
     local ok, err = page:open(request.url)
     if not ok then
-        page:close()
         return { error = "Failed to open page: " .. tostring(err) }
     end
 
@@ -39,16 +41,12 @@ function override_fetch(request)
         print("[CDP] Warning: Selector not found, returning partial HTML. Error: " .. tostring(selector_err))
     end
 
-    -- 3. Optional: Take a screenshot using the optimized call_save method
-    -- This saves the image directly to disk from Rust, bypassing Lua memory overhead.
-    page:call_save("Page.captureScreenshot", { format = "png" }, "last_render.png")
+    -- 3. Optional: Take a screenshot using the high-level helper
+    page:screenshot("last_render.png")
     print("[CDP] Screenshot saved to last_render.png")
 
     -- 4. Get the fully rendered HTML
     local html = page:content()
-    
-    -- 5. Close the tab (important to prevent memory leaks)
-    page:close()
     
     return {
         status = 200,

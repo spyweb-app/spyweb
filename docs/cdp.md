@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Spyweb does not bundle a browser.** Unlike tools that download a 300MB+ Chromium binary you don't need, Spyweb uses whatever browser you already have installed to render JavaScript-heavy pages. You don't download anything extra. You don't configure anything special. It just works.
+**Spyweb does not bundle a browser.** Instead, the built-in `cdp` module automatically detects and uses a Chromium-based browser (such as Chrome, Edge, or Brave) already installed on your system to execute JavaScript and render dynamic pages.
 
 If you need JS rendering in a hook (to scrape a React site, bypass a Cloudflare challenge, click buttons, wait for DOM elements), you use the `cdp` module. That's it.
 
@@ -40,28 +40,28 @@ function override_fetch(request)
     -- 1. Launch a temporary browser
     local browser = cdp.launch({})
     
-    -- 2. Attach to a page (tab)
+    -- 2. Register automatic cleanup on exit (successful or error)
+    defer(function() browser:close() end)
+    
+    -- 3. Attach to a page (tab)
     local page = browser:attach()
     
-    -- 3. Navigate safely and check for errors
+    -- 4. Navigate safely and check for errors
     local ok, err = page:open(request.url)
     if not ok then
-        browser:close()
         return { error = "Navigation failed: " .. tostring(err) }
     end
 
-    -- 4. Wait for content before extraction
+    -- 5. Wait for content before extraction
     local found, wait_err = page:wait_for_selector(".dynamic-content", 10000)
     if not found then
-        browser:close()
         return { error = "Selector timeout: " .. tostring(wait_err) }
     end
     
-    -- 5. Get the rendered HTML and clean up
+    -- 6. Get the rendered HTML (browser is closed automatically by defer)
     local html = page:content()
-    browser:close()
     
-    -- 6. Pass the html back to the pipeline (triggers extraction or catches in after_fetch)
+    -- 7. Pass the html back to the pipeline
     return {
         status = 200,
         body = html,
