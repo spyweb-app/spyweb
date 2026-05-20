@@ -17,9 +17,9 @@ pub struct CdpTransport {
     // Pending requests: id → oneshot sender waiting for response
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<anyhow::Result<Value>>>>>,
 
-    // Event queue: cloned receivers compete for messages.
-    _event_tx: Sender<CdpEvent>,
-    event_rx: Receiver<CdpEvent>, // kept to allow new subscriber clones
+    // Event routing: key is Some(sessionId) for sessions, None for main transport.
+    // Multiple listeners can subscribe to the same key.
+    listeners: Arc<Mutex<HashMap<Option<String>, Vec<Sender<CdpEvent>>>>>,
 
     // Monotonically increasing request ID
     next_id: Arc<AtomicU64>,
@@ -58,11 +58,11 @@ impl CdpTransport {
         // Channel for outgoing WebSocket frames
         let (ws_tx, ws_rx) = async_channel::unbounded::<String>();
 
-        // Channel for CDP event notifications.
-        let (event_tx, event_rx) = async_channel::unbounded::<CdpEvent>();
-
         // Pending request map shared between caller and read loop
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<anyhow::Result<Value>>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
+        let listeners: Arc<Mutex<HashMap<Option<String>, Vec<Sender<CdpEvent>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
         // Spawn write loop — drains ws_rx and writes frames to WebSocket
@@ -78,10 +78,10 @@ impl CdpTransport {
             .detach();
         }
 
-        // Spawn read loop — routes incoming messages to pending or event channel.
+        // Spawn read loop — routes incoming messages to pending or event listeners.
         {
             let pending = Arc::clone(&pending);
-            let event_tx = event_tx.clone();
+            let listeners = Arc::clone(&listeners);
             let mut ws_read = ws_read;
 
             smol::spawn(async move {
@@ -125,13 +125,26 @@ impl CdpTransport {
                             params,
                             session_id,
                         } => {
-                            let _ = event_tx
-                                .send(CdpEvent {
-                                    method,
-                                    params: params.unwrap_or(Value::Null),
-                                    session_id,
-                                })
-                                .await;
+                            let event = CdpEvent {
+                                method,
+                                params: params.unwrap_or(Value::Null),
+                                session_id: session_id.clone(),
+                            };
+
+                            let list = {
+                                let mut guard = listeners.lock().unwrap();
+                                if let Some(list) = guard.get_mut(&session_id) {
+                                    // Clean up closed listeners
+                                    list.retain(|tx| !tx.is_closed());
+                                    list.clone()
+                                } else {
+                                    Vec::new()
+                                }
+                            };
+
+                            for tx in list {
+                                let _ = tx.send(event.clone()).await;
+                            }
                         }
                     }
                 }
@@ -152,8 +165,7 @@ impl CdpTransport {
         Ok(Self {
             ws_tx,
             pending,
-            _event_tx: event_tx,
-            event_rx,
+            listeners,
             next_id: Arc::new(AtomicU64::new(1)),
         })
     }
@@ -202,13 +214,23 @@ impl CdpTransport {
     }
 
     /// Wait for a CDP event matching the given name and predicate.
-    /// Events are buffered in the unbounded channel by the read loop,
-    /// so events that arrive between a call() and wait_event() are NOT lost.
     pub async fn wait_event<F>(&self, event_name: &str, predicate: F) -> anyhow::Result<CdpEvent>
     where
         F: Fn(&Value) -> bool,
     {
-        let rx = self.event_rx.clone();
+        self.wait_event_session(None, event_name, predicate).await
+    }
+
+    pub async fn wait_event_session<F>(
+        &self,
+        session_id: Option<String>,
+        event_name: &str,
+        predicate: F,
+    ) -> anyhow::Result<CdpEvent>
+    where
+        F: Fn(&Value) -> bool,
+    {
+        let rx = self.register_listener(session_id);
         loop {
             let event = rx
                 .recv()
@@ -230,24 +252,63 @@ impl CdpTransport {
     where
         F: Fn(&Value) -> bool,
     {
+        self.wait_event_session_timeout(None, event_name, timeout, predicate)
+            .await
+    }
+
+    pub async fn wait_event_session_timeout<F>(
+        &self,
+        session_id: Option<String>,
+        event_name: &str,
+        timeout: Option<Duration>,
+        predicate: F,
+    ) -> anyhow::Result<CdpEvent>
+    where
+        F: Fn(&Value) -> bool,
+    {
         if let Some(timeout) = timeout {
-            smol::future::or(self.wait_event(event_name, predicate), async move {
-                smol::Timer::after(timeout).await;
-                Err(anyhow::anyhow!(
-                    "Timeout waiting for CDP event {} after {}ms",
-                    event_name,
-                    timeout.as_millis()
-                ))
-            })
+            smol::future::or(
+                self.wait_event_session(session_id, event_name, predicate),
+                async move {
+                    smol::Timer::after(timeout).await;
+                    Err(anyhow::anyhow!(
+                        "Timeout waiting for CDP event {} after {}ms",
+                        event_name,
+                        timeout.as_millis()
+                    ))
+                },
+            )
             .await
         } else {
-            self.wait_event(event_name, predicate).await
+            self.wait_event_session(session_id, event_name, predicate)
+                .await
         }
+    }
+
+    pub fn register_listener(&self, session_id: Option<String>) -> Receiver<CdpEvent> {
+        let (tx, rx) = async_channel::unbounded();
+        self.listeners
+            .lock()
+            .unwrap()
+            .entry(session_id)
+            .or_default()
+            .push(tx);
+        rx
+    }
+
+    pub fn register_session_listener(&self, session_id: &str) -> Receiver<CdpEvent> {
+        self.register_listener(Some(session_id.to_string()))
+    }
+
+    pub fn unregister_session_listener(&self, session_id: &str) {
+        self.listeners
+            .lock()
+            .unwrap()
+            .remove(&Some(session_id.to_string()));
     }
 
     pub fn close(&self) {
         self.ws_tx.close();
-        self._event_tx.close();
         let pending = {
             let mut guard = self.pending.lock().unwrap();
             std::mem::take(&mut *guard)

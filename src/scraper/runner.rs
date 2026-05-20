@@ -236,7 +236,9 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
                 };
                 let result = runner.extract(&job.config, job.dir.as_deref(), &response)?;
                 if let (Some(h), Some(s)) = (job.hooks.as_ref(), sample) {
-                    let _ = h.record_telemetry_stage("extract", s, "success", None).await;
+                    let _ = h
+                        .record_telemetry_stage("extract", s, "success", None)
+                        .await;
                 }
                 result
             }

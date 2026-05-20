@@ -48,6 +48,7 @@ pub struct Browser {
     pub(crate) _lock_file: Option<std::fs::File>,
     pub(crate) keep_alive: bool,
     pub(crate) browser_ws_url: Option<String>,
+    pub(crate) is_remote: bool,
 }
 
 impl Browser {
@@ -76,6 +77,7 @@ impl Browser {
             _lock_file: None,
             keep_alive: true,
             browser_ws_url: Some(ws_url.to_string()),
+            is_remote: true,
         })
     }
 
@@ -224,6 +226,7 @@ impl Browser {
             _lock_file: lock_file,
             keep_alive: options.keep_alive,
             browser_ws_url: Some(ws_url),
+            is_remote: false,
         })
     }
 

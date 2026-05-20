@@ -17,22 +17,27 @@ struct PageHandle {
 }
 
 struct PageHandleInner {
-    page_transport: Arc<CdpTransport>,
     browser_transport: Arc<CdpTransport>,
+    // Optional separate connection (used for local/non-flat CDP)
+    page_transport: Option<Arc<CdpTransport>>,
+    // Session ID for flat routing (used for remote/flat CDP)
+    session_id: Option<String>,
     target_id: String,
     closed: AtomicBool,
 }
 
 impl PageHandle {
     fn new(
-        page_transport: Arc<CdpTransport>,
         browser_transport: Arc<CdpTransport>,
+        page_transport: Option<Arc<CdpTransport>>,
+        session_id: Option<String>,
         target_id: String,
     ) -> Self {
         Self {
             inner: Arc::new(PageHandleInner {
-                page_transport,
                 browser_transport,
+                page_transport,
+                session_id,
                 target_id,
                 closed: AtomicBool::new(false),
             }),
@@ -44,7 +49,15 @@ impl PageHandle {
             return;
         }
 
-        self.inner.page_transport.close();
+        if let Some(ref pt) = self.inner.page_transport {
+            pt.close();
+        }
+
+        if let Some(ref sid) = self.inner.session_id {
+            self.inner
+                .browser_transport
+                .unregister_session_listener(sid);
+        }
 
         let browser_transport = Arc::clone(&self.inner.browser_transport);
         let target_id = self.inner.target_id.clone();
@@ -58,7 +71,6 @@ impl PageHandle {
         })
         .detach();
     }
-
 }
 
 impl Drop for PageHandle {
@@ -76,29 +88,24 @@ impl mlua::UserData for PageHandle {
     }
 }
 
-fn decode_base64(input: &str) -> mlua::Result<Vec<u8>> {
-    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+pub(crate) fn decode_base64(input: &str) -> mlua::Result<Vec<u8>> {
+    let mut out = Vec::new();
     let mut buf = 0u32;
-    let mut bits = 0u8;
+    let mut bits = 0;
 
-    for byte in input.bytes() {
-        let val = match byte {
-            b'A'..=b'Z' => byte - b'A',
-            b'a'..=b'z' => byte - b'a' + 26,
-            b'0'..=b'9' => byte - b'0' + 52,
+    for &c in input.as_bytes() {
+        if c == b'=' {
+            break;
+        }
+        let val = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
             b'+' => 62,
             b'/' => 63,
-            b'=' => break,
-            b'\r' | b'\n' | b'\t' | b' ' => continue,
-            _ => {
-                return Err(mlua::Error::runtime(format!(
-                    "invalid base64 byte: {}",
-                    byte
-                )));
-            }
-        } as u32;
-
-        buf = (buf << 6) | val;
+            _ => continue, // skip whitespace/invalid chars
+        };
+        buf = (buf << 6) | val as u32;
         bits += 6;
         if bits >= 8 {
             bits -= 8;
@@ -109,7 +116,7 @@ fn decode_base64(input: &str) -> mlua::Result<Vec<u8>> {
     Ok(out)
 }
 
-fn parse_wait_args(
+pub(crate) fn parse_wait_args(
     args: mlua::Variadic<mlua::Value>,
 ) -> mlua::Result<(Option<u64>, Option<mlua::Function>)> {
     let mut timeout_ms = None;
@@ -143,10 +150,12 @@ fn parse_wait_args(
 async fn wait_event_for_lua(
     lua: &mlua::Lua,
     transport: Arc<CdpTransport>,
+    session_id: Option<String>,
     event: String,
     timeout_ms: Option<u64>,
     predicate: Option<mlua::Function>,
 ) -> mlua::Result<mlua::Table> {
+    let rx = transport.register_listener(session_id.clone());
     let deadline = timeout_ms.map(|ms| std::time::Instant::now() + Duration::from_millis(ms));
 
     loop {
@@ -165,13 +174,27 @@ async fn wait_event_for_lua(
             None => None,
         };
 
-        let result_event = transport
-            .wait_event_timeout(&event, remaining, |_| true)
-            .await
-            .map_err(|e| {
-                crate::t_eprintln!("wait_event failed: {}", e);
-                mlua::Error::external(e)
-            })?;
+        let result_event = if let Some(timeout) = remaining {
+            let event_name = event.clone();
+            smol::future::or(
+                async { rx.recv().await.map_err(|e| mlua::Error::external(e)) },
+                async move {
+                    smol::Timer::after(timeout).await;
+                    Err(mlua::Error::external(anyhow::anyhow!(
+                        "Timeout waiting for CDP event {} after {}ms",
+                        event_name,
+                        timeout.as_millis()
+                    )))
+                },
+            )
+            .await?
+        } else {
+            rx.recv().await.map_err(|e| mlua::Error::external(e))?
+        };
+
+        if result_event.method != event {
+            continue;
+        }
 
         if let Some(predicate) = &predicate {
             let params = lua.to_value(&result_event.params)?;
@@ -191,61 +214,73 @@ async fn wait_event_for_lua(
 async fn create_page_table(
     lua: &mlua::Lua,
     browser_transport: Arc<CdpTransport>,
-    browser_ws_url: String,
     target_id: String,
+    page_transport: Option<Arc<CdpTransport>>,
+    session_id: Option<String>,
 ) -> mlua::Result<mlua::Table> {
-    let origin = browser_ws_url
-        .find("/devtools/")
-        .map(|pos| &browser_ws_url[..pos])
-        .unwrap_or(browser_ws_url.as_str());
-
-    let page_ws_url = format!("{}/devtools/page/{}", origin, target_id);
-    let page_transport = Arc::new(
-        CdpTransport::connect(&page_ws_url)
-            .await
-            .map_err(mlua::Error::external)?,
-    );
     let handle = lua.create_userdata(PageHandle::new(
-        Arc::clone(&page_transport),
         Arc::clone(&browser_transport),
+        page_transport.clone(),
+        session_id.clone(),
         target_id.clone(),
     ))?;
 
     let page = lua.create_table()?;
     page.set("_target_id", target_id.clone())?;
+    if let Some(ref sid) = session_id {
+        page.set("_session_id", sid.clone())?;
+    }
     page.set("__handle", handle)?;
 
-    let ct = page_transport.clone();
+    // page:call()
+    let bt_call = Arc::clone(&browser_transport);
+    let pt_call = page_transport.clone();
+    let sid_call = session_id.clone();
     page.set(
         "call",
         lua.create_async_function(
             move |lua, (_self, method, params): (mlua::Value, String, mlua::Value)| {
-                let ct = ct.clone();
+                let bt = Arc::clone(&bt_call);
+                let pt = pt_call.clone();
+                let sid = sid_call.clone();
                 async move {
                     let params_json: Value = lua.from_value(params)?;
-                    let result = ct
-                        .call(&method, params_json)
-                        .await
-                        .map_err(mlua::Error::external)?;
+                    let result = if let Some(ref sid) = sid {
+                        bt.call_session(sid, &method, params_json).await
+                    } else if let Some(ref pt) = pt {
+                        pt.call(&method, params_json).await
+                    } else {
+                        return Err(mlua::Error::runtime("No transport for page".to_string()));
+                    };
+                    let result = result.map_err(mlua::Error::external)?;
                     lua.to_value(&result).map_err(mlua::Error::runtime)
                 }
             },
         )?,
     )?;
 
-    let ct_save = page_transport.clone();
+    // page:call_save()
+    let bt_save = Arc::clone(&browser_transport);
+    let pt_save = page_transport.clone();
+    let sid_save = session_id.clone();
     page.set(
         "call_save",
         lua.create_async_function(
             move |lua,
-                (_self, method, params, path): (mlua::Value, String, mlua::Value, String)| {
-                let ct = ct_save.clone();
+                  (_self, method, params, path): (mlua::Value, String, mlua::Value, String)| {
+                let bt = Arc::clone(&bt_save);
+                let pt = pt_save.clone();
+                let sid = sid_save.clone();
                 async move {
                     let params_json: Value = lua.from_value(params)?;
-                    let mut result = ct
-                        .call(&method, params_json)
-                        .await
-                        .map_err(mlua::Error::external)?;
+                    let result = if let Some(ref sid) = sid {
+                        bt.call_session(sid, &method, params_json).await
+                    } else if let Some(ref pt) = pt {
+                        pt.call(&method, params_json).await
+                    } else {
+                        return Err(mlua::Error::runtime("No transport for page".to_string()));
+                    };
+                    let mut result = result.map_err(mlua::Error::external)?;
 
                     if let Some(base64_data) = result.get("data").and_then(|v| v.as_str()) {
                         let base64_data = base64_data.to_string();
@@ -258,7 +293,7 @@ async fn create_page_table(
 
                         if let Some(obj) = result.as_object_mut() {
                             obj.remove("data");
-                            obj.insert("saved_to".to_string(), Value::String(saved_path) ); 
+                            obj.insert("saved_to".to_string(), Value::String(saved_path));
                         }
                     }
 
@@ -268,20 +303,31 @@ async fn create_page_table(
         )?,
     )?;
 
-    let wt = page_transport.clone();
+    // page:wait_event()
+    let bt_wait = Arc::clone(&browser_transport);
+    let pt_wait = page_transport.clone();
+    let sid_wait = session_id.clone();
     page.set(
         "wait_event",
         lua.create_async_function(
             move |lua, (_self, event, args): (mlua::Value, String, mlua::Variadic<mlua::Value>)| {
-                let wt = wt.clone();
+                let bt = Arc::clone(&bt_wait);
+                let pt = pt_wait.clone();
+                let sid = sid_wait.clone();
                 async move {
                     let (timeout_ms, predicate) = parse_wait_args(args)?;
-                    wait_event_for_lua(&lua, wt, event, timeout_ms, predicate).await
+                    let transport = if let Some(ref pt) = pt {
+                        Arc::clone(pt)
+                    } else {
+                        Arc::clone(&bt)
+                    };
+                    wait_event_for_lua(&lua, transport, sid, event, timeout_ms, predicate).await
                 }
             },
         )?,
     )?;
 
+    // page:close()
     let close_handle = lua.create_function(move |_, page: mlua::Table| {
         let handle: mlua::AnyUserData = page.get("__handle")?;
         let handle = handle.borrow::<PageHandle>()?.clone();
@@ -290,6 +336,7 @@ async fn create_page_table(
     })?;
     page.set("close", close_handle)?;
 
+    // Inject high-level Lua helpers (cdp.lua)
     let cdp_table: mlua::Table = lua.globals().get("cdp")?;
     let inject: mlua::Function = cdp_table.get("_inject_page")?;
     inject.call::<()>(page.clone())?;
@@ -297,24 +344,56 @@ async fn create_page_table(
     Ok(page)
 }
 
-async fn create_page_in_target(
+async fn create_page_for_browser(
     lua: &mlua::Lua,
-    browser_transport: Arc<CdpTransport>,
+    browser: &Browser,
+    target_id: String,
     browser_ws_url: String,
-    options: Value,
 ) -> mlua::Result<mlua::Table> {
-    let result = browser_transport
-        .call("Target.createTarget", options)
+    if browser.is_remote {
+        let result = browser
+            .transport
+            .call(
+                "Target.attachToTarget",
+                serde_json::json!({ "targetId": target_id, "flatten": true }),
+            )
+            .await
+            .map_err(mlua::Error::external)?;
+        let session_id = result["sessionId"]
+            .as_str()
+            .ok_or_else(|| {
+                mlua::Error::runtime("missing sessionId in attach response".to_string())
+            })?
+            .to_string();
+        create_page_table(
+            lua,
+            Arc::clone(&browser.transport),
+            target_id,
+            None,
+            Some(session_id),
+        )
         .await
-        .map_err(mlua::Error::external)?;
-    let target_id = result["targetId"]
-        .as_str()
-        .ok_or_else(|| {
-            mlua::Error::runtime("Missing targetId in Target.createTarget response".to_string())
-        })?
-        .to_string();
+    } else {
+        let origin = browser_ws_url
+            .find("/devtools/")
+            .map(|pos| &browser_ws_url[..pos])
+            .unwrap_or(browser_ws_url.as_str());
 
-    create_page_table(lua, browser_transport, browser_ws_url, target_id).await
+        let page_ws_url = format!("{}/devtools/page/{}", origin, target_id);
+        let page_transport = Arc::new(
+            CdpTransport::connect(&page_ws_url)
+                .await
+                .map_err(mlua::Error::external)?,
+        );
+        create_page_table(
+            lua,
+            Arc::clone(&browser.transport),
+            target_id,
+            Some(page_transport),
+            None,
+        )
+        .await
+    }
 }
 
 impl mlua::UserData for Browser {
@@ -337,21 +416,6 @@ impl mlua::UserData for Browser {
                 lua.to_value(&result_json).map_err(mlua::Error::runtime)
             },
         );
-        // methods.add_async_method(
-        //     "call",
-        //     |lua, this, (method, params): (String, mlua::Value)| async move {
-        //         let params_json: Value = lua.from_value(params)?;
-        //         let result_json = match this.transport.call(&method, params_json).await {
-        //             Ok(r) => r,
-        //             Err(e) => {
-        //                 crate::t_eprintln!("Method call failed: {e}");
-        //                 return Err(mlua::Error::external(anyhow::anyhow!("{e}")));
-        //             }
-        //         };
-
-        //         lua.to_value(&result_json).map_err(mlua::Error::external)
-        //     },
-        // );
 
         // browser:wait_event("Page.loadEventFired", timeout_ms?, predicate?)
         methods.add_async_method(
@@ -361,6 +425,7 @@ impl mlua::UserData for Browser {
                 wait_event_for_lua(
                     &lua,
                     Arc::clone(&this.transport),
+                    None,
                     event,
                     timeout_ms,
                     predicate,
@@ -424,21 +489,8 @@ impl mlua::UserData for Browser {
                                 && t["url"].as_str() == Some("about:blank")
                         })
                     }) {
-                        let target_id = existing["targetId"]
-                            .as_str()
-                            .ok_or_else(|| {
-                                mlua::Error::runtime(
-                                    "missing or invalid targetId in CDP response".to_string(),
-                                )
-                            })?
-                            .to_string();
-                        return create_page_table(
-                            &lua,
-                            Arc::clone(&this.transport),
-                            browser_url,
-                            target_id,
-                        )
-                        .await;
+                        let target_id = existing["targetId"].as_str().unwrap().to_string();
+                        return create_page_for_browser(&lua, &this, target_id, browser_url).await;
                     }
                 }
 
@@ -447,7 +499,21 @@ impl mlua::UserData for Browser {
                     params["browserContextId"] = Value::String(context_id);
                 }
 
-                create_page_in_target(&lua, Arc::clone(&this.transport), browser_url, params).await
+                let result = this
+                    .transport
+                    .call("Target.createTarget", params)
+                    .await
+                    .map_err(mlua::Error::external)?;
+                let target_id = result["targetId"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        mlua::Error::runtime(
+                            "Missing targetId in Target.createTarget response".to_string(),
+                        )
+                    })?
+                    .to_string();
+
+                create_page_for_browser(&lua, &this, target_id, browser_url).await
             },
         );
 
@@ -457,6 +523,7 @@ impl mlua::UserData for Browser {
                 .as_ref()
                 .ok_or_else(|| mlua::Error::runtime("No browser WS URL".to_string()))?
                 .to_string();
+            let is_remote = this.is_remote;
             let result = this
                 .transport
                 .call("Target.createBrowserContext", serde_json::json!({}))
@@ -485,16 +552,66 @@ impl mlua::UserData for Browser {
                         let attach_browser_url = attach_browser_url.clone();
                         let attach_context_id = attach_context_id.clone();
                         async move {
-                            create_page_in_target(
-                                &lua,
-                                attach_transport,
-                                attach_browser_url,
-                                serde_json::json!({
-                                    "url": url.unwrap_or_else(|| "about:blank".to_string()),
-                                    "browserContextId": attach_context_id,
-                                }),
-                            )
-                            .await
+                            let result = attach_transport
+                                .call(
+                                    "Target.createTarget",
+                                    serde_json::json!({
+                                        "url": url.unwrap_or_else(|| "about:blank".to_string()),
+                                        "browserContextId": attach_context_id,
+                                    }),
+                                )
+                                .await
+                                .map_err(mlua::Error::external)?;
+                            let target_id = result["targetId"]
+                                .as_str()
+                                .ok_or_else(|| {
+                                    mlua::Error::runtime("Missing targetId in Target.createTarget response".to_string())
+                                })?
+                                .to_string();
+
+                            if is_remote {
+                                let attach_res = attach_transport
+                                    .call(
+                                        "Target.attachToTarget",
+                                        serde_json::json!({ "targetId": target_id, "flatten": true }),
+                                    )
+                                    .await
+                                    .map_err(mlua::Error::external)?;
+                                let session_id = attach_res["sessionId"]
+                                    .as_str()
+                                    .ok_or_else(|| {
+                                        mlua::Error::runtime("missing sessionId in attach response".to_string())
+                                    })?
+                                    .to_string();
+                                create_page_table(
+                                    &lua,
+                                    Arc::clone(&attach_transport),
+                                    target_id,
+                                    None,
+                                    Some(session_id),
+                                )
+                                .await
+                            } else {
+                                let origin = attach_browser_url
+                                    .find("/devtools/")
+                                    .map(|pos| &attach_browser_url[..pos])
+                                    .unwrap_or(attach_browser_url.as_str());
+
+                                let page_ws_url = format!("{}/devtools/page/{}", origin, target_id);
+                                let page_transport = Arc::new(
+                                    CdpTransport::connect(&page_ws_url)
+                                        .await
+                                        .map_err(mlua::Error::external)?,
+                                );
+                                create_page_table(
+                                    &lua,
+                                    Arc::clone(&attach_transport),
+                                    target_id,
+                                    Some(page_transport),
+                                    None,
+                                )
+                                .await
+                            }
                         }
                     },
                 )?,
@@ -556,48 +673,15 @@ impl mlua::UserData for Browser {
              this,
              (session_id, event, args): (String, String, mlua::Variadic<mlua::Value>)| async move {
                 let (timeout_ms, predicate) = parse_wait_args(args)?;
-                let session_for_filter = session_id.clone();
-                let deadline =
-                    timeout_ms.map(|ms| std::time::Instant::now() + Duration::from_millis(ms));
-                loop {
-                    let remaining = match deadline {
-                        Some(deadline) => {
-                            let remaining =
-                                deadline.saturating_duration_since(std::time::Instant::now());
-                            if remaining.is_zero() {
-                                return Err(mlua::Error::external(anyhow::anyhow!(
-                                    "Timeout waiting for session event {} after {}ms",
-                                    event,
-                                    timeout_ms.unwrap_or_default()
-                                )));
-                            }
-                            Some(remaining)
-                        }
-                        None => None,
-                    };
-                    let ev = this
-                        .transport
-                        .wait_event_timeout(&event, remaining, |params| {
-                            if let Some(predicate) = &predicate {
-                                let Ok(params) = lua.to_value(params) else {
-                                    return false;
-                                };
-                                predicate.call::<bool>(params).unwrap_or(false)
-                            } else {
-                                true
-                            }
-                        })
-                        .await
-                        .map_err(mlua::Error::external)?;
-                    if ev.session_id.as_deref() != Some(session_for_filter.as_str()) {
-                        continue;
-                    }
-                    let event_table = lua.create_table()?;
-                    event_table.set("method", ev.method)?;
-                    event_table.set("params", lua.to_value(&ev.params)?)?;
-                    event_table.set("session_id", ev.session_id)?;
-                    return Ok(event_table);
-                }
+                wait_event_for_lua(
+                    &lua,
+                    Arc::clone(&this.transport),
+                    Some(session_id),
+                    event,
+                    timeout_ms,
+                    predicate,
+                )
+                .await
             },
         );
     }
