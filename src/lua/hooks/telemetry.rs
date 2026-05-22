@@ -238,7 +238,7 @@ impl JobHooks {
                 let mem_delta = entry.get::<i64>("mem_delta_bytes").unwrap_or(0) as f64;
                 let mem_padded = if lua_mem > 0.0 {
                     let mem_val = lua_mem / 1024.0;
-                    let mem_str = if mem_val >= 1024.0 {
+                    let mem_str = if mem_val >= 1000.0 {
                         format!("{:.2} MB", mem_val / 1024.0)
                     } else {
                         format!("{:.1} KB", mem_val)
@@ -246,7 +246,7 @@ impl JobHooks {
 
                     let sign = if mem_delta > 0.0 { "+" } else { "" };
                     let delta_val = mem_delta / 1024.0;
-                    let delta_str = if delta_val.abs() >= 1024.0 {
+                    let delta_str = if delta_val.abs() >= 1000.0 {
                         format!("{}{:.2} MB", sign, delta_val / 1024.0)
                     } else {
                         format!("{}{:.1} KB", sign, delta_val)

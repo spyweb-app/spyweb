@@ -1,13 +1,24 @@
 use crate::services::notifier;
 use mlua::{Lua, LuaSerdeExt, Result as LuaResult};
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
+    lua.load("math.randomseed(os.time())").exec()?;
+
     // helpers.lua
     lua.load(include_str!("../globals/helpers.lua"))
         .set_name("helpers.lua")
         .exec()
         .map_err(|e| mlua::Error::runtime(format!("Failed to load helpers.lua: {e}")))?;
+
+    lua.globals().set(
+        "sleep",
+        lua.create_async_function(|_, ms: u64| async move {
+            smol::Timer::after(Duration::from_millis(ms)).await;
+            Ok(())
+        })?,
+    )?;
 
     lua.globals().set(
         "notify",
