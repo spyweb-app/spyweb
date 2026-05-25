@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -98,6 +99,7 @@ fn format_error_chain(err: &anyhow::Error) -> String {
 pub struct RequestHandler {
     next_proxy_index: AtomicUsize,
     timeout: Duration,
+    default_agent: OnceLock<Agent>,
 }
 
 impl Default for RequestHandler {
@@ -111,6 +113,7 @@ impl RequestHandler {
         Self {
             next_proxy_index: AtomicUsize::new(0),
             timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            default_agent: OnceLock::new(),
         }
     }
 
@@ -118,12 +121,23 @@ impl RequestHandler {
         Self {
             next_proxy_index: AtomicUsize::new(0),
             timeout,
+            default_agent: OnceLock::new(),
+        }
+    }
+
+    fn get_agent(&self, proxy_url: Option<&str>) -> Result<Agent> {
+        match proxy_url {
+            Some(url) => self.build_agent(Some(url)),
+            None => Ok(self
+                .default_agent
+                .get_or_init(|| self.build_agent(None).expect("default agent init"))
+                .clone()),
         }
     }
 
     pub fn fetch(&self, job: &JobConfig) -> Result<RequestResult> {
         let selected_proxy = self.select_proxy(job);
-        let agent = self.build_agent(selected_proxy.as_deref())?;
+        let agent = self.get_agent(selected_proxy.as_deref())?;
 
         let mut request = agent.get(&job.url);
 
@@ -161,7 +175,7 @@ impl RequestHandler {
     /// Proxy selection still comes from job.proxy.
     pub fn fetch_with_request(&self, job: &JobConfig, req: &RequestConfig) -> FetchAttempt {
         let selected_proxy = self.select_proxy(job);
-        let agent = match self.build_agent(selected_proxy.as_deref()) {
+        let agent = match self.get_agent(selected_proxy.as_deref()) {
             Ok(agent) => agent,
             Err(err) => {
                 return FetchAttempt {

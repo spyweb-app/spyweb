@@ -8,12 +8,13 @@ use std::{sync::Arc, time::Duration};
 
 pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
     let interval = Duration::from_secs(job.config.interval as u64);
+    let base_request = RequestConfig::from_job(&job.config);
 
     loop {
         crate::t_println!("Running job: {}", color::c_job(&job.config.name));
         let started = std::time::Instant::now();
 
-        let result = run_once(&job, &db, &runner).await;
+        let result = run_once(&job, &db, &runner, &base_request).await;
         let pipeline_elapsed = started.elapsed();
         let cleanup_started = std::time::Instant::now();
 
@@ -81,14 +82,14 @@ async fn record_telemetry_stage(
     }
 }
 
-async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
+async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>, base_request: &RequestConfig) -> Result<()> {
     let started = std::time::Instant::now();
 
     if let Some(h) = job.hooks.as_ref() {
         h.init_telemetry().await?;
     }
 
-    let result = run_once_inner(job, db, runner).await;
+    let result = run_once_inner(job, db, runner, base_request).await;
 
     if let Some(h) = job.hooks.as_ref() {
         let _ = h.finalize_telemetry(started.elapsed()).await;
@@ -97,14 +98,13 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
     result
 }
 
-async fn run_once_inner(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result<()> {
-    let request = RequestConfig::from_job(&job.config);
+async fn run_once_inner(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>, base_request: &RequestConfig) -> Result<()> {
     let request = match job.hooks.as_ref() {
-        Some(h) => match h.before_fetch(request).await? {
+        Some(h) => match h.before_fetch(base_request.clone()).await? {
             None => return Ok(()),
             Some(r) => r,
         },
-        None => request,
+        None => base_request.clone(),
     };
 
     let fetch_attempt = match job.hooks.as_ref().filter(|h| h.has_override_fetch()) {
@@ -130,11 +130,11 @@ async fn run_once_inner(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>) -> Result
     };
 
     let response = match job.hooks.as_ref() {
-        Some(h) => match h.after_fetch(fetch_attempt.clone()).await? {
+        Some(h) => match h.after_fetch(fetch_attempt).await? {
             None => return Ok(()),
             Some(r) => r,
         },
-        None => fetch_attempt.result.clone().map_err(anyhow::Error::msg)?,
+        None => fetch_attempt.result.map_err(anyhow::Error::msg)?,
     };
 
     let status_code = response.status;
@@ -412,7 +412,8 @@ end
         let runner = Arc::new(Runner::new());
 
         smol::block_on(async {
-            run_once(&job, &db, &runner).await.unwrap();
+            let base_request = RequestConfig::from_job(&job.config);
+            run_once(&job, &db, &runner, &base_request).await.unwrap();
 
             let hooks = job.hooks.as_ref().unwrap();
             let lua = hooks.lua.lock().await;

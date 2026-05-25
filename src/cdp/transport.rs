@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use crate::cdp::types::{CdpEvent, JsonRpcMessage};
 
+type EventListeners = Arc<Mutex<HashMap<Option<String>, Vec<Sender<CdpEvent>>>>>;
 pub struct CdpTransport {
     // Send raw text frames to the write loop
     ws_tx: Sender<String>,
@@ -19,7 +20,7 @@ pub struct CdpTransport {
 
     // Event routing: key is Some(sessionId) for sessions, None for main transport.
     // Multiple listeners can subscribe to the same key.
-    listeners: Arc<Mutex<HashMap<Option<String>, Vec<Sender<CdpEvent>>>>>,
+    listeners: EventListeners,
 
     // Monotonically increasing request ID
     next_id: Arc<AtomicU64>,
@@ -62,8 +63,7 @@ impl CdpTransport {
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<anyhow::Result<Value>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
-        let listeners: Arc<Mutex<HashMap<Option<String>, Vec<Sender<CdpEvent>>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let listeners: EventListeners = Arc::new(Mutex::new(HashMap::new()));
 
         // Spawn write loop — drains ws_rx and writes frames to WebSocket
         {

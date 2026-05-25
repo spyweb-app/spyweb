@@ -31,14 +31,12 @@ pub fn profile_in_use(path: &Path) -> Result<bool> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(&lock_path)
         .with_context(|| format!("Failed to open lock file: {}", lock_path.display()))?;
 
     match file.try_lock_exclusive() {
-        Ok(()) => {
-            let _ = file.unlock();
-            Ok(false)
-        }
+        Ok(()) => Ok(false), // let _ = file.unlock();
         Err(_) => Ok(true),
     }
 }

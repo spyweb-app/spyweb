@@ -177,7 +177,7 @@ async fn wait_event_for_lua(
         let result_event = if let Some(timeout) = remaining {
             let event_name = event.clone();
             smol::future::or(
-                async { rx.recv().await.map_err(|e| mlua::Error::external(e)) },
+                async { rx.recv().await.map_err(mlua::Error::external) },
                 async move {
                     smol::Timer::after(timeout).await;
                     Err(mlua::Error::external(anyhow::anyhow!(
@@ -189,7 +189,7 @@ async fn wait_event_for_lua(
             )
             .await?
         } else {
-            rx.recv().await.map_err(|e| mlua::Error::external(e))?
+            rx.recv().await.map_err(mlua::Error::external)?
         };
 
         if result_event.method != event {

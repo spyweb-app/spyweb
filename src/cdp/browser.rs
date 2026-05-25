@@ -9,7 +9,8 @@ use futures_lite::StreamExt;
 use crate::cdp::transport::CdpTransport;
 use crate::cdp::types::LaunchOptions;
 
-static REGISTRY: OnceLock<Mutex<Vec<Arc<Mutex<Option<Child>>>>>> = OnceLock::new();
+type BrowserRegistry = OnceLock<Mutex<Vec<Arc<Mutex<Option<Child>>>>>>;
+static REGISTRY: BrowserRegistry = OnceLock::new();
 
 fn register_process(child: Arc<Mutex<Option<Child>>>) {
     let registry = REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
@@ -32,10 +33,10 @@ pub fn shutdown_all() {
     if let Some(registry) = REGISTRY.get() {
         let mut guard = registry.lock().unwrap();
         for arc in guard.drain(..) {
-            if let Ok(mut child_guard) = arc.lock() {
-                if let Some(mut child) = child_guard.take() {
-                    let _ = child.kill();
-                }
+            if let Ok(mut child_guard) = arc.lock()
+                && let Some(mut child) = child_guard.take()
+            {
+                let _ = child.kill();
             }
         }
     }
@@ -232,12 +233,11 @@ impl Browser {
 
     pub fn close(&mut self) {
         self.transport.close();
-        if let Some(child_mutex) = self.process.take() {
-            if let Ok(mut child_guard) = child_mutex.lock() {
-                if let Some(mut child) = child_guard.take() {
-                    let _ = child.kill();
-                }
-            }
+        if let Some(child_mutex) = self.process.take()
+            && let Ok(mut child_guard) = child_mutex.lock()
+            && let Some(mut child) = child_guard.take()
+        {
+            let _ = child.kill();
         }
         self._lock_file.take();
     }

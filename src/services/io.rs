@@ -26,7 +26,7 @@ pub struct IoTask {
 }
 
 pub fn init() {
-    let (tx, rx) = bounded(1024);
+    let (tx, rx) = bounded(16);
     IO_SENDER.set(tx).expect("IO system already initialized");
 
     std::thread::spawn(move || {
@@ -204,8 +204,8 @@ fn rotate_file(path: &Path) -> anyhow::Result<()> {
     // If we have more than MAX_ROTATIONS, delete the oldest
     if entries.len() > MAX_ROTATIONS {
         let to_delete = entries.len() - MAX_ROTATIONS;
-        for i in 0..to_delete {
-            let _ = fs::remove_file(&entries[i].1);
+        for entry in &entries[..to_delete] {
+            let _ = fs::remove_file(&entry.1);
         }
     }
 

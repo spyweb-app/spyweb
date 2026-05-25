@@ -28,7 +28,7 @@ pub struct Db {
 
 impl Db {
     pub fn open(path: &str) -> Result<Self> {
-        let db = Database::create(path)?;
+        let db = Database::builder().set_cache_size(4 << 20).create(path)?;
         let write = db.begin_write()?;
         write.open_table(RECORDS)?;
         write.open_table(SEEN)?;
