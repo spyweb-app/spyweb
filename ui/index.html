@@ -3,83 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SpyWeb - Admin Panel</title>
+    <title>SpyWeb - Records Viewer</title>
     <link rel="icon" type="image/png" href="/icon.png">
-    <!-- Bulma CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.0/css/bulma.min.css">
-    <!-- Alpine JS -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>
         :root {
-            --primary-gradient: linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%);
-            --glass-bg: rgba(20, 22, 31, 0.85);
-            --glass-border: rgba(255, 255, 255, 0.08);
-            --bg-color: #0f111a;
+            --bg-deep: #050505;
+            --bg-surface: #0f0f0f;
+            --glass: rgba(15, 15, 15, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.05);
+            --accent: #e11d48;
+            --accent2: #fb7185;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --sweep-pos: -100%;
         }
         
         body {
-            background-color: var(--bg-color);
-            color: #e2e8f0;
+            background-color: var(--bg-deep);
+            color: var(--text-main);
             min-height: 100vh;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-image: 
-                radial-gradient(circle at 15% 50%, rgba(58, 123, 213, 0.1), transparent 25%),
-                radial-gradient(circle at 85% 30%, rgba(0, 210, 255, 0.1), transparent 25%);
-            background-attachment: fixed;
-            overflow: hidden; /* App-like feel, scroll inner containers */
+            overflow: hidden;
+            transition: background-color 0.8s ease, color 0.8s ease;
         }
 
         .title-gradient {
-            background: var(--primary-gradient);
-            background-clip: text;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--accent);
             font-weight: 800;
         }
 
         .glass-sidebar {
-            background: var(--glass-bg);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
+            background: var(--bg-surface);
             border-right: 1px solid var(--glass-border);
             display: flex;
             flex-direction: column;
         }
 
         .navbar.is-glass {
-            background: var(--glass-bg);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
+            background: var(--bg-surface);
             border-bottom: 1px solid var(--glass-border);
         }
 
         .glass-card {
-            background: rgba(30, 32, 45, 0.6);
+            background: var(--bg-surface);
             border: 1px solid var(--glass-border);
             border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        /* The Wipe Effect */
+        .theme-sweep {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0.1;
+            pointer-events: none;
+            z-index: 10000;
+            transform: translateX(var(--sweep-pos));
+            transition: transform 1.2s cubic-bezier(0.65, 0, 0.35, 1);
         }
 
         /* Menu Styling */
         .menu-list a {
-            color: #a0aec0;
+            color: var(--text-muted);
             border-radius: 8px;
             margin-bottom: 4px;
-            transition: all 0.2s ease;
+            transition: all 0.3s ease;
             font-size: 0.95rem;
         }
         .menu-list a:hover {
             background-color: rgba(255, 255, 255, 0.05);
-            color: #fff;
+            color: var(--text-main);
         }
         .menu-list a.is-active {
-            background: var(--primary-gradient);
+            background: var(--accent);
             color: #fff;
             font-weight: 600;
         }
         .menu-label {
-            color: #718096;
+            color: var(--text-muted);
             letter-spacing: 0.1em;
+            opacity: 0.6;
         }
 
         /* Table Styling */
@@ -87,29 +95,29 @@
             border-radius: 12px;
             overflow: auto;
             border: 1px solid var(--glass-border);
-            background: rgba(20, 22, 31, 0.5);
+            background: var(--bg-surface);
         }
         
         .table {
             background-color: transparent;
-            color: #f1f5f9;
+            color: var(--text-main);
             margin-bottom: 0;
         }
         .table thead th {
             border-bottom: 1px solid var(--glass-border);
-            color: #00d2ff !important;
+            color: var(--accent) !important;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
             font-size: 0.8rem;
             padding: 1rem;
-            background: rgba(15, 17, 26, 0.8);
+            background: var(--bg-deep);
             position: sticky;
             top: 0;
             z-index: 10;
         }
         .table td, .table th {
-            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            border-bottom: 1px solid var(--glass-border);
             padding: 1rem;
             vertical-align: middle;
         }
@@ -117,13 +125,26 @@
             border-bottom: none;
         }
         .table.is-hoverable tbody tr:hover {
-            background-color: rgba(0, 210, 255, 0.05);
+            background-color: rgba(255, 255, 255, 0.02);
         }
 
         .tag.is-primary-gradient {
-            background: var(--primary-gradient);
+            background: var(--accent);
             color: white;
             border: none;
+        }
+
+        .button.is-info.is-outlined {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .button.is-info.is-outlined:hover {
+            background-color: var(--accent);
+            color: #fff;
+        }
+
+        .tag.is-rounded {
+            border-radius: 100px;
         }
 
         .scrollable-y {
@@ -146,12 +167,17 @@
             background: rgba(255, 255, 255, 0.2); 
         }
 
+        * {
+            transition: border-color 0.4s ease, background-color 0.4s ease, color 0.4s ease;
+        }
+
         [x-cloak] { display: none !important; }
     </style>
 </head>
-<body>
+<body x-data="spywebApp()" x-init="initApp()" :style="themeStyles">
+    <div class="theme-sweep" :style="{'--sweep-pos': sweepPos}"></div>
 
-<div x-data="spywebApp()" x-init="initApp()" x-cloak class="columns is-gapless m-0" style="height: 100vh;">
+<div x-cloak class="columns is-gapless m-0" style="height: 100vh;">
     
     <!-- Sidebar -->
     <div class="column is-3-tablet is-2-desktop glass-sidebar is-hidden-mobile">
@@ -175,9 +201,9 @@
                     <template x-show="loadingJobs">
                         <li><a class="has-text-grey">Loading...</a></li>
                     </template>
-                    <template x-for="job in jobs" :key="job">
+                    <template x-for="job in jobs" :key="job.id">
                         <li>
-                            <a :class="{'is-active': selectedJob === job}" @click="selectJob(job)" x-text="job"></a>
+                            <a :class="{'is-active': selectedJob === job.id}" @click="selectJob(job.id)" x-text="job.name"></a>
                         </li>
                     </template>
                 </ul>
@@ -191,8 +217,17 @@
         <!-- Header Nav -->
         <nav class="navbar is-glass px-5 is-flex is-align-items-center is-justify-content-space-between" style="min-height: 4.5rem;">
             <div class="is-flex is-align-items-center">
-                <h2 class="title is-5 has-text-white mb-0" x-text="selectedJob ? selectedJob : 'Recent Records'"></h2>
-                <span class="tag is-primary-gradient is-rounded ml-3" x-show="!loadingRecords && records.length > 0" x-text="records.length + ' Items'"></span>
+                <h2 class="title is-5 has-text-white mb-0" x-text="selectedJob ? (jobs.find(j => j.id === selectedJob)?.name || selectedJob) : 'Recent Records'"></h2>
+                <span class="tag is-primary-gradient is-rounded ml-3" x-show="!loadingRecords && records.length > 0" x-text="records.length + ' Items'"></span>    
+            </div>
+                        
+            <!-- Theme Picker -->
+            <div class="is-flex mr-5 is-hidden-mobile">
+                <template x-for="(colors, name) in themes" :key="name">
+                    <button class="button is-small p-0 m-1" 
+                                    :style="'background:' + colors.accent + '; border: none; width: 18px; height: 18px; min-width: 18px; border-radius: 4px;'" 
+                    @click="triggerSweep(name)" :title="name"></button>
+                </template>
             </div>
             
             <div class="is-flex is-align-items-center gap-3">
@@ -222,8 +257,8 @@
                 <div class="select is-small is-rounded is-dark mr-3 is-hidden-tablet">
                     <select x-model="selectedJob" @change="fetchRecords()">
                         <option value="">All Recent Records</option>
-                        <template x-for="job in jobs" :key="job">
-                            <option :value="job" x-text="job"></option>
+                        <template x-for="job in jobs" :key="job.id">
+                            <option :value="job.id" x-text="job.name"></option>
                         </template>
                     </select>
                 </div>
@@ -238,8 +273,8 @@
             
             <!-- Loading State -->
             <div x-show="loadingRecords" class="has-text-centered py-6">
-                <div class="loader is-loading is-size-1" style="margin: 0 auto; width: 3rem; height: 3rem; border-width: 3px; border-color: #00d2ff transparent #00d2ff transparent;"></div>
-                <p class="mt-4 has-text-info">Fetching records...</p>
+                <div class="loader is-loading is-size-1" :style="'margin: 0 auto; width: 3rem; height: 3rem; border-width: 3px; border-color: ' + themes[theme].accent + ' transparent ' + themes[theme].accent + ' transparent;'"></div>
+                <p class="mt-4" :style="'color: ' + themes[theme].accent">Fetching records...</p>
             </div>
 
             <!-- Error State -->
@@ -272,7 +307,7 @@
                             <tr>
                                 <td class="has-text-grey-light is-size-7" style="white-space: nowrap;" x-text="formatDate(record.date_time)"></td>
                                 <td x-show="!selectedJob">
-                                    <span class="tag is-dark is-rounded is-small" x-text="record.job_id || 'Unknown'"></span>
+                                    <span class="tag is-dark is-rounded is-small" x-text="jobs.find(j => j.id === record.job_id)?.name || record.job_id || 'Unknown'"></span>
                                 </td>
                                 
                                 <template x-for="header in tableHeaders" :key="header">
@@ -282,12 +317,16 @@
                                 </template>
                                 
                                 <td>
-                                    <template x-if="record.match_key && record.match_key.length > 0">
-                                        <span class="tag is-warning is-dark is-rounded is-small" title="Matched Keywords" x-text="record.match_key.join(', ')"></span>
-                                    </template>
-                                    <template x-if="!record.match_key || record.match_key.length === 0">
-                                        <span class="has-text-grey-dark">-</span>
-                                    </template>
+                                    <div class="tags">
+                                        <template x-for="keyword in (record.match_key || [])" :key="keyword">
+                                            <span class="tag is-rounded is-small mb-0 mr-0" 
+                                                :style="'background: ' + themes[theme].accent + '15; color: ' + themes[theme].accent + '; border: 1px solid ' + themes[theme].accent + '33;'"
+                                                x-text="keyword"></span>
+                                        </template>
+                                        <template x-if="!record.match_key || record.match_key.length === 0">
+                                            <span class="has-text-grey-dark">-</span>
+                                        </template>
+                                    </div>
                                 </td>
                             </tr>
                         </template>
@@ -295,6 +334,37 @@
                 </table>
             </div>
             
+        </div>
+    </div>
+
+    <!-- Auth Modal -->
+    <div class="modal" :class="showAuthModal ? 'is-active' : ''">
+        <div class="modal-background"></div>
+        <div class="modal-content px-4">
+            <div class="glass-card p-6 has-text-centered" style="max-width: 400px; margin: 0 auto; background: var(--bg-surface);">
+                <span class="icon is-large mb-4" :style="'color: ' + themes[theme].accent">
+                    <i class="fas fa-3x fa-shield-halved"></i>
+                </span>
+                <h3 class="title is-4 mb-2">Authentication Required</h3>
+                <p class="subtitle is-6 mb-5">Please enter your SPYWEB_API_KEY to continue.</p>
+                
+                <div class="field mb-5">
+                    <div class="control has-icons-left">
+                        <input class="input is-dark is-rounded" type="password" placeholder="Enter API Key" 
+                            x-model="apiKey" @keyup.enter="submitAuth()"
+                            style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: #fff;">
+                        <span class="icon is-small is-left">
+                            <i class="fas fa-key"></i>
+                        </span>
+                    </div>
+                </div>
+                
+                <button class="button is-fullwidth is-rounded" 
+                    :style="'background: ' + themes[theme].accent + '; color: #fff; border: none; font-weight: 600;'"
+                    @click="submitAuth()">
+                    Unlock Dashboard
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -314,9 +384,62 @@
             pageStack: [],
             hasMore: false,
             
+            // Theme Management
+            theme: 'crimson',
+            sweepPos: '-100%',
+            apiKey: localStorage.getItem('spyweb_api_key') || '',
+            showAuthModal: false,
+            authError: '',
+            themes: {
+                crimson: { accent: '#e11d48', accent2: '#fb7185' },
+                emerald: { accent: '#10b981', accent2: '#34d399' },
+                cobalt: { accent: '#3b82f6', accent2: '#60a5fa' },
+                violet: { accent: '#8b5cf6', accent2: '#a78bfa' },
+                amber: { accent: '#f59e0b', accent2: '#fbbf24' },
+                pink: { accent: '#ec4899', accent2: '#f472b6' },
+                rose: { accent: '#f43f5e', accent2: '#fb7185' },
+                orange: { accent: '#f97316', accent2: '#fb923c' },
+                cyan: { accent: '#06b6d4', accent2: '#22d3ee' },
+                lime: { accent: '#84cc16', accent2: '#a3e635' }
+            },
+
             initApp() {
+                const themeKeys = Object.keys(this.themes);
+                this.theme = themeKeys[Math.floor(Math.random() * themeKeys.length)];
                 this.fetchJobs();
                 this.fetchRecords();
+                this.startThemeCycle();
+            },
+
+            startThemeCycle() {
+                const cycle = () => {
+                    const themeKeys = Object.keys(this.themes);
+                    let nextTheme;
+                    do {
+                        nextTheme = themeKeys[Math.floor(Math.random() * themeKeys.length)];
+                    } while (nextTheme === this.theme);
+                    
+                    this.triggerSweep(nextTheme);
+                    const nextInterval = Math.floor(Math.random() * (60000 - 30000 + 1)) + 30000;
+                    setTimeout(cycle, nextInterval);
+                };
+                setTimeout(cycle, 30000);
+            },
+
+            triggerSweep(nextTheme) {
+                this.sweepPos = '100%';
+                setTimeout(() => {
+                    this.theme = nextTheme;
+                    this.sweepPos = '-100%';
+                }, 600);
+            },
+
+            get themeStyles() {
+                const t = this.themes[this.theme];
+                return {
+                    '--accent': t.accent,
+                    '--accent2': t.accent2
+                };
             },
             
             selectJob(job) {
@@ -338,30 +461,34 @@
 
             async next() {
                 if (!this.nextAfter) return;
-                this.pageStack.push(this.records[0].timestamp); // Store top for "Prev" logic? 
-                // Wait, if we use 'after', we move forward in time (older records).
-                // So the stack should store the current 'after' used to get THIS page.
-                // Actually, let's keep it simple: 
-                // pageStack stores the 'after' value used to fetch the CURRENT page.
+                this.pageStack.push(this.records[0].timestamp); 
                 const currentAfter = this.records[this.records.length - 1].timestamp;
-                this.pageStack.push(this.nextAfter); // This is wrong for back.
-                
-                // Let's use a simple page-based stack for "after" values.
-                // [null, after1, after2]
-                // page 1: after=null
-                // page 2: after=after1
-                // page 3: after=after2
+                this.pageStack.push(this.nextAfter); 
             },
             
+            async apiFetch(url) {
+                const res = await fetch(url, {
+                    headers: { 'X-SpyWeb-Key': this.apiKey }
+                });
+                
+                if (res.status === 401) {
+                    this.showAuthModal = true;
+                    throw new Error('Unauthorized');
+                }
+                
+                if (!res.ok) throw new Error('API Error: ' + res.status);
+                return res.json();
+            },
+
             async fetchJobs() {
                 this.loadingJobs = true;
                 try {
-                    const res = await fetch('/api/jobs');
-                    if (!res.ok) throw new Error('Failed to fetch jobs');
-                    this.jobs = await res.json();
+                    this.jobs = await this.apiFetch('/api/jobs');
                 } catch (err) {
-                    console.error(err);
-                    this.error = "Could not load jobs list.";
+                    if (err.message !== 'Unauthorized') {
+                        console.error(err);
+                        this.error = "Could not load jobs list.";
+                    }
                 } finally {
                     this.loadingJobs = false;
                 }
@@ -380,10 +507,7 @@
                     
                     url += `?${params.toString()}`;
                     
-                    const res = await fetch(url);
-                    if (!res.ok) throw new Error('Failed to fetch records');
-                    
-                    const data = await res.json();
+                    const data = await this.apiFetch(url);
                     
                     if (this.selectedJob) {
                         this.records = data.records || [];
@@ -407,8 +531,10 @@
                         this.records = flattened; // server already limited it
                     }
                 } catch (err) {
-                    console.error(err);
-                    this.error = "Could not load records.";
+                    if (err.message !== 'Unauthorized') {
+                        console.error(err);
+                        this.error = "Could not load records.";
+                    }
                 } finally {
                     this.loadingRecords = false;
                 }
@@ -425,6 +551,14 @@
                 if (this.pageStack.length === 0) return;
                 this.currentAfter = this.pageStack.pop();
                 await this.fetchRecords(this.currentAfter);
+            },
+
+            submitAuth() {
+                if (!this.apiKey) return;
+                localStorage.setItem('spyweb_api_key', this.apiKey);
+                this.showAuthModal = false;
+                this.fetchJobs();
+                this.fetchRecords();
             },
 
             // Compute dynamic headers based on the current records set
@@ -470,7 +604,7 @@
 
                 if (str.startsWith('http://') || str.startsWith('https://')) {
                     const safeUrl = str.split(' ')[0].replace(/"/g, '%22').replace(/'/g, '%27'); // Very basic URL safety
-                    return `<a href="${safeUrl}" target="_blank" class="has-text-info" style="text-decoration: underline; text-underline-offset: 3px;" rel="noopener noreferrer">${escape(str)}</a>`;
+                    return `<a href="${safeUrl}" target="_blank" style="color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-weight: 600;" rel="noopener noreferrer">View</a>`;
                 }
                 
                 let displayStr = escape(str);
