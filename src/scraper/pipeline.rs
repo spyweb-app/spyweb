@@ -82,7 +82,12 @@ async fn record_telemetry_stage(
     }
 }
 
-async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>, base_request: &RequestConfig) -> Result<()> {
+async fn run_once(
+    job: &Job,
+    db: &Arc<Db>,
+    runner: &Arc<Runner>,
+    base_request: &RequestConfig,
+) -> Result<()> {
     let started = std::time::Instant::now();
 
     if let Some(h) = job.hooks.as_ref() {
@@ -98,7 +103,12 @@ async fn run_once(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>, base_request: &
     result
 }
 
-async fn run_once_inner(job: &Job, db: &Arc<Db>, runner: &Arc<Runner>, base_request: &RequestConfig) -> Result<()> {
+async fn run_once_inner(
+    job: &Job,
+    db: &Arc<Db>,
+    runner: &Arc<Runner>,
+    base_request: &RequestConfig,
+) -> Result<()> {
     let request = match job.hooks.as_ref() {
         Some(h) => match h.before_fetch(base_request.clone()).await? {
             None => return Ok(()),

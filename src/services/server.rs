@@ -3,9 +3,16 @@ use anyhow::Result;
 use rouille::{Request, Response};
 use std::sync::Arc;
 
+#[derive(serde::Serialize, Clone)]
+pub struct JobSummary {
+    pub id: String,
+    pub name: String,
+}
+
 pub struct WebServer {
     db: Arc<Db>,
-    active_jobs: Arc<std::sync::RwLock<Vec<String>>>,
+    active_jobs: Arc<std::sync::RwLock<Vec<JobSummary>>>,
+    auth_key: Option<String>,
 }
 
 #[derive(Debug)]
@@ -30,53 +37,42 @@ impl RecordsQuery {
 }
 
 impl WebServer {
-    pub fn new(db: Arc<Db>, active_jobs: Arc<std::sync::RwLock<Vec<String>>>) -> Self {
-        Self { db, active_jobs }
+    pub fn new(db: Arc<Db>, active_jobs: Arc<std::sync::RwLock<Vec<JobSummary>>>) -> Self {
+        let auth_key = std::env::var("SPYWEB_API_KEY").ok().filter(|s| !s.is_empty());
+        Self {
+            db,
+            active_jobs,
+            auth_key,
+        }
     }
 
     pub fn listen(&self, addr: &str) -> Result<()> {
         let server_db = Arc::clone(&self.db);
         let server_active_jobs = Arc::clone(&self.active_jobs);
+        let auth_key = self.auth_key.clone();
 
         let server = rouille::Server::new(addr, move |request| {
             let url = request.url();
 
-            // HTML pages
-            if url == "/" || url == "/records" {
-                let ui_path = std::path::Path::new("ui/index.html");
-                if ui_path.exists() {
-                    return match std::fs::read_to_string(ui_path) {
-                        Ok(content) => Response::html(content),
-                        Err(e) => {
-                            Response::html(format!("<pre>Error reading ui/index.html: {}</pre>", e))
-                        }
-                    };
+            // 1. API Route Branch (Guarded)
+            if url.starts_with("/api") {
+                if let Some(ref required_key) = auth_key {
+                    let provided_key = request.header("X-SpyWeb-Key").unwrap_or_default();
+                    if provided_key != required_key {
+                        return Response::json(&serde_json::json!({ "error": "Unauthorized" }))
+                            .with_status_code(401);
+                    }
                 }
 
-                return match handle_html_records(&server_db) {
-                    Ok(html) => Response::html(html),
-                    Err(e) => Response::html(format!("<pre>Error: {}</pre>", e)),
+                return match handle_api_request(&server_db, &server_active_jobs, request) {
+                    Ok(response) => response,
+                    Err(e) => Response::json(&serde_json::json!({ "error": e.to_string() }))
+                        .with_status_code(500),
                 };
             }
 
-            // Static assets (favicon, images, custom scripts etc)
-            let asset_response = rouille::match_assets(request, "ui");
-            if asset_response.is_success() {
-                return asset_response;
-            }
-
-            // API endpoints
-            if !url.starts_with("/api") {
-                return Response::empty_404();
-            }
-
-            match handle_request_logic(&server_db, &server_active_jobs, request) {
-                Ok(response) => response,
-                Err(e) => Response::json(&serde_json::json!({
-                    "error": e.to_string()
-                }))
-                .with_status_code(500),
-            }
+            // 2. Static Assets Branch (Unguarded, Strictly Caged)
+            handle_static_request(&server_db, request)
         })
         .map_err(|e| anyhow::anyhow!("Failed to start server on {}: {}", addr, e))?;
 
@@ -90,32 +86,88 @@ impl WebServer {
     }
 }
 
-fn handle_request_logic(
+/// Strictly validates and serves files from the 'ui' directory.
+fn handle_static_request(db: &Db, request: &Request) -> Response {
+    let url = request.url();
+
+    // Special case for root/records routes -> serve index.html
+    if url == "/" || url == "/records" {
+        let index_path = std::path::Path::new("ui/index.html");
+        if index_path.exists() {
+            return match std::fs::read_to_string(index_path) {
+                Ok(content) => Response::html(content),
+                Err(e) => Response::html(format!("<pre>Error loading UI: {}</pre>", e)),
+            };
+        }
+        // Fallback to minimal built-in HTML if ui/index.html is missing
+        return match handle_html_records(db) {
+            Ok(html) => Response::html(html),
+            Err(e) => Response::html(format!("<pre>Error: {}</pre>", e)),
+        };
+    }
+
+    // Sanitize and validate path for other assets
+    let path = url.trim_start_matches('/');
+    if let Err(e) = validate_static_path(path) {
+        crate::t_eprintln!("Blocked static request for '{}': {}", url, e);
+        return Response::empty_404();
+    }
+
+    // All checks passed, attempt to serve from ui/ folder
+    let asset_response = rouille::match_assets(request, "ui");
+    if asset_response.is_success() {
+        return asset_response;
+    }
+
+    Response::empty_404()
+}
+
+fn validate_static_path(path: &str) -> Result<()> {
+    // 1. Traversal Prevention (Strictly no ..)
+    if path.contains("..") {
+        return Err(anyhow::anyhow!("Directory traversal attempt blocked."));
+    }
+
+    // 2. Extension Allowlist
+    let allowed_extensions = [
+        "html", "js", "css", "png", "jpg", "jpeg", "gif", "svg", "ico", "woff", "woff2", "ttf",
+        "otf", "json", "webmanifest", "map",
+    ];
+
+    let path_obj = std::path::Path::new(path);
+    let ext = path_obj
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if !allowed_extensions.contains(&ext.as_str()) {
+        return Err(anyhow::anyhow!(
+            "File type not allowed for static assets: .{}",
+            ext
+        ));
+    }
+
+    Ok(())
+}
+
+fn handle_api_request(
     db: &Db,
-    active_jobs: &Arc<std::sync::RwLock<Vec<String>>>,
+    active_jobs: &Arc<std::sync::RwLock<Vec<JobSummary>>>,
     request: &Request,
 ) -> Result<Response> {
     let url = request.url();
 
     if url == "/api/records" {
         return handle_records_request(request, db);
-        // let job_id = request.get_param("job_id");
-        // let all_records = db.get_all_records()?;
-
-        // if let Some(id) = job_id {
-        //     let records = all_records.get(&id).cloned().unwrap_or_default();
-        //     return Ok(Response::json(&records));
-        // } else {
-        //     return Ok(Response::json(&all_records));
-        // }
     }
 
     if url == "/api/jobs" {
-        let job_ids = active_jobs
+        let summaries = active_jobs
             .read()
             .map_err(|err| anyhow::anyhow!("active jobs lock poisoned: {}", err))?
             .clone();
-        return Ok(Response::json(&job_ids));
+        return Ok(Response::json(&summaries));
     }
 
     Ok(Response::empty_404())
@@ -126,41 +178,8 @@ fn handle_records_request(request: &Request, db: &Db) -> Result<Response> {
 
     if let Some(job_id) = query.job_id {
         let records = db.get_records_for_job_paginated(&job_id, query.limit, query.after)?;
-
-        // #[derive(serde::Serialize)]
-        // struct PaginatedResponse {
-        //     records: Vec<Record>,
-        //     limit: usize,
-        //     has_more: bool,
-        //     next_after: Option<u64>,
-        // }
-
-        // let has_more = records.len() == query.limit;
-        // let next_after = records.last().map(|r| r.timestamp);
-
-        // Ok(Response::json(&PaginatedResponse {
-        //     records,
-        //     limit: query.limit,
-        //     has_more,
-        //     next_after: if has_more { next_after } else { None },
-        // }))
-        // Transform on the fly
         let next_after = records.last().map(|r| r.timestamp);
-        // let records_with_datetime: Vec<_> = records
-        //     .into_iter()
-        //     .map(|record| {
-        //         // Serialize the original record to a value
-        //         let mut value = serde_json::to_value(record)?;
-        //         // Inject the date_time field
-        //         value["date_time"] = serde_json::to_value(crate::services::utils::nanos_to_zulu(
-        //             Some(value["timestamp"].as_u64().unwrap()),
-        //         ))?;
-        //         Ok(value)
-        //     })
-        //     .collect::<Result<Vec<_>>>()?;
         let records_with_datetime = add_datetime_to_records(records);
-
-        // Similar response structure but with serde_json::Value
         let has_more = records_with_datetime.len() == query.limit;
 
         Ok(Response::json(&serde_json::json!({

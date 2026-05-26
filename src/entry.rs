@@ -9,7 +9,7 @@ use crate::config::types::Jobs;
 use crate::scraper::pipeline;
 use crate::scraper::runner::Runner;
 use crate::services::db::Db;
-use crate::services::server::WebServer;
+use crate::services::server::{JobSummary, WebServer};
 use crate::services::watcher;
 
 pub fn start_app() -> Result<()> {
@@ -31,8 +31,11 @@ pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
     let active_job_ids = Arc::new(std::sync::RwLock::new(
         jobs.list
             .iter()
-            .map(|j| j.config.id())
-            .collect::<Vec<String>>(),
+            .map(|j| JobSummary {
+                id: j.config.id(),
+                name: j.config.name.clone(),
+            })
+            .collect::<Vec<JobSummary>>(),
     ));
 
     let ex = Arc::new(Executor::new());
@@ -105,7 +108,7 @@ async fn job_manager(
     db: Arc<Db>,
     initial_jobs: Jobs,
     reload_rx: smol::channel::Receiver<()>,
-    active_job_ids: Arc<std::sync::RwLock<Vec<String>>>,
+    active_job_ids: Arc<std::sync::RwLock<Vec<JobSummary>>>,
 ) {
     let mut handles = spawn_jobs(&ex, &runner, &db, initial_jobs);
 
@@ -125,7 +128,14 @@ async fn job_manager(
                 crate::cdp::browser::shutdown_all();
 
                 if let Ok(mut lock) = active_job_ids.write() {
-                    *lock = new_jobs.list.iter().map(|j| j.config.id()).collect();
+                    *lock = new_jobs
+                        .list
+                        .iter()
+                        .map(|j| JobSummary {
+                            id: j.config.id(),
+                            name: j.config.name.clone(),
+                        })
+                        .collect();
                 }
                 handles = spawn_jobs(&ex, &runner, &db, new_jobs);
                 crate::t_println!(
