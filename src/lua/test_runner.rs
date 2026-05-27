@@ -154,21 +154,23 @@ fn discover_tests(job_dir: &Path, job_name: &str) -> Result<Vec<String>> {
 
 async fn run_single_test(job_dir: &Path, job_name: &str, test_name: &str) -> Result<()> {
     let temp_db_file = NamedTempFile::new()?;
-    let db = Arc::new(Db::open(temp_db_file.path().to_str().unwrap())?);
+    let temp_db = temp_db_file
+        .path()
+        .to_str()
+        .context("Failed to convert temp db path to string")?;
+    let db = Arc::new(Db::open(temp_db)?);
     let lua = engine::create_engine(Some(job_dir.to_path_buf()), db, job_name)?;
 
     load_test_sources(&lua, job_dir)?;
 
-    let test_fn: Function = lua.globals().get(test_name).with_context(|| {
-        format!(
-            "Test function {} not found",
-            crate::color::c_err(&test_name)
-        )
-    })?;
+    let test_fn: Function = lua
+        .globals()
+        .get(test_name)
+        .with_context(|| format!("Test function {} not found", crate::color::c_err(test_name)))?;
     test_fn
         .call_async::<()>(())
         .await
-        .with_context(|| format!("Test {} failed", crate::color::c_err(&test_name)))?;
+        .with_context(|| format!("Test {} failed", crate::color::c_err(test_name)))?;
 
     Ok(())
 }

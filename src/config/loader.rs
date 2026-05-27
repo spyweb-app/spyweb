@@ -279,7 +279,8 @@ fn load_config_from_file(path: &str) -> Result<Vec<Job>> {
     }
 
     let content = fs::read_to_string(path)?;
-    let file: JobFile = toml::from_str(&content)?;
+    let file: JobFile = toml::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("Config error in '{}': {}", path.display(), e))?;
 
     let mut jobs = Vec::with_capacity(file.jobs.len());
     for config in file.jobs {
@@ -311,8 +312,9 @@ fn load_config_from_dir(path: &str, db: Arc<Db>) -> Result<Vec<Job>> {
             continue;
         }
 
-        let content = fs::read_to_string(config_path)?;
-        let config: JobConfig = toml::from_str(&content)?;
+        let content = fs::read_to_string(&config_path)?;
+        let config: JobConfig = toml::from_str(&content)
+            .map_err(|e| anyhow::anyhow!("Config error in '{}': {}", config_path.display(), e))?;
         validate_job_config(&config)?;
         let hook_path = dir.join("hooks.lua");
         let hooks = if hook_path.exists() {

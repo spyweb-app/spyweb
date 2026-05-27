@@ -260,7 +260,10 @@ pub fn listen_command() -> anyhow::Result<()> {
             res
         }
         Commands::Test { job_name, pattern } => {
-            crate::lua::test_runner::run_tests(job_name, pattern)
+            crate::services::io::init();
+            let res = crate::lua::test_runner::run_tests(job_name, pattern);
+            crate::services::utils::shutdown_system();
+            res
         }
         Commands::Profile { command } => handle_profile_command(command),
         Commands::Version => {
