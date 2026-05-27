@@ -83,6 +83,7 @@ impl JobHooks {
         let sample = self.telemetry_stage_start().await?;
         match self.try_override_fetch(&req).await {
             Ok(result) => {
+                self.set_last_fetch(&result).await?;
                 let (status, error) = match &result.result {
                     Ok(_) => ("success", None),
                     Err(err) => ("error", Some(err.clone())),
@@ -137,12 +138,12 @@ impl JobHooks {
     }
 
     pub async fn after_fetch(&self, attempt: FetchAttempt) -> Result<Option<RequestResult>> {
-        self.set_last_fetch(&attempt).await?;
         if !self.has_after_fetch {
             return attempt.result.map(Some).map_err(anyhow::Error::msg);
         }
+        let fetch_table = self.last_fetch_table(&attempt).await?;
         let sample = self.telemetry_stage_start().await?;
-        match self.try_after_fetch(&attempt).await {
+        match self.try_after_fetch(&attempt, fetch_table).await {
             Ok(result) => {
                 let _ = self
                     .record_telemetry_stage("after_fetch", sample, "success", None)
@@ -162,21 +163,33 @@ impl JobHooks {
         }
     }
 
-    async fn set_last_fetch(&self, attempt: &FetchAttempt) -> Result<()> {
+    pub(crate) async fn set_last_fetch(&self, attempt: &FetchAttempt) -> Result<()> {
         let lua = self.lua.lock().await;
         let table = conversions::fetch_result_to_lua(&lua, attempt)?;
         lua.globals().set("last_fetch", table)?;
         Ok(())
     }
 
+    async fn last_fetch_table(&self, attempt: &FetchAttempt) -> Result<mlua::Table> {
+        let lua = self.lua.lock().await;
+        match lua.globals().get::<mlua::Table>("last_fetch") {
+            Ok(table) => Ok(table),
+            Err(_) => {
+                let table = conversions::fetch_result_to_lua(&lua, attempt)?;
+                lua.globals().set("last_fetch", table.clone())?;
+                Ok(table)
+            }
+        }
+    }
+
     pub(crate) async fn try_after_fetch(
         &self,
         attempt: &FetchAttempt,
+        fetch_table: mlua::Table,
     ) -> Result<Option<RequestResult>> {
         let lua = self.lua.lock().await;
         let func: mlua::Function = lua.globals().get("after_fetch")?;
-        let table = conversions::fetch_result_to_lua(&lua, attempt)?;
-        let ret = func.call_async::<mlua::Value>(table).await;
+        let ret = func.call_async::<mlua::Value>(fetch_table).await;
         run_deferred(&lua, "after_fetch");
         match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),

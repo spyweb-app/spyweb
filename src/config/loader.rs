@@ -14,6 +14,10 @@ pub fn load_all_jobs(file_path: &str, dir_path: &str, db: Arc<Db>) -> Result<Job
     Ok(Jobs { list })
 }
 
+pub fn load_dir_jobs(dir_path: &str, db: Arc<Db>) -> Result<Vec<Job>> {
+    load_config_from_dir(dir_path, db)
+}
+
 fn normalized_hash_fields(config: &JobConfig) -> Vec<String> {
     config
         .hash_fields

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -25,6 +27,14 @@ pub fn nanos_to_zulu(time: Option<u64>) -> String {
 
 pub fn now_zulu() -> String {
     nanos_to_zulu(None)
+}
+
+pub fn format_duration(duration: Duration) -> String {
+    if duration.as_secs() > 0 {
+        format!("{:.2}s", duration.as_secs_f64())
+    } else {
+        format!("{:.2}ms", duration.as_secs_f64() * 1000.0)
+    }
 }
 
 pub fn shutdown_system() {

@@ -7,12 +7,15 @@ pub mod cdp;
 pub mod network;
 pub mod storage;
 pub mod system;
+pub mod testing;
 
 #[cfg(test)]
 mod tests;
 
 pub fn register(lua: &Lua, db: Arc<Db>, job_name: &str) -> anyhow::Result<()> {
-    storage::register(lua, db, job_name)
+    storage::register(lua, db, job_name)?;
+    testing::register(lua)?;
+    Ok(())
 }
 
 pub fn register_http_and_fs(lua: &Lua, job_dir: Option<PathBuf>) -> mlua::Result<()> {

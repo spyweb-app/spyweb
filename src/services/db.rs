@@ -8,6 +8,8 @@ const RECORDS: TableDefinition<(&str, u64), &str> = TableDefinition::new("record
 const SEEN: TableDefinition<&str, u8> = TableDefinition::new("seen");
 pub const LUA_USER_TABLE: TableDefinition<&str, &str> = TableDefinition::new("lua_user");
 
+const DB_CACHE_SIZE_BYTES: usize = 512 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Record {
     pub fields: HashMap<String, String>,
@@ -28,7 +30,9 @@ pub struct Db {
 
 impl Db {
     pub fn open(path: &str) -> Result<Self> {
-        let db = Database::builder().set_cache_size(4 << 20).create(path)?;
+        let db = Database::builder()
+            .set_cache_size(DB_CACHE_SIZE_BYTES)
+            .create(path)?;
         let write = db.begin_write()?;
         write.open_table(RECORDS)?;
         write.open_table(SEEN)?;

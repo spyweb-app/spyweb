@@ -106,6 +106,10 @@ enum Commands {
     Debug {
         job_name: String,
     },
+    Test {
+        job_name: Option<String>,
+        pattern: Option<String>,
+    },
     Profile {
         #[command(subcommand)]
         command: ProfileCommands,
@@ -254,6 +258,9 @@ pub fn listen_command() -> anyhow::Result<()> {
             let res = smol::block_on(crate::scraper::runner::debug_job(&job_name));
             crate::services::utils::shutdown_system();
             res
+        }
+        Commands::Test { job_name, pattern } => {
+            crate::lua::test_runner::run_tests(job_name, pattern)
         }
         Commands::Profile { command } => handle_profile_command(command),
         Commands::Version => {

@@ -38,7 +38,7 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
         let cleanup_msg = if ran_cycle_cleanup {
             format!(
                 ", cleanup finished in {}",
-                color::c_info(&format_duration(cleanup_elapsed))
+                color::c_info(&crate::services::utils::format_duration(cleanup_elapsed))
             )
         } else {
             String::new()
@@ -47,19 +47,11 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
         crate::t_println!(
             "Job [{}] finished in {}{}, sleeping for {}",
             color::c_job(&job.config.name),
-            color::c_info(&format_duration(pipeline_elapsed)),
+            color::c_info(&crate::services::utils::format_duration(pipeline_elapsed)),
             cleanup_msg,
             color::c_info(&format!("{}s", job.config.interval))
         );
         Timer::after(interval).await;
-    }
-}
-
-fn format_duration(duration: Duration) -> String {
-    if duration.as_secs() > 0 {
-        format!("{:.2}s", duration.as_secs_f64())
-    } else {
-        format!("{:.2}ms", duration.as_secs_f64() * 1000.0)
     }
 }
 
@@ -129,6 +121,9 @@ async fn run_once_inner(
             })
             .await;
             if let Some(sample) = sample {
+                if let Some(h) = job.hooks.as_ref() {
+                    h.set_last_fetch(&attempt).await?;
+                }
                 let (status, error) = match &attempt.result {
                     Ok(_) => ("success", None),
                     Err(err) => ("error", Some(err.clone())),
@@ -431,6 +426,10 @@ end
             let map: mlua::Table = telemetry.get("map").unwrap();
 
             assert!(telemetry.get::<f64>("total_duration_ms").unwrap() >= 0.0);
+            assert!(matches!(
+                lua.globals().get::<mlua::Value>("last_fetch").unwrap(),
+                mlua::Value::Table(_)
+            ));
             assert_eq!(
                 map.get::<mlua::Table>("override_fetch")
                     .unwrap()

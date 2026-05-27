@@ -38,7 +38,9 @@ impl RecordsQuery {
 
 impl WebServer {
     pub fn new(db: Arc<Db>, active_jobs: Arc<std::sync::RwLock<Vec<JobSummary>>>) -> Self {
-        let auth_key = std::env::var("SPYWEB_API_KEY").ok().filter(|s| !s.is_empty());
+        let auth_key = std::env::var("SPYWEB_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
         Self {
             db,
             active_jobs,
@@ -130,8 +132,22 @@ fn validate_static_path(path: &str) -> Result<()> {
 
     // 2. Extension Allowlist
     let allowed_extensions = [
-        "html", "js", "css", "png", "jpg", "jpeg", "gif", "svg", "ico", "woff", "woff2", "ttf",
-        "otf", "json", "webmanifest", "map",
+        "html",
+        "js",
+        "css",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "svg",
+        "ico",
+        "woff",
+        "woff2",
+        "ttf",
+        "otf",
+        "json",
+        "webmanifest",
+        "map",
     ];
 
     let path_obj = std::path::Path::new(path);

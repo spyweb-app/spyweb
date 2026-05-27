@@ -38,7 +38,7 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
         lua.globals().set(
             "log",
             lua.create_async_function(move |_, msg: String| {
-                let path = log_dir.join("hook.log");
+                let path = log_dir.join("hooks.log");
                 async move {
                     let task = crate::services::io::IoTask {
                         path,

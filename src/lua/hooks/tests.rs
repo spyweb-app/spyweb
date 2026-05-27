@@ -48,7 +48,15 @@ end
         }),
     };
 
-    let err = smol::block_on(async { hooks.try_after_fetch(&attempt).await }).unwrap_err();
+    let err = smol::block_on(async {
+        hooks.set_last_fetch(&attempt).await.unwrap();
+        let fetch_table = {
+            let lua = hooks.lua.lock().await;
+            lua.globals().get("last_fetch").unwrap()
+        };
+        hooks.try_after_fetch(&attempt, fetch_table).await
+    })
+    .unwrap_err();
     let rendered = hooks.format_hook_error("after_fetch", err);
 
     assert!(rendered.contains("Lua after_fetch error for job 'test_job'"));
@@ -98,6 +106,14 @@ end
     let res = attempt.result.unwrap();
     assert_eq!(res.status, 200);
     assert_eq!(res.body, "overridden body for https://example.com");
+
+    smol::block_on(async {
+        let lua = hooks.lua.lock().await;
+        assert!(matches!(
+            lua.globals().get::<mlua::Value>("last_fetch").unwrap(),
+            mlua::Value::Table(_)
+        ));
+    });
 
     // Test Lua-returned error
     let req_fail = RequestConfig {
