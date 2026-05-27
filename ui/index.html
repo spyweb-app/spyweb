@@ -182,7 +182,23 @@
     <!-- Sidebar -->
     <div class="column is-3-tablet is-2-desktop glass-sidebar is-hidden-mobile">
         <div class="p-5">
-            <h1 class="title is-4 title-gradient mb-5">SpyWeb</h1>
+            <h1 class="title is-4 mb-5" style="display: flex; align-items: center; gap: 8px;">
+                <svg width="24" height="24" viewBox="130 130 420 420" style="flex-shrink: 0;">
+                    <g stroke="var(--accent)" stroke-width="20" fill="none" stroke-linejoin="round" stroke-linecap="round">
+                        <line x1="340" y1="340" x2="550" y2="340"/>
+                        <line x1="340" y1="340" x2="489" y2="489"/>
+                        <line x1="340" y1="340" x2="340" y2="550"/>
+                        <line x1="340" y1="340" x2="191" y2="489"/>
+                        <line x1="340" y1="340" x2="130" y2="340"/>
+                        <line x1="340" y1="340" x2="191" y2="191"/>
+                        <line x1="340" y1="340" x2="340" y2="130"/>
+                        <line x1="340" y1="340" x2="489" y2="191"/>
+                        <path d="M 450,340 Q 420,365 418,418 Q 365,420 340,450 Q 315,420 262,418 Q 260,365 230,340 Q 260,315 262,262 Q 315,260 340,230 Q 365,260 418,262 Q 420,315 450,340"/>
+                        <path d="M 538,340 Q 472,395 480,480 Q 395,472 340,538 Q 285,472 200,480 Q 208,395 142,340 Q 208,285 200,200 Q 285,208 340,142 Q 395,208 480,200 Q 472,285 538,340"/>
+                    </g>
+                </svg>
+                <span>Spy<b class="title-gradient">Web</b></span>
+            </h1>
         </div>
         
         <div class="px-3 pb-5 scrollable-y is-flex-grow-1">
@@ -224,9 +240,7 @@
             <!-- Theme Picker -->
             <div class="is-flex mr-5 is-hidden-mobile">
                 <template x-for="(colors, name) in themes" :key="name">
-                    <button class="button is-small p-0 m-1" 
-                                    :style="'background:' + colors.accent + '; border: none; width: 18px; height: 18px; min-width: 18px; border-radius: 4px;'" 
-                    @click="triggerSweep(name)" :title="name"></button>
+                    <button class="button is-small p-0 m-1" :style="'background:' + colors.accent + '; border: none; width: 18px; height: 18px; min-width: 18px; border-radius: 4px;'" @click="triggerSweep(name)" :title="name"></button>
                 </template>
             </div>
             
