@@ -11,11 +11,16 @@
 
 <p align="center">
   📖 <a href="https://docs.spyweb.app/"><b>Master Guide</b></a> |
-  🌐 <a href="docs/cdp.md">Browser Automation</a> |
+  🧪 <a href="docs/lua-testing.md">Testing</a> |
+  🌐 <a href="https://docs.spyweb.app/cdp">Browser Automation</a> |
   ⚙️ <a href="docs/config.md">Config</a> |
   🚀 <a href="docs/vps-deployment.md">VPS Setup</a> |
   📂 <a href="examples/">Examples</a> |
   🏗️ <a href="CONTRIBUTING.md">Build from Source</a>
+</p>
+
+<p align="center">
+  <img alt="SpyWeb Terminal Demo" src="https://spyweb.app/terminal.svg" width="100%" style="max-width: 800px;">
 </p>
 
 ---
@@ -47,6 +52,7 @@ keywords = ["rust", "linux", "open source"]
 | **Hybrid Engine** | Falls back to a spec-compliant DOM parser for broken or complex HTML. |
 | **CDP Automation** | Launch or connect to any Chromium browser for JS rendering, clicking, waiting, screenshots. |
 | **Alerting** | Integrated desktop notifications and customizable webhooks for monitoring. |
+| **Lua Testing** | Co-located `test_*` functions run in fresh Lua VMs with isolated temporary databases. |
 | **Pipeline Telemetry** | Stage-by-stage tracking of execution time, memory usage, and active browsers. |
 
 ## Install & Run
@@ -132,10 +138,27 @@ The terminal binary includes helpful developer tools:
 # Run a single job instantly (bypasses interval and runs the 7 core stages of the Lua pipeline up to before_store)
 # Saves '{job_location}/{job-id}-response.html' and '{job_location}/{job-id}-fields.json' for easy inspection!
 ./spyweb debug "My Job Name"
+```
 
+<p align="center">
+  <img alt="SpyWeb CLI Debug Telemetry" src="https://spyweb.app/images/spyweb-debug.png" width="100%" style="max-width: 800px;">
+</p>
+
+```bash
 # Check version and active Lua engine
 ./spyweb version
 
+# Run Lua unit tests for jobs
+./spyweb test                       # run all test 
+./spyweb test "My Job Name"         # run all test from specific job
+./spyweb test "My Job Name" price   # runa ll test from specific job which name containts price
+```
+
+<p align="center">
+  <img alt="SpyWeb Lua Unit Testing" src="https://spyweb.app/images/spyweb-test.png" width="100%" style="max-width: 800px;">
+</p>
+
+```bash
 # Profile management — check, list, clear, or delete per-job browser profiles
 ./spyweb profile check "My Job"  # Show profile status (all jobs if no name given)
 ./spyweb profile list            # Alias for check
@@ -147,6 +170,13 @@ The terminal binary includes helpful developer tools:
 
 ## Lua API & Hooks
 Place a `hooks.lua` next to your config to customize the pipeline. SpyWeb provides persistent storage to track state (like page numbers or failure counts) across restarts.
+
+## Testing
+SpyWeb supports co-located Lua tests for jobs. Define global functions that start with `test_` in `hooks.lua` or `tests.lua`, and run them with the `spyweb test` command.
+
+Tests run in isolated Lua VMs with temporary databases, so global state and database changes do not leak between cases.
+
+See [docs/lua-testing.md](docs/lua-testing.md) for the full testing workflow, file layout, and examples.
 
 ### Scoped vs Global Storage
 *   **`store_get/set/delete(key)`**: Scoped to the individual job. Safe for standard logic because hooks for a single job are sequential.
