@@ -7,7 +7,10 @@
 -- --------------------------------------------------------------------------
 -- 1. CONFIGURATION
 -- --------------------------------------------------------------------------
-local HEADLESS_BROWSER_PATH = "/usr/bin/lightpanda"
+-- NOTE: To persist sessions (cookies/logins) between headless and visual modes, 
+-- BOTH paths must point to a Chromium-based browser (Chrome, Edge, Brave).
+-- If you use Lightpanda for headless, session state will NOT transfer to Chrome.
+local HEADLESS_BROWSER_PATH = "/usr/bin/google-chrome"
 local VISUAL_BROWSER_PATH = "/usr/bin/google-chrome"
 
 -- SELECTORS

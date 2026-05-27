@@ -4,272 +4,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SpyWeb — CDP Documentation</title>
-    <link rel="icon" type="image/png" href="/icon.png">
+    <title>SpyWeb - CDP Documentation</title>
+    <link rel="icon" type="image/png" href="https://spyweb.app/icon.png">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-darcula.min.css">
-    <style>
-        :root {
-            --bg: #0f1117;
-            --surface: #181b24;
-            --surface2: #1e2230;
-            --border: #2a2e3d;
-            --accent: #6c5ce7;
-            --accent2: #a29bfe;
-            --text: #c9d1d9;
-            --text-muted: #8b949e;
-            --green: #00b894;
-            --yellow: #fdcb6e;
-            --red: #ff7675;
-            --blue: #74b9ff;
-        }
-
-        * {
-            box-sizing: border-box
-        }
-
-        html {
-            background: var(--bg);
-            scroll-behavior: smooth;
-            scroll-padding-top: 80px
-        }
-
-        body {
-            font-family: 'Inter', system-ui, sans-serif;
-            color: var(--text);
-            background: var(--bg)
-        }
-
-        .navbar {
-            background: var(--surface) !important;
-            border-bottom: 1px solid var(--border)
-        }
-
-        .navbar-item,
-        .navbar-link {
-            color: var(--text) !important
-        }
-
-        .navbar-item:hover {
-            background: var(--surface2) !important;
-            color: #fff !important
-        }
-
-        .hero {
-            background: linear-gradient(135deg, #0f1117 0%, #1a1040 50%, #0f1117 100%)
-        }
-
-        .hero .title {
-            color: #fff
-        }
-
-        .hero .subtitle {
-            color: var(--accent2)
-        }
-
-        .box {
-            background: var(--surface) !important;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            color: var(--text)
-        }
-
-        .title,
-        .label {
-            color: #fff !important
-        }
-
-        .content h1,
-        .content h2,
-        .content h3,
-        .content h4 {
-            color: #fff
-        }
-
-        pre {
-            background: #282a36 !important;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 1.2em !important;
-            overflow-x: auto;
-            font-size: .85rem;
-            margin: 1.2rem 0;
-        }
-
-        code {
-            background: var(--surface2);
-            color: var(--accent2);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: .9em;
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
-        }
-
-        pre code {
-            background: none !important;
-            padding: 0 !important;
-            color: inherit !important;
-        }
-
-        .tag.is-info {
-            background: var(--accent) !important
-        }
-
-        .tag.is-warning {
-            background: #e17055 !important;
-            color: #fff !important
-        }
-
-        .tag.is-success {
-            background: var(--green) !important
-        }
-
-        table {
-            color: var(--text) !important
-        }
-
-        table th {
-            color: #fff !important;
-            background: var(--surface2) !important;
-            border-color: var(--border) !important
-        }
-
-        table td {
-            border-color: var(--border) !important
-        }
-
-        .menu-label {
-            color: var(--text-muted) !important
-        }
-
-        .menu-list a {
-            color: var(--text) !important;
-            border-radius: 6px
-        }
-
-        .menu-list a:hover {
-            background: var(--surface2) !important;
-            color: #fff !important
-        }
-
-        .menu-list a.is-active {
-            background: var(--accent) !important;
-            color: #fff !important
-        }
-
-        .footer {
-            background: var(--surface) !important;
-            border-top: 1px solid var(--border);
-            color: var(--text-muted)
-        }
-
-        .tabs li.is-active a {
-            border-color: var(--accent) !important;
-            color: var(--accent2) !important
-        }
-
-        .tabs a {
-            color: var(--text-muted) !important;
-            border-color: var(--border) !important
-        }
-
-        .tabs a:hover {
-            color: #fff !important;
-            border-color: var(--accent2) !important
-        }
-
-        .notification {
-            border: 1px solid var(--border)
-        }
-
-        .notification.is-info {
-            background: rgba(108, 92, 231, .15) !important;
-            color: var(--accent2) !important
-        }
-
-        .notification.is-warning {
-            background: rgba(225, 112, 85, .15) !important;
-            color: var(--yellow) !important
-        }
-
-        .notification.is-danger {
-            background: rgba(255, 118, 117, .15) !important;
-            color: var(--red) !important
-        }
-
-        .sidebar {
-            position: sticky;
-            top: 80px;
-            max-height: calc(100vh - 100px);
-            overflow-y: auto;
-            padding-right: 10px;
-        }
-
-        .sidebar::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        .sidebar::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .sidebar::-webkit-scrollbar-thumb {
-            background: var(--surface2);
-            border-radius: 10px;
-        }
-
-        .sidebar::-webkit-scrollbar-thumb:hover {
-            background: var(--accent);
-        }
-
-        @media(max-width:1023px) {
-            .sidebar {
-                position: static
-            }
-        }
-
-        .section {
-            padding: 2rem 1.5rem
-        }
-
-        .compat-yes {
-            color: var(--green)
-        }
-
-        .compat-no {
-            color: var(--red)
-        }
-
-        .compat-warn {
-            color: var(--yellow)
-        }
-
-        .method-block {
-            border-left: 3px solid var(--accent);
-            padding: .8em 1em;
-            margin: .5em 0;
-            background: var(--surface2);
-            border-radius: 0 8px 8px 0;
-            transition: border-color .2s
-        }
-
-        .method-block:hover {
-            border-color: var(--green)
-        }
-
-        .method-block .method-name {
-            color: var(--accent2);
-            font-weight: 700;
-            font-family: monospace
-        }
-
-        .method-block .method-async {
-            font-size: .8em;
-            color: var(--text-muted)
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 
 <body x-data="{ activeSection: 'overview', mobileMenu: false }">
@@ -278,8 +19,22 @@
     <nav class="navbar is-fixed-top" role="navigation">
         <div class="container">
             <div class="navbar-brand">
-                <a class="navbar-item has-text-weight-bold" href="index.html">
-                    <span style="color:var(--accent2);font-size:1.2em">⚡</span>&nbsp;SpyWeb docs
+                <a class="navbar-item" href="index.html" style="gap:8px">
+                    <svg width="28" height="28" viewBox="130 130 420 420" style="flex-shrink:0">
+                        <g stroke="#e11d48" stroke-width="20" fill="none" stroke-linejoin="round" stroke-linecap="round">
+                            <line x1="340" y1="340" x2="550" y2="340"/>
+                            <line x1="340" y1="340" x2="489" y2="489"/>
+                            <line x1="340" y1="340" x2="340" y2="550"/>
+                            <line x1="340" y1="340" x2="191" y2="489"/>
+                            <line x1="340" y1="340" x2="130" y2="340"/>
+                            <line x1="340" y1="340" x2="191" y2="191"/>
+                            <line x1="340" y1="340" x2="340" y2="130"/>
+                            <line x1="340" y1="340" x2="489" y2="191"/>
+                            <path d="M 450,340 Q 420,365 418,418 Q 365,420 340,450 Q 315,420 262,418 Q 260,365 230,340 Q 260,315 262,262 Q 315,260 340,230 Q 365,260 418,262 Q 420,315 450,340"/>
+                            <path d="M 538,340 Q 472,395 480,480 Q 395,472 340,538 Q 285,472 200,480 Q 208,395 142,340 Q 208,285 200,200 Q 285,208 340,142 Q 395,208 480,200 Q 472,285 538,340"/>
+                        </g>
+                    </svg>
+                    <span class="title is-4" style="margin-bottom:0">Spy<b style="background:linear-gradient(135deg,#e11d48,#9f1239);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;font-weight:800">Web</b></span>
                 </a>
                 <a role="button" class="navbar-burger" @click="mobileMenu=!mobileMenu"
                     :class="{'is-active':mobileMenu}">
@@ -292,6 +47,7 @@
                     <a class="navbar-item" href="#integration">Integration</a>
                     <a class="navbar-item" href="#browser-api">Browser API</a>
                     <a class="navbar-item" href="#page-api">Page API</a>
+                    <a class="navbar-item" target="_blank" href="https://github.com/spyweb-app/spyweb/blob/beta/docs/lua-testing.md">Testing</a>
                     <a class="navbar-item" href="index.html">Master Guide</a>
                     <a class="navbar-item" target="_blank" href="https://github.com/spyweb-app/spyweb">GitHub</a>
                 </div>
@@ -322,6 +78,7 @@
                             <p class="menu-label">Specialized Browsers &amp; More</p>
                             <ul class="menu-list">
                                 <li><a href="#specialized">Lightweight Browsers</a></li>
+                                <li><a target="_blank" href="https://github.com/spyweb-app/spyweb/blob/beta/docs/lua-testing.md">Lua Testing</a></li>
                             </ul>
                         </aside>
                     </div>
@@ -361,11 +118,11 @@
                             <h4 class="title is-5 mt-5">How It Works</h4>
                             <p>Spyweb can get a browser two ways:</p>
                             <ol>
-                                <li><strong>Launch one</strong> — <code>cdp.launch()</code> finds Chrome, Edge, or Brave
+                                <li><strong>Launch one</strong> - <code>cdp.launch()</code> finds Chrome, Edge, or Brave
                                     on your system, starts it in headless mode, and connects to it automatically. Zero
                                     config. You can also pass <code>{ executable = "/path/to/browser" }</code> to use a
                                     specific binary.</li>
-                                <li><strong>Connect to an existing one</strong> —
+                                <li><strong>Connect to an existing one</strong> -
                                     <code>cdp.connect("ws://...", [headers])</code> attaches to any browser or
                                     CDP-compatible server already running. The optional <code>headers</code> table
                                     allows for custom HTTP headers like <code>Authorization</code>.
@@ -389,9 +146,9 @@ local browser = cdp.connect(ws_url, {
                                 with <code>--remote-debugging-port=0</code> (which picks a random free port). It reads
                                 the DevTools WebSocket URL from the browser's stderr output, connects to it, and gives
                                 you a <code>Browser</code> object. Every command and response is sent as JSON-RPC
-                                messages over WebSocket — the same protocol Chrome's own DevTools uses.</p>
+                                messages over WebSocket - the same protocol Chrome's own DevTools uses.</p>
                             <p>Each page/tab gets its own dedicated WebSocket connection. This is why
-                                <code>browser:attach()</code> doesn't just return a reference — it actually opens a new
+                                <code>browser:attach()</code> doesn't just return a reference - it actually opens a new
                                 WebSocket to the page's specific endpoint.
                             </p>
                             <p>By default, closing the browser kills the process and cleans up the profile. You can
@@ -491,6 +248,18 @@ end</code></pre>
                     <div id="browser-api" class="box mb-5">
                         <h2 class="title is-3">Browser API Reference</h2>
                         <div class="content">
+                            <div class="notification is-info">
+                                <strong>Async vs Sync.</strong> Unlike languages where async requires <code>await</code> or <code>.then()</code>, the
+                                <code>async</code>/<code>sync</code> difference here is purely technical and usually only matters inside <code>defer</code>.
+                                The only difference is that <strong>async</strong> bindings yield the Lua VM and won't block the thread while waiting
+                                for I/O, while <strong>sync</strong> bindings run to completion without yielding.
+                                <br><br>
+                                <strong>async</strong> - frees the thread to run other tasks while waiting for I/O or network response. Your hook
+                                appears to block, but the runtime stays responsive.
+                                <br>
+                                <strong>sync</strong> - holds the thread until the binding finishes; only used for instant operations like
+                                computation or simple reads where holding the thread is not a concern.
+                            </div>
                             <p>These methods are provided directly by the Spyweb Core on the <code>Browser</code> object
                                 returned by <code>cdp.launch()</code> or <code>cdp.connect()</code>.</p>
 
@@ -621,6 +390,32 @@ local session_id = result.sessionId</code></pre>
                         </div>
                     </div>
 
+                    <!-- Context API Reference -->
+                    <div id="context-api" class="box mb-5">
+                        <h2 class="title is-3">Context API Reference</h2>
+                        <div class="content">
+                            <p>Returned by <code>browser:new_context()</code>.</p>
+
+                            <div class="method-block">
+                                <span class="method-name">context.id</span>
+                                <br><small>The unique string ID of the context.</small>
+                            </div>
+
+                            <div id="context-attach" class="method-block">
+                                <span class="method-name">context:attach([url])</span> <span class="method-async">async</span>
+                                <br><small>Creates a new page within this isolated context.</small>
+                            </div>
+                            <pre><code class="language-lua">local page = ctx:attach("https://example.com")</code></pre>
+
+                            <div id="context-close" class="method-block">
+                                <span class="method-name">context:close()</span> <span class="method-async">sync</span>
+                                <br><small>Closes the context and all associated pages.</small>
+                            </div>
+                            <pre><code class="language-lua">ctx:close()</code></pre>
+
+                        </div>
+                    </div>
+
                     <!-- Page API Reference -->
                     <div id="page-api" class="box mb-5">
                         <h2 class="title is-3">Page API (Native)</h2>
@@ -671,7 +466,7 @@ local ev = page:wait_event("Network.responseReceived", 5000, function(params)
 end)</code></pre>
 
                             <div id="page-close" class="method-block">
-                                <span class="method-name">page:close()</span> <span class="method-async">async</span>
+                                <span class="method-name">page:close()</span> <span class="method-async">sync</span>
                                 <br><small>Closes the specific tab/page. Does not affect the browser process or other
                                     tabs.</small>
                             </div>
@@ -686,7 +481,7 @@ end)</code></pre>
                         <div class="content">
 
                             <p>Higher-level CDP abstraction methods injected by <code>cdp.lua</code> for convenience.
-                                These are plain Lua functions — you can override or extend them on any page object.</p>
+                                These are plain Lua functions - you can override or extend them on any page object.</p>
 
                             <div id="page-open" class="method-block">
                                 <span class="method-name">page:open(url, [wait_until], [timeout_ms])</span> <span
@@ -1129,7 +924,7 @@ page:block_resources({ "*.analytics.js", "*.tracking.com/*" })</code></pre>
 
     <footer class="footer py-6">
         <div class="content has-text-centered">
-            <p>SpyWeb — Zero-dependency web monitoring engine &bull; <a target="_blank"
+            <p>SpyWeb - Zero-dependency web monitoring engine &bull; <a target="_blank"
                     href="https://github.com/spyweb-app/spyweb" style="color:var(--accent2)">GitHub</a></p>
         </div>
     </footer>

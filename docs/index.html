@@ -4,260 +4,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SpyWeb — The Master Guide</title>
-    <link rel="icon" type="image/png" href="/icon.png">
+    <title>SpyWeb - The Master Guide</title>
+    <link rel="icon" type="image/png" href="https://spyweb.app/icon.png">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-darcula.min.css">
-    <style>
-        :root {
-            --bg: #0f1117;
-            --surface: #181b24;
-            --surface2: #1e2230;
-            --border: #2a2e3d;
-            --accent: #6c5ce7;
-            --accent2: #a29bfe;
-            --text: #c9d1d9;
-            --text-muted: #8b949e;
-            --green: #00b894;
-            --yellow: #fdcb6e;
-            --red: #ff7675;
-            --blue: #74b9ff;
-        }
-
-        * {
-            box-sizing: border-box
-        }
-
-        html {
-            background: var(--bg);
-            scroll-behavior: smooth;
-            scroll-padding-top: 80px
-        }
-
-        body {
-            font-family: 'Inter', system-ui, sans-serif;
-            color: var(--text);
-            background: var(--bg)
-        }
-
-        .navbar {
-            background: var(--surface) !important;
-            border-bottom: 1px solid var(--border)
-        }
-
-        .navbar-item,
-        .navbar-link {
-            color: var(--text) !important
-        }
-
-        .navbar-item:hover {
-            background: var(--surface2) !important;
-            color: #fff !important
-        }
-
-        .hero {
-            background: linear-gradient(135deg, #0f1117 0%, #1a1040 50%, #0f1117 100%)
-        }
-
-        .hero .title {
-            color: #fff
-        }
-
-        .hero .subtitle {
-            color: var(--accent2)
-        }
-
-        .box {
-            background: var(--surface) !important;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            color: var(--text)
-        }
-
-        .title,
-        .label {
-            color: #fff !important
-        }
-
-        .content h1,
-        .content h2,
-        .content h3,
-        .content h4 {
-            color: #fff
-        }
-
-        pre {
-            background: #282a36 !important;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 1.2em !important;
-            overflow-x: auto;
-            font-size: .85rem;
-            margin: 1.2rem 0;
-        }
-
-        code {
-            background: var(--surface2);
-            color: var(--accent2);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: .9em;
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
-        }
-
-        pre code {
-            background: none !important;
-            padding: 0 !important;
-            color: inherit !important;
-        }
-
-        .tag.is-info {
-            background: var(--accent) !important
-        }
-
-        .tag.is-warning {
-            background: #e17055 !important;
-            color: #fff !important
-        }
-
-        .tag.is-success {
-            background: var(--green) !important
-        }
-
-        table {
-            color: var(--text) !important
-        }
-
-        table th {
-            color: #fff !important;
-            background: var(--surface2) !important;
-            border-color: var(--border) !important
-        }
-
-        table td {
-            border-color: var(--border) !important
-        }
-
-        .menu-label {
-            color: var(--text-muted) !important
-        }
-
-        .menu-list a {
-            color: var(--text) !important;
-            border-radius: 6px
-        }
-
-        .menu-list a:hover {
-            background: var(--surface2) !important;
-            color: #fff !important
-        }
-
-        .menu-list a.is-active {
-            background: var(--accent) !important;
-            color: #fff !important
-        }
-
-        .footer {
-            background: var(--surface) !important;
-            border-top: 1px solid var(--border);
-            color: var(--text-muted)
-        }
-
-        .tabs li.is-active a {
-            border-color: var(--accent) !important;
-            color: var(--accent2) !important
-        }
-
-        .tabs a {
-            color: var(--text-muted) !important;
-            border-color: var(--border) !important
-        }
-
-        .tabs a:hover {
-            color: #fff !important;
-            border-color: var(--accent2) !important
-        }
-
-        .notification {
-            border: 1px solid var(--border)
-        }
-
-        .notification.is-info {
-            background: rgba(108, 92, 231, .15) !important;
-            color: var(--accent2) !important
-        }
-
-        .notification.is-warning {
-            background: rgba(225, 112, 85, .15) !important;
-            color: var(--yellow) !important
-        }
-
-        .notification.is-danger {
-            background: rgba(255, 118, 117, .15) !important;
-            color: var(--red) !important
-        }
-
-        .pipeline-stage {
-            border-left: 3px solid var(--accent);
-            padding: .8em 1em;
-            margin: .5em 0;
-            background: var(--surface2);
-            border-radius: 0 8px 8px 0;
-            transition: border-color .2s
-        }
-
-        .pipeline-stage:hover {
-            border-color: var(--green)
-        }
-
-        .pipeline-stage .stage-name {
-            color: var(--accent2);
-            font-weight: 700;
-            font-family: monospace
-        }
-
-        .pipeline-stage .stage-thread {
-            font-size: .8em;
-            color: var(--text-muted)
-        }
-
-        .sidebar {
-            position: sticky;
-            top: 80px;
-            max-height: calc(100vh - 100px);
-            overflow-y: auto;
-            padding-right: 10px;
-        }
-
-        .sidebar::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        .sidebar::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .sidebar::-webkit-scrollbar-thumb {
-            background: var(--surface2);
-            border-radius: 10px;
-        }
-
-        .sidebar::-webkit-scrollbar-thumb:hover {
-            background: var(--accent);
-        }
-
-        @media(max-width:1023px) {
-            .sidebar {
-                position: static
-            }
-        }
-
-        .section {
-            padding: 2rem 1.5rem
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 
 <body x-data="{ activeSection: 'overview', mobileMenu: false }">
@@ -266,8 +19,22 @@
     <nav class="navbar is-fixed-top" role="navigation">
         <div class="container">
             <div class="navbar-brand">
-                <a class="navbar-item has-text-weight-bold" href="#">
-                    <span style="color:var(--accent2);font-size:1.2em">⚡</span>&nbsp;SpyWeb docs
+                <a class="navbar-item" href="#" style="gap:8px">
+                    <svg width="28" height="28" viewBox="130 130 420 420" style="flex-shrink:0">
+                        <g stroke="#e11d48" stroke-width="20" fill="none" stroke-linejoin="round" stroke-linecap="round">
+                            <line x1="340" y1="340" x2="550" y2="340"/>
+                            <line x1="340" y1="340" x2="489" y2="489"/>
+                            <line x1="340" y1="340" x2="340" y2="550"/>
+                            <line x1="340" y1="340" x2="191" y2="489"/>
+                            <line x1="340" y1="340" x2="130" y2="340"/>
+                            <line x1="340" y1="340" x2="191" y2="191"/>
+                            <line x1="340" y1="340" x2="340" y2="130"/>
+                            <line x1="340" y1="340" x2="489" y2="191"/>
+                            <path d="M 450,340 Q 420,365 418,418 Q 365,420 340,450 Q 315,420 262,418 Q 260,365 230,340 Q 260,315 262,262 Q 315,260 340,230 Q 365,260 418,262 Q 420,315 450,340"/>
+                            <path d="M 538,340 Q 472,395 480,480 Q 395,472 340,538 Q 285,472 200,480 Q 208,395 142,340 Q 208,285 200,200 Q 285,208 340,142 Q 395,208 480,200 Q 472,285 538,340"/>
+                        </g>
+                    </svg>
+                    <span class="title is-4" style="margin-bottom:0">Spy<b style="background:linear-gradient(135deg,#e11d48,#9f1239);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;font-weight:800">Web</b></span>
                 </a>
                 <a role="button" class="navbar-burger" @click="mobileMenu=!mobileMenu"
                     :class="{'is-active':mobileMenu}">
@@ -280,6 +47,7 @@
                     <a class="navbar-item" href="#hooks">Hooks</a>
                     <a class="navbar-item" href="#config">Config</a>
                     <a class="navbar-item" href="#examples">Examples</a>
+                    <a class="navbar-item" target="_blank" href="https://github.com/spyweb-app/spyweb/blob/beta/docs/lua-testing.md">Testing</a>
                     <a class="navbar-item" href="cdp.html">CDP</a>
                     <a class="navbar-item" target="_blank" href="https://github.com/spyweb-app/spyweb">GitHub</a>
                 </div>
@@ -338,6 +106,7 @@
                             </ul>
                             <p class="menu-label">More</p>
                             <ul class="menu-list">
+                                <li><a target="_blank" href="https://github.com/spyweb-app/spyweb/blob/beta/docs/lua-testing.md">Lua Testing</a></li>
                                 <li><a target="_blank"
                                         href="https://github.com/spyweb-app/spyweb/blob/beta/docs/lifecycle.md">Execution
                                         Lifecycle</a></li>
@@ -373,7 +142,7 @@
                                 Place a <code>hooks.lua</code> alongside your job's <code>config.toml</code> and define
                                 any combination of 9 hook functions.</p>
                             <div class="notification is-info">
-                                <strong>All hooks are optional.</strong> Omit any you don't need — spyweb runs fine with
+                                <strong>All hooks are optional.</strong> Omit any you don't need - spyweb runs fine with
                                 just a <code>config.toml</code>.
                             </div>
                             <h4>Key Rules</h4>
@@ -388,7 +157,7 @@
                                 </li>
                                 <li>Hot-reload creates a fresh Lua VM and <strong>resets global Lua state</strong>, but
                                     stored values survive</li>
-                                <li>Hook errors are <strong>logged and skipped</strong> — they never crash the job</li>
+                                <li>Hook errors are <strong>logged and skipped</strong> - they never crash the job</li>
                                 <li><strong>Efficiency:</strong> Only define the hooks you actually need. SpyWeb
                                     pre-detects which functions exist at startup and skips the processing logic entirely
                                     for any that are missing.</li>
@@ -409,7 +178,7 @@
                                 class="stage-thread">executor thread</span><br><small>Custom fetching phase (bypasses
                                 built-in HTTP client if defined)</small></div>
                         <div class="pipeline-stage" style="border-color:var(--blue)"><span class="stage-name">[HTTP
-                                fetch]</span> <span class="stage-thread">background thread</span><br><small>Automatic —
+                                fetch]</span> <span class="stage-thread">background thread</span><br><small>Automatic -
                                 uses request config from previous stage</small></div>
                         <div class="pipeline-stage"><span class="stage-name">after_fetch(fetch_result)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Inspect success or failure,
@@ -420,7 +189,7 @@
                                 JSON/XML (bypasses built-in CSS extraction if defined)</small></div>
                         <div class="pipeline-stage" style="border-color:var(--blue)"><span class="stage-name">[CSS
                                 extraction]</span> <span class="stage-thread">background
-                                thread</span><br><small>Automatic — raw parser with DOM fallback</small></div>
+                                thread</span><br><small>Automatic - raw parser with DOM fallback</small></div>
                         <div class="pipeline-stage"><span class="stage-name">after_extract(items)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Batch filter/modify all items. nil
                                 or empty = no items</small></div>
@@ -431,7 +200,7 @@
                                 class="stage-thread">executor thread</span><br><small>Last chance before DB insert. nil
                                 = skip store + notify</small></div>
                         <div class="pipeline-stage" style="border-color:var(--blue)"><span class="stage-name">[dedup +
-                                insert]</span> <span class="stage-thread">background thread</span><br><small>Automatic —
+                                insert]</span> <span class="stage-thread">background thread</span><br><small>Automatic -
                                 atomic check-and-insert</small></div>
                         <div class="pipeline-stage"><span class="stage-name">before_notify(items)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Reshape or silence notifications.
@@ -441,7 +210,7 @@
                                 Full JSON payload</small></div>
                         <div class="pipeline-stage" style="border-color:var(--blue)"><span class="stage-name">[notify +
                                 webhook]</span> <span class="stage-thread">background thread</span><br><small>Automatic
-                                — desktop notification + webhook POST</small></div>
+                                - desktop notification + webhook POST</small></div>
                     </div>
 
                     <!-- Setup -->
@@ -454,7 +223,7 @@
     ├── config.toml    # job configuration (required)
     └── hooks.lua       # Lua hooks (optional)</code></pre>
                             <p>spyweb auto-discovers <code>hooks.lua</code> when loading the job. No config changes
-                                needed — just create the file.</p>
+                                needed - just create the file.</p>
                         </div>
                     </div>
 
@@ -847,7 +616,7 @@ end</code></pre>
                             <span class="tag is-info mr-2">5</span> after_extract(items)
                         </h3>
                         <div class="content">
-                            <p>Batch hook — receives <strong>all</strong> extracted items at once. Good for
+                            <p>Batch hook - receives <strong>all</strong> extracted items at once. Good for
                                 cross-item
                                 logic, dedup, or sorting.</p>
                             <p><strong>No short-circuit:</strong> returning <code>nil</code> or empty table just
@@ -888,7 +657,7 @@ end</code></pre>
                             <div class="notification is-warning">
                                 <strong>Mutually exclusive with keyword filter.</strong> If
                                 <code>filter_item()</code>
-                                exists in your script, the built-in keyword filter is skipped entirely — even if
+                                exists in your script, the built-in keyword filter is skipped entirely - even if
                                 you
                                 have <code>keywords</code> in your config.
                             </div>
@@ -1066,9 +835,18 @@ end</code></pre>
                     <div id="globals" class="box mb-5">
                         <h2 class="title is-3">Global Functions</h2>
                         <div class="content">
-                            <p>spyweb injects several global helper functions into the Lua environment for
-                                networking,
-                                notifications, logging, and storage.</p>
+                            <p>SpyWeb injects several global helper functions into the Lua environment for networking, notifications, logging, and storage.</p>
+
+                            <div class="notification is-info">
+                                Unlike languages where async requires <code>await</code> or
+                                <code>.then()</code>, the <code>async</code>/<code>sync</code> difference here is purely technical and usually only matters inside <code>defer</code>. The only difference is that <code>async</code> bindings yield the Lua VM and won't block the thread while waiting for I/O, while <code>sync</code> bindings run to completion without yielding.
+                            </div>
+
+                            <div class="notification is-info">
+                                <code>async</code> - frees the thread to run other tasks while waiting
+                                for I/O or network response. Your hook appears to block, but the runtime stays responsive.<br>
+                                <code>sync</code> - holds the thread until the binding finishes; only used for instant operations like computation or simple reads where holding the thread is not a concern.
+                            </div>
 
                             <h3 class="title is-4" id="storage">Storage & Persistence</h3>
                             <p>SpyWeb supports state management through both <strong>Runtime Memory</strong>
@@ -1110,15 +888,15 @@ end</code></pre>
                                         </thead>
                                         <tbody>
                                             <tr>
-                                                <td><code>store_set(key, value)</code></td>
+                                                <td><code>store_set(key, value)</code> <span class="tag is-small is-dark">async</span></td>
                                                 <td>Save a string (prefixed with job name)</td>
                                             </tr>
                                             <tr>
-                                                <td><code>store_get(key)</code></td>
+                                                <td><code>store_get(key)</code> <span class="tag is-small is-dark">async</span></td>
                                                 <td>Retrieve a string or <code>nil</code></td>
                                             </tr>
                                             <tr>
-                                                <td><code>store_delete(key)</code></td>
+                                                <td><code>store_delete(key)</code> <span class="tag is-small is-dark">async</span></td>
                                                 <td>Remove a key</td>
                                             </tr>
                                         </tbody>
@@ -1139,19 +917,19 @@ store_set("count", tostring(c + 1))</code></pre>
                                         </thead>
                                         <tbody>
                                             <tr>
-                                                <td><code>global_store_set(key, value)</code></td>
+                                                <td><code>global_store_set(key, value)</code> <span class="tag is-small is-dark">async</span></td>
                                                 <td>Save a string (shared across all jobs)</td>
                                             </tr>
                                             <tr>
-                                                <td><code>global_store_get(key)</code></td>
+                                                <td><code>global_store_get(key)</code> <span class="tag is-small is-dark">async</span></td>
                                                 <td>Retrieve a shared string or <code>nil</code></td>
                                             </tr>
                                             <tr>
-                                                <td><code>global_store_delete(key)</code></td>
+                                                <td><code>global_store_delete(key)</code> <span class="tag is-small is-dark">async</span></td>
                                                 <td>Remove a shared key</td>
                                             </tr>
                                             <tr>
-                                                <td><code>global_store_incr(k, def, delta)</code></td>
+                                                <td><code>global_store_incr(k, def, delta)</code> <span class="tag is-small is-dark">async</span></td>
                                                 <td><strong>Atomic</strong> shared increment across all jobs</td>
                                             </tr>
                                         </tbody>
@@ -1205,7 +983,7 @@ end</code></pre>
 
                             <hr style="background-color: var(--border)">
 
-                            <h3 class="title is-4" id="http_get"><code>http_get(url, [headers])</code></h3>
+                            <h3 class="title is-4" id="http_get"><code>http_get(url, [headers])</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Performs a synchronous HTTP GET request. The <code>headers</code> argument is an
                                 optional
                                 Lua table containing key-value pairs for request headers.</p>
@@ -1214,7 +992,7 @@ end</code></pre>
     ["X-Custom-Header"] = "my-value"
 })</code></pre>
 
-                            <h3 class="title is-4" id="http_post"><code>http_post(url, body, [headers])</code></h3>
+                            <h3 class="title is-4" id="http_post"><code>http_post(url, body, [headers])</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Performs a synchronous HTTP POST request. By default, it sets the
                                 <code>Content-Type</code> to <code>application/x-www-form-urlencoded</code> unless
                                 overridden in the <code>headers</code> argument.
@@ -1224,7 +1002,7 @@ end</code></pre>
     ["Accept"] = "application/json"
 })</code></pre>
 
-                            <h3 class="title is-4" id="json_encode"><code>json_encode(table)</code></h3>
+                            <h3 class="title is-4" id="json_encode"><code>json_encode(table)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Converts a Lua table or value into a JSON string. Handles nested tables, arrays,
                                 booleans, and nulls automatically using the built-in high-performance JSON
                                 engine.
@@ -1236,14 +1014,14 @@ end</code></pre>
 local body = json_encode(payload)
 local resp = http_post("https://api.rendering-service.com/render", body, {["Content-Type"]="application/json"})</code></pre>
 
-                            <h3 class="title is-4" id="json_decode"><code>json_decode(string)</code></h3>
+                            <h3 class="title is-4" id="json_decode"><code>json_decode(string)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Parses a JSON string into a native Lua table. Returns <code>nil</code> and logs an
                                 error
                                 if the JSON is malformed.</p>
                             <pre><code class="language-lua">local data = json_decode('{"status": "ok", "count": 42}')
 log("Status is: " .. data.status)</code></pre>
 
-                            <h3 class="title is-4" id="defer"><code>defer(fn)</code></h3>
+                            <h3 class="title is-4" id="defer"><code>defer(fn)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Registers a cleanup function to run <strong>immediately after the top-level Hook
                                     exits</strong>. Essential for preventing zombie processes and memory leaks.</p>
                             <div class="notification is-info is-light py-2 px-4 mb-3" style="font-size:0.9rem">
@@ -1268,7 +1046,7 @@ log("Status is: " .. data.status)</code></pre>
 end</code></pre>
                             <p class="is-size-7"><a href="lifecycle.md">View full Execution Lifecycle guide →</a></p>
 
-                            <h3 class="title is-4" id="dump"><code>dump(value)</code></h3>
+                            <h3 class="title is-4" id="dump"><code>dump(value)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Formats any Lua value into a readable string for debugging. This is especially
                                 useful for nested hook payloads like <code>fetch_result</code> or
                                 <code>last_fetch</code>. It handles nested tables, quotes strings, and marks cycles
@@ -1280,7 +1058,7 @@ end</code></pre>
     return fetch_result
 end</code></pre>
 
-                            <h3 class="title is-4" id="copy"><code>copy(table)</code></h3>
+                            <h3 class="title is-4" id="copy"><code>copy(table)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Returns a shallow copy of a table. Only the first level of keys and values are
                                 copied; nested tables are still shared by reference.</p>
                             <pre><code class="language-lua">local original = { a = 1, b = { c = 2 } }
@@ -1288,7 +1066,7 @@ local shallow = copy(original)
 shallow.a = 99 -- original.a is still 1
 shallow.b.c = 99 -- original.b.c IS now 99</code></pre>
 
-                            <h3 class="title is-4" id="deep_copy"><code>deep_copy(table)</code></h3>
+                            <h3 class="title is-4" id="deep_copy"><code>deep_copy(table)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Returns a deep, recursive copy of a table. Every nested table is cloned, ensuring
                                 total isolation from the original. It safely handles circular references (cycles).
                             </p>
@@ -1296,7 +1074,7 @@ shallow.b.c = 99 -- original.b.c IS now 99</code></pre>
 local deep = deep_copy(original)
 deep.b.c = 99 -- original.b.c remains 2</code></pre>
 
-                            <h3 class="title is-4" id="notify"><code>notify(title, body, [timeout_ms])</code></h3>
+                            <h3 class="title is-4" id="notify"><code>notify(title, body, [timeout_ms])</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Sends a desktop notification immediately from Lua. This is a thin wrapper around
                                 SpyWeb's native notification sender and can be used from any hook, including error
                                 paths that never reach the normal notify stage.</p>
@@ -1316,15 +1094,15 @@ deep.b.c = 99 -- original.b.c remains 2</code></pre>
     return fetch_result
 end</code></pre>
 
-                            <h3 class="title is-4" id="log"><code>log(message)</code></h3>
-                            <p>Appends a message to <code>hook.log</code> inside the job's directory. This is the
+                            <h3 class="title is-4" id="log"><code>log(message)</code> <span class="tag is-small is-dark">async</span></h3>
+                            <p>Appends a message to <code>hooks.log</code> inside the job's directory. This is the
                                 recommended way to debug hooks without using external libraries.</p>
                             <pre><code class="language-lua">function after_extract(items)
     log("Extracted " .. #items .. " items from " .. request.url)
     return items
 end</code></pre>
 
-                            <h3 class="title is-4" id="fs_append"><code>fs_append(filename, content)</code></h3>
+                            <h3 class="title is-4" id="fs_append"><code>fs_append(filename, content)</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Appends raw content to a file in the job's directory. All writes are non-blocking and
                                 safe.
                                 Files feature <strong>automatic 10MB rotation</strong> with timestamped filenames
@@ -1337,7 +1115,7 @@ end</code></pre>
     return items
 end</code></pre>
 
-                            <h3 class="title is-4" id="fs_overwrite"><code>fs_overwrite(filename, content)</code></h3>
+                            <h3 class="title is-4" id="fs_overwrite"><code>fs_overwrite(filename, content)</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Replaces the entire content of a file in the job's directory. Ideal for keeping a
                                 "latest"
                                 snapshot of your scraping results.</p>
@@ -1350,7 +1128,7 @@ end</code></pre>
     return items
 end</code></pre>
 
-                            <h3 class="title is-4" id="env_get"><code>env_get(key)</code></h3>
+                            <h3 class="title is-4" id="env_get"><code>env_get(key)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Retrieves a read-only environment variable from the host system. For security, SpyWeb
                                 automatically prepends the <code>SPYWEB_</code> prefix to any key provided. This
                                 allows
@@ -1665,8 +1443,14 @@ body = "Title: {title}\nLink: {link}"</code></pre>
                         <h2 class="title is-3">REST API</h2>
                         <div class="content">
                             <p>SpyWeb runs a built-in web server on <code>127.0.0.1:7979</code> which serves both
-                                the
-                                dashboard UI and a JSON API for querying your scraped records.</p>
+                                the dashboard UI and a JSON API for querying your scraped records.</p>
+
+                            <h4 class="title is-5 mb-2">Authentication</h4>
+                            <p>If the <code>SPYWEB_API_KEY</code> environment variable is set, all <code>/api/*</code>
+                                endpoints require the <code>X-SpyWeb-Key</code> header.</p>
+                            <pre><code>curl -H "X-SpyWeb-Key: your_key" http://127.0.0.1:7979/api/jobs</code></pre>
+
+                            <h4 class="title is-5 mb-2">Endpoints</h4>
                             <table class="table is-fullwidth">
                                 <thead>
                                     <tr>
@@ -1690,15 +1474,24 @@ body = "Title: {title}\nLink: {link}"</code></pre>
                                     </tr>
                                     <tr>
                                         <td><code>GET /api/jobs</code></td>
-                                        <td>List all active job IDs and their status</td>
+                                        <td>List all active jobs with human-readable names</td>
                                     </tr>
                                 </tbody>
                             </table>
+
+                            <h4 class="title is-5 mb-2">Job List Structure</h4>
+                            <p>The <code>/api/jobs</code> endpoint returns an array of objects containing both the
+                                logic ID and configuration name.</p>
+                            <pre><code>[
+  { "id": "job_1", "name": "Global Job Tracker" },
+  { "id": "job_2", "name": "Local Price Monitor" }
+]</code></pre>
+
                             <div class="notification is-info">
                                 <strong>💡 Bring Your Own UI:</strong> The default dashboard is served from
                                 <code>ui/index.html</code>. Because SpyWeb serves this dynamically, you can replace
                                 it
-                                with your own React/Vue build instantly — no restart required.
+                                with your own React/Vue build instantly - no restart required.
                             </div>
                         </div>
                     </div>
@@ -1953,7 +1746,7 @@ end</code></pre>
                         <div x-show="tab==='pagination'">
                             <div class="content">
                                 <p><strong>Cycle through pages using a Lua global counter:</strong></p>
-                                <pre><code class="language-lua">-- hook.lua — globals persist while the job process stays alive
+                                <pre><code class="language-lua">-- hook.lua - globals persist while the job process stays alive
 function before_fetch(request)
     page = page or 1
     if string.find(request.url, "?") then
@@ -1978,7 +1771,7 @@ end</code></pre>
                         <div x-show="tab==='filtering'">
                             <div class="content">
                                 <p><strong>Replace the keyword filter with custom Lua logic:</strong></p>
-                                <pre><code class="language-lua">-- hook.lua — replaces built-in keyword filter
+                                <pre><code class="language-lua">-- hook.lua - replaces built-in keyword filter
 blocked = { ["spam co"] = true }
 
 function filter_item(item)
@@ -2005,7 +1798,7 @@ end</code></pre>
                         <div x-show="tab==='headers'">
                             <div class="content">
                                 <p><strong>Add auth headers dynamically:</strong></p>
-                                <pre><code class="language-lua">-- hook.lua — dynamic headers
+                                <pre><code class="language-lua">-- hook.lua - dynamic headers
 function before_fetch(request)
     request.headers["Authorization"] = "Bearer my-api-key"
     request.headers["X-Custom"] = "spyweb"
@@ -2030,7 +1823,7 @@ end</code></pre>
                                 <p><strong>Page Change & Anti-Bot Detection:</strong> If a website blocks you or
                                     changes its layout, your CSS selector will return 0 items. Use this to instantly
                                     inspect the underlying HTTP response and trigger an alert.</p>
-                                <pre><code class="language-lua">-- hook.lua — fallback debugging
+                                <pre><code class="language-lua">-- hook.lua - fallback debugging
 function after_extract(items)
     -- selector_matches tells us if the CSS selector found anything at all, 
     -- regardless of whether keywords filtered them out later.
@@ -2126,7 +1919,7 @@ end</code></pre>
                                     </tr>
                                     <tr>
                                         <td><strong>Logging</strong></td>
-                                        <td>Calls to <code>log(msg)</code> append to <code>hook.log</code> in the
+                                        <td>Calls to <code>log(msg)</code> append to <code>hooks.log</code> in the
                                             job's
                                             directory. This file is persistent and useful for long-term debugging.
                                         </td>
@@ -2174,7 +1967,7 @@ end</code></pre>
 
     <footer class="footer py-6">
         <div class="content has-text-centered">
-            <p>SpyWeb — Zero-dependency web monitoring engine &bull; <a target="_blank"
+            <p>SpyWeb - Zero-dependency web monitoring engine &bull; <a target="_blank"
                     href="https://github.com/spyweb-app/spyweb" style="color:var(--accent2)">GitHub</a></p>
         </div>
     </footer>
