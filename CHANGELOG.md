@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0-beta] - 2026-05-28
+
+### Added
+- **Lua Testing:** Introduced a lightweight testing framework for Lua hooks via the `spyweb test <job>` CLI command, including a new `testing` Lua global for assertions and integrated IO support.
+- **Auth:** Added optional stateless API authentication via `SPYWEB_API_KEY` env var. the `/api/*` routes check the `X-SpyWeb-Key` header.
+- **Lua API:** Added `sleep(ms)` async binding for suspending execution.
+- **CDP Transport:** Added flat session routing (`call_session`, `register_listener`, `wait_event_session`) for session-level event targeting instead of a shared event channel.
+- **Browser:** Added `is_remote` flag to distinguish remote vs launched browser instances.
+- **UI:** Added a color picker to the record viewer with support for automatic and manual color scheme switching.
+- **Documentation:** Added `docs/lua-testing.md` and updated existing documentation and examples to reflect the latest CDP and testing features.
+
+### Changed
+- **Server:** Refactored request handling into separate `handle_api_request` (authenticated) and `handle_static_request` (unguarded, with path traversal protection and extension allowist) branches.
+- **Record Viewer:** Enhanced the built-in record viewer to support the new optional API authentication.
+- **Branding:** Updated the tray icon, UI logo, and favicon for a refreshed visual identity.
+- **API:** `/api/jobs` now returns `{ id, name }` objects instead of bare job IDs.
+- **CDP Transport:** Replaced shared event broadcast channel with session-keyed listener map, allowing multiple independent subscribers.
+- **Telemetry:** Changed memory threshold rounding from 1024 to 1000 for cleaner display.
+
+### Fixed
+- None.
+
 ## [1.3.0-beta] - 2026-05-19
 
 ### Added
