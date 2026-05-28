@@ -14,7 +14,6 @@
   🧪 <a href="docs/lua-testing.md">Testing</a> |
   🌐 <a href="https://docs.spyweb.app/cdp">Browser Automation</a> |
   ⚙️ <a href="docs/config.md">Config</a> |
-  🚀 <a href="docs/vps-deployment.md">VPS Setup</a> |
   📂 <a href="examples/">Examples</a> |
   🏗️ <a href="CONTRIBUTING.md">Build from Source</a>
 </p>
@@ -131,10 +130,25 @@ $env:SPYWEB_PORT=9000; .\spyweb.exe start
 ## CLI Tools
 The terminal binary includes helpful developer tools:
 
+### Utility Commands
 ```bash
 # Validate your jobs.toml without running the scraper
 ./spyweb check
 
+# Check version and active Lua engine
+./spyweb version
+
+# Profile management — check, list, clear, or delete per-job browser profiles
+./spyweb profile check "My Job"  # Show profile status (all jobs if no name given)
+./spyweb profile list            # Alias for check
+./spyweb profile clear all       # Wipe browser caches for all jobs
+./spyweb profile clear "My Job"  # Clear a specific job's cache
+./spyweb profile delete all      # Delete profile directories entirely
+./spyweb profile delete "My Job" # Delete a specific job's profile directory
+```
+
+### Development & Testing
+```bash
 # Run a single job instantly (bypasses interval and runs the 7 core stages of the Lua pipeline up to before_store)
 # Saves '{job_location}/{job-id}-response.html' and '{job_location}/{job-id}-fields.json' for easy inspection!
 ./spyweb debug "My Job Name"
@@ -145,9 +159,6 @@ The terminal binary includes helpful developer tools:
 </p>
 
 ```bash
-# Check version and active Lua engine
-./spyweb version
-
 # Run Lua unit tests for jobs
 ./spyweb test                       # run all test 
 ./spyweb test "My Job Name"         # run all test from specific job
@@ -158,15 +169,6 @@ The terminal binary includes helpful developer tools:
   <img alt="SpyWeb Lua Unit Testing" src="https://spyweb.app/images/spyweb-test.png" width="100%" style="max-width: 800px;">
 </p>
 
-```bash
-# Profile management — check, list, clear, or delete per-job browser profiles
-./spyweb profile check "My Job"  # Show profile status (all jobs if no name given)
-./spyweb profile list            # Alias for check
-./spyweb profile clear all       # Wipe browser caches for all jobs
-./spyweb profile clear "My Job"  # Clear a specific job's cache
-./spyweb profile delete all      # Delete profile directories entirely
-./spyweb profile delete "My Job" # Delete a specific job's profile directory
-```
 
 ## Lua API & Hooks
 Place a `hooks.lua` next to your config to customize the pipeline. SpyWeb provides persistent storage to track state (like page numbers or failure counts) across restarts.
