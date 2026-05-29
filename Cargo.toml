@@ -10,6 +10,7 @@ readme = "README.md"
 keywords = ["scraper", "web-scraping", "list-scraper", "job-scraper", "lua"]
 categories = ["command-line-utilities", "web-programming"]
 rust-version = "1.94.1"
+default-run = "spyweb"
 exclude = ["tests/", "jobs/", "logs/"]
 
 [dependencies]
