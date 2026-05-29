@@ -7,7 +7,12 @@ use mlua::Lua;
 use crate::lua::bindings;
 use crate::services::db::Db;
 
-pub fn create_engine(job_dir: Option<PathBuf>, db: Arc<Db>, job_name: &str) -> Result<Lua> {
+pub fn create_engine(
+    job_dir: Option<PathBuf>,
+    db: Arc<Db>,
+    job_name: &str,
+    uses_cdp: bool,
+) -> Result<Lua> {
     #[cfg(feature = "luau")]
     let libs = mlua::StdLib::TABLE
         | mlua::StdLib::STRING
@@ -22,7 +27,10 @@ pub fn create_engine(job_dir: Option<PathBuf>, db: Arc<Db>, job_name: &str) -> R
 
     let lua = Lua::new_with(libs, mlua::LuaOptions::default())?;
 
-    bindings::register_http_and_fs(&lua, job_dir)?;
+    bindings::register_http_and_fs(&lua, job_dir.clone())?;
+    if uses_cdp {
+        bindings::register_cdp(&lua, job_dir)?;
+    }
     bindings::register(&lua, db, job_name)?;
 
     Ok(lua)

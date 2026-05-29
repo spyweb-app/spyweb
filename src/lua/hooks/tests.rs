@@ -16,6 +16,13 @@ fn unique_test_dir(name: &str) -> PathBuf {
 }
 
 #[test]
+fn source_uses_cdp_detects_cdp_usage() {
+    assert!(source_uses_cdp("local page = cdp.connect('ws://example')"));
+    assert!(source_uses_cdp("return cdp.launch({})"));
+    assert!(!source_uses_cdp("return http_get('https://example.com')"));
+}
+
+#[test]
 fn hook_errors_use_hook_file_path_instead_of_rust_source() {
     let dir = unique_test_dir("hook-traceback");
     fs::create_dir_all(&dir).unwrap();

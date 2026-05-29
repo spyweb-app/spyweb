@@ -10,6 +10,10 @@ pub(crate) mod telemetry;
 
 pub(crate) use telemetry::TelemetrySample;
 
+pub(crate) fn source_uses_cdp(source: &str) -> bool {
+    source.contains("cdp.")
+}
+
 pub struct JobHooks {
     pub(crate) lua: Mutex<Lua>,
     pub(crate) job_name: String,
@@ -79,17 +83,28 @@ impl std::error::Error for LuaHookError {
 impl JobHooks {
     pub fn load(path: &Path, db: Arc<Db>, job_name: &str) -> Result<Self> {
         let job_dir = path.parent().map(|p| p.to_path_buf());
-        let lua = engine::create_engine(job_dir, db, job_name)?;
-
         let source = std::fs::read_to_string(path)?;
+        let defer_path = path.with_file_name("defer.lua");
+        let defer_source = if defer_path.exists() {
+            Some(
+                std::fs::read_to_string(&defer_path)
+                    .map_err(|e| anyhow::anyhow!("failed to read defer.lua: {e}"))?,
+            )
+        } else {
+            None
+        };
+        let uses_cdp = source_uses_cdp(&source)
+            || defer_source
+                .as_deref()
+                .map(source_uses_cdp)
+                .unwrap_or(false);
+
+        let lua = engine::create_engine(job_dir, db, job_name, uses_cdp)?;
         let chunk_name = path.to_string_lossy();
         lua.load(&source).set_name(chunk_name.as_ref()).exec()?;
 
-        let defer_path = path.with_file_name("defer.lua");
-        let has_defer_lua = defer_path.exists();
-        if has_defer_lua {
-            let defer_source = std::fs::read_to_string(&defer_path)
-                .map_err(|e| anyhow::anyhow!("failed to read defer.lua: {e}"))?;
+        let has_defer_lua = defer_source.is_some();
+        if let Some(defer_source) = defer_source {
             lua.load(&defer_source)
                 .set_name("defer.lua")
                 .exec()

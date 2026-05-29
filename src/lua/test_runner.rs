@@ -8,7 +8,7 @@ use tempfile::NamedTempFile;
 
 use crate::config::loader;
 use crate::config::types::{Job, Jobs};
-use crate::lua::engine;
+use crate::lua::{engine, hooks::source_uses_cdp};
 use crate::services::db::Db;
 use crate::services::profiles;
 
@@ -134,7 +134,8 @@ fn discover_tests(job_dir: &Path, job_name: &str) -> Result<Vec<String>> {
     // Using a fake DB for discovery
     let temp_db_file = NamedTempFile::new()?;
     let db = Arc::new(Db::open(temp_db_file.path().to_str().unwrap())?);
-    let lua = engine::create_engine(Some(job_dir.to_path_buf()), db, job_name)?;
+    let uses_cdp = job_source_uses_cdp(job_dir)?;
+    let lua = engine::create_engine(Some(job_dir.to_path_buf()), db, job_name, uses_cdp)?;
 
     load_test_sources(&lua, job_dir)?;
 
@@ -159,7 +160,8 @@ async fn run_single_test(job_dir: &Path, job_name: &str, test_name: &str) -> Res
         .to_str()
         .context("Failed to convert temp db path to string")?;
     let db = Arc::new(Db::open(temp_db)?);
-    let lua = engine::create_engine(Some(job_dir.to_path_buf()), db, job_name)?;
+    let uses_cdp = job_source_uses_cdp(job_dir)?;
+    let lua = engine::create_engine(Some(job_dir.to_path_buf()), db, job_name, uses_cdp)?;
 
     load_test_sources(&lua, job_dir)?;
 
@@ -187,6 +189,22 @@ fn load_test_sources(lua: &mlua::Lua, job_dir: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn job_source_uses_cdp(job_dir: &Path) -> Result<bool> {
+    let mut source = String::new();
+    for file in [
+        job_dir.join("hooks.lua"),
+        job_dir.join("defer.lua"),
+        job_dir.join("tests.lua"),
+    ] {
+        if file.exists() {
+            source.push_str(&std::fs::read_to_string(&file)?);
+            source.push('\n');
+        }
+    }
+
+    Ok(source_uses_cdp(&source))
 }
 
 fn load_lua_file(lua: &mlua::Lua, file: &Path) -> Result<()> {

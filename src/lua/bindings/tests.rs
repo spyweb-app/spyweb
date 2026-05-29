@@ -330,6 +330,7 @@ fn test_copy_and_deep_copy_helpers() {
 fn test_cdp_bindings_exposed() {
     let lua = Lua::new();
     register_http_and_fs(&lua, None).unwrap();
+    register_cdp(&lua, None).unwrap();
 
     let cdp: mlua::Table = lua.globals().get("cdp").unwrap();
     assert!(cdp.contains_key("connect").unwrap());
@@ -351,6 +352,7 @@ fn test_cdp_bindings_exposed() {
 fn test_cdp_inject_page_methods() {
     let lua = Lua::new();
     register_http_and_fs(&lua, None).unwrap();
+    register_cdp(&lua, None).unwrap();
 
     lua.load(
         r##"
@@ -455,6 +457,7 @@ fn test_cdp_inject_page_methods() {
 fn test_cdp_page_network_and_screenshot_helpers() {
     let lua = Lua::new();
     register_http_and_fs(&lua, None).unwrap();
+    register_cdp(&lua, None).unwrap();
 
     lua.load(
         r##"
@@ -528,6 +531,7 @@ fn test_cdp_page_network_and_screenshot_helpers() {
 fn test_cdp_page_wait_scroll_and_real_input_helpers() {
     let lua = Lua::new();
     register_http_and_fs(&lua, None).unwrap();
+    register_cdp(&lua, None).unwrap();
 
     lua.load(
         r##"
@@ -604,6 +608,7 @@ fn test_cdp_page_wait_scroll_and_real_input_helpers() {
 fn test_cdp_page_helpers_log_and_continue_on_page_failures() {
     let lua = Lua::new();
     register_http_and_fs(&lua, None).unwrap();
+    register_cdp(&lua, None).unwrap();
 
     lua.load(
         r##"
