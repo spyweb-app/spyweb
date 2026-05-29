@@ -143,20 +143,42 @@ fn validate_path(path: &Path) -> anyhow::Result<()> {
         ));
     }
 
-    // 2. Traversal Prevention
-    if path.to_string_lossy().contains("..") {
+    // 2. Traversal Prevention (Component-based)
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
         return Err(anyhow::anyhow!("Directory traversal attempt blocked."));
     }
 
-    // 3. Directory Scoping
-    // In production, we ensure we are in a 'safe' folder.
+    // 3. Absolute Scoping & Symlink Protection
+    let current_dir = std::env::current_dir()?;
+    let abs_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        current_dir.join(path)
+    };
+
+    // If file exists, canonicalize to detect symlink escapes
+    if abs_path.exists() {
+        let canonical = abs_path.canonicalize()?;
+        if !canonical.starts_with(&current_dir) {
+            return Err(anyhow::anyhow!("Path escapes sandbox via symlink."));
+        }
+    }
+
+    // 4. Directory Scoping
     #[cfg(not(test))]
     {
-        let path_str = path.to_string_lossy();
-        // Allow writes to 'jobs' or 'data' or 'logs'
-        if !path_str.contains("jobs") && !path_str.contains("data") && !path_str.contains("logs") {
+        let allowed_subdirs = ["jobs", "data", "logs"];
+        let is_safe = allowed_subdirs.iter().any(|subdir| {
+            let safe_root = current_dir.join(subdir);
+            abs_path.starts_with(safe_root)
+        });
+
+        if !is_safe {
             return Err(anyhow::anyhow!(
-                "Path must be within project scope: {:?}",
+                "Access denied: Path must be within 'jobs/', 'data/', or 'logs/': {:?}",
                 path
             ));
         }
@@ -215,21 +237,34 @@ fn rotate_file(path: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
     fn test_validate_path() {
+        // Valid paths
         assert!(validate_path(Path::new("data.csv")).is_ok());
         assert!(validate_path(Path::new("logs/hook.log")).is_ok());
+        assert!(validate_path(Path::new("jobs/myjob/output.json")).is_ok());
+
+        // Traversal attempts
         assert!(validate_path(Path::new("../secret.txt")).is_err());
         assert!(validate_path(Path::new("data/../../etc/passwd")).is_err());
+        assert!(validate_path(Path::new("/etc/passwd")).is_err());
+
+        // Invalid extensions
+        assert!(validate_path(Path::new("data.exe")).is_err());
+        assert!(validate_path(Path::new("data.sh")).is_err());
+        assert!(validate_path(Path::new("data")).is_err());
     }
 
     #[test]
     fn test_io_rotation() {
         smol::block_on(async {
-            let dir = TempDir::new().unwrap();
-            let file_path = dir.path().join("test.log");
+            let current_dir = std::env::current_dir().unwrap();
+            let test_dir = current_dir.join("target").join("test_io_rotation");
+            let _ = fs::remove_dir_all(&test_dir);
+            fs::create_dir_all(&test_dir).unwrap();
+            
+            let file_path = test_dir.join("test.log");
 
             let (tx, _rx) = bounded(1024);
             let _ = IO_SENDER.set(tx);
@@ -269,7 +304,7 @@ mod tests {
 
             // Find the rotated file (it will have a timestamp)
             let mut rotated_found = false;
-            if let Ok(read_dir) = fs::read_dir(dir.path()) {
+            if let Ok(read_dir) = fs::read_dir(&test_dir) {
                 for entry in read_dir.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
                     if name.starts_with("test.2") && name.ends_with(".log") {
@@ -279,14 +314,19 @@ mod tests {
                 }
             }
             assert!(rotated_found, "Timestamped rotated file not found");
+            let _ = fs::remove_dir_all(&test_dir);
         });
     }
 
     #[test]
     fn test_fs_overwrite() {
         smol::block_on(async {
-            let dir = TempDir::new().unwrap();
-            let file_path = dir.path().join("state.json");
+            let current_dir = std::env::current_dir().unwrap();
+            let test_dir = current_dir.join("target").join("test_io_overwrite");
+            let _ = fs::remove_dir_all(&test_dir);
+            fs::create_dir_all(&test_dir).unwrap();
+            
+            let file_path = test_dir.join("state.json");
             let mut files = HashMap::new();
 
             handle_task(
@@ -314,6 +354,7 @@ mod tests {
             .unwrap();
 
             assert_eq!(fs::read_to_string(&file_path).unwrap(), "second");
+            let _ = fs::remove_dir_all(&test_dir);
         });
     }
 }
