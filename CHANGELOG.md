@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Documentation:** Added `docs/lua-testing.md` and updated existing documentation and examples to reflect the latest CDP and testing features.
 
 ### Changed
+- **IO Security:** Enhanced path validation in the IO service using canonicalization and component-based checks to prevent symlink and traversal attacks.
 - **Server:** Refactored request handling into separate `handle_api_request` (authenticated) and `handle_static_request` (unguarded, with path traversal protection and extension allowist) branches.
 - **Record Viewer:** Enhanced the built-in record viewer to support the new optional API authentication.
 - **Branding:** Updated the tray icon, UI logo, and favicon for a refreshed visual identity.

@@ -49,6 +49,9 @@ impl RequestConfig {
         for (name, value) in DEFAULT_HEADERS {
             headers.insert(name.to_string(), value.to_string());
         }
+
+        headers.insert("Connection".to_string(), "close".to_string());
+
         if let Some(job_headers) = &job.headers {
             for (name, value) in job_headers {
                 headers.shift_remove(name.as_str());
@@ -223,6 +226,7 @@ impl RequestHandler {
         let mut config = Agent::config_builder()
             .timeout_global(Some(self.timeout))
             .http_status_as_error(false)
+            .max_idle_connections(0) 
             .build();
 
         if let Some(proxy_url) = proxy_url {
@@ -231,6 +235,7 @@ impl RequestHandler {
             config = Agent::config_builder()
                 .timeout_global(Some(self.timeout))
                 .http_status_as_error(false)
+                .max_idle_connections(0)
                 .proxy(Some(proxy))
                 .build();
         }
