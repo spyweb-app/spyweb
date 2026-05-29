@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.0-beta] - 2026-05-28
+## [1.4.0-beta] - 2026-05-29
 
 ### Added
 - **Lua Testing:** Introduced a lightweight testing framework for Lua hooks via the `spyweb test <job>` CLI command, including a new `testing` Lua global for assertions and integrated IO support.
@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **API:** `/api/jobs` now returns `{ id, name }` objects instead of bare job IDs.
 - **CDP Transport:** Replaced shared event broadcast channel with session-keyed listener map, allowing multiple independent subscribers.
 - **Telemetry:** Changed memory threshold rounding from 1024 to 1000 for cleaner display.
+- **Lazy-load CDP:** CDP bindings are now registered only for hook sources that reference `cdp.*`, jobs that never use CDP no longer pay the startup cost for that VM surface.
+- **Lazy-load Hooks:** Disabled job no longer load `hooks.lua`, they do not create idle Lua VMs during startup or config reload.
+- **Jobs API:** `/api/jobs` now includes an `enabled` flag while preserving the existing `{ id, name }` structure order for compatibility.
+
 
 ### Fixed
 - None.

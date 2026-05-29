@@ -76,13 +76,17 @@
             font-size: 0.95rem;
         }
         .menu-list a:hover {
-            background-color: rgba(255, 255, 255, 0.05);
+            background-color: color-mix(in srgb, var(--accent), transparent 90%);
             color: var(--text-main);
         }
         .menu-list a.is-active {
             background: var(--accent);
             color: #fff;
             font-weight: 600;
+        }
+        .menu-list a.is-active:hover {
+            background: var(--accent);
+            opacity: 0.9;
         }
         .menu-label {
             color: var(--text-muted);
@@ -219,7 +223,9 @@
                     </template>
                     <template x-for="job in jobs" :key="job.id">
                         <li>
-                            <a :class="{'is-active': selectedJob === job.id}" @click="selectJob(job.id)" x-text="job.name"></a>
+                            <a :class="{'is-active': selectedJob === job.id}" 
+                               :style="!job.enabled ? 'opacity: 0.4; filter: grayscale(100%);' : ''"
+                               @click="selectJob(job.id)" x-text="job.name"></a>
                         </li>
                     </template>
                 </ul>
