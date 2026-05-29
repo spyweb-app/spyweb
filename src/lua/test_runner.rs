@@ -404,6 +404,7 @@ end
                     hash_fields: None,
                 },
                 hooks: None,
+                has_hooks_file: false,
                 dir: Some(std::path::PathBuf::from("jobs/price-sync")),
             }],
         };

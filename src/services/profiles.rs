@@ -147,6 +147,7 @@ mod tests {
                 hash_fields: None,
             },
             hooks: None,
+            has_hooks_file: false,
             dir: dir.map(PathBuf::from),
         }
     }
@@ -154,23 +155,23 @@ mod tests {
     #[test]
     fn finds_job_by_name_or_id() {
         let jobs = Jobs {
-            list: vec![mock_job(Some("jobs/jumia"), "Jumia")],
+            list: vec![mock_job(Some("jobs/spyweb"), "SpyWeb")],
         };
-        assert!(find_job(&jobs, "Jumia").is_some());
-        assert!(find_job(&jobs, "jumia").is_some());
+        assert!(find_job(&jobs, "SpyWeb").is_some());
+        assert!(find_job(&jobs, "SpyWeb").is_some());
         assert!(find_job(&jobs, "  ").is_none());
     }
 
     #[test]
     fn resolves_profile_path_from_job_dir() {
-        let job = mock_job(Some("jobs/jumia"), "Jumia");
+        let job = mock_job(Some("jobs/spyweb"), "SpyWeb");
         let path = profile_dir_for_job(&job).expect("profile path");
-        assert!(path.ends_with(".spyweb/jumia"));
+        assert!(path.ends_with(".spyweb/spyweb"));
     }
 
     #[test]
     fn returns_none_without_job_dir_when_no_root_available() {
-        let job = mock_job(None, "Jumia");
+        let job = mock_job(None, "SpyWeb");
         let _ = profile_dir_for_job(&job);
     }
 }

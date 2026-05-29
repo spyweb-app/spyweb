@@ -412,6 +412,7 @@ end
                 hash_fields: None,
             },
             hooks: Some(hooks),
+            has_hooks_file: true,
             dir: Some(dir.clone()),
         };
         let runner = Arc::new(Runner::new());

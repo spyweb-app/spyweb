@@ -14,6 +14,7 @@ pub struct Jobs {
 pub struct Job {
     pub config: JobConfig,
     pub hooks: Option<JobHooks>,
+    pub has_hooks_file: bool,
     pub dir: Option<PathBuf>,
 }
 

@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub struct JobSummary {
     pub id: String,
     pub name: String,
+    pub enabled: bool,
 }
 
 pub struct WebServer {

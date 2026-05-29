@@ -226,7 +226,7 @@ impl RequestHandler {
         let mut config = Agent::config_builder()
             .timeout_global(Some(self.timeout))
             .http_status_as_error(false)
-            .max_idle_connections(0) 
+            .max_idle_connections(0)
             .build();
 
         if let Some(proxy_url) = proxy_url {
@@ -413,13 +413,13 @@ mod tests {
 
     #[test]
     fn error_chain_formatter_preserves_context_and_cause() {
-        let err = anyhow::anyhow!("dns lookup failed").context("request failed for job 'Jumia'");
+        let err = anyhow::anyhow!("dns lookup failed").context("request failed for job 'Spyweb'");
 
         let formatted = format_error_chain(&err);
 
         assert_eq!(
             formatted,
-            "request failed for job 'Jumia': dns lookup failed"
+            "request failed for job 'Spyweb': dns lookup failed"
         );
     }
 }

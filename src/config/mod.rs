@@ -39,8 +39,12 @@ pub fn config_check() -> anyhow::Result<()> {
                 crate::color::c_info(&jobs.list.len().to_string())
             );
             for job in &jobs.list {
-                let hook_status = if job.hooks.is_some() {
-                    crate::color::c_info("hooks.lua")
+                let hook_status = if job.has_hooks_file {
+                    if job.config.enabled {
+                        crate::color::c_info("hooks.lua")
+                    } else {
+                        crate::color::c_dim("hooks.lua")
+                    }
                 } else {
                     crate::color::c_dim("no hook")
                 };

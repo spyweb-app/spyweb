@@ -8,7 +8,7 @@ const RECORDS: TableDefinition<(&str, u64), &str> = TableDefinition::new("record
 const SEEN: TableDefinition<&str, u8> = TableDefinition::new("seen");
 pub const LUA_USER_TABLE: TableDefinition<&str, &str> = TableDefinition::new("lua_user");
 
-const DB_CACHE_SIZE_BYTES: usize = 512 * 1024;
+const DB_CACHE_SIZE_BYTES: usize = 128 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Record {

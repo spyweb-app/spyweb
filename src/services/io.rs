@@ -263,7 +263,7 @@ mod tests {
             let test_dir = current_dir.join("target").join("test_io_rotation");
             let _ = fs::remove_dir_all(&test_dir);
             fs::create_dir_all(&test_dir).unwrap();
-            
+
             let file_path = test_dir.join("test.log");
 
             let (tx, _rx) = bounded(1024);
@@ -325,7 +325,7 @@ mod tests {
             let test_dir = current_dir.join("target").join("test_io_overwrite");
             let _ = fs::remove_dir_all(&test_dir);
             fs::create_dir_all(&test_dir).unwrap();
-            
+
             let file_path = test_dir.join("state.json");
             let mut files = HashMap::new();
 

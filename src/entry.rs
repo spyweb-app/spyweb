@@ -34,6 +34,7 @@ pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
             .map(|j| JobSummary {
                 id: j.config.id(),
                 name: j.config.name.clone(),
+                enabled: j.config.enabled,
             })
             .collect::<Vec<JobSummary>>(),
     ));
@@ -134,6 +135,7 @@ async fn job_manager(
                         .map(|j| JobSummary {
                             id: j.config.id(),
                             name: j.config.name.clone(),
+                            enabled: j.config.enabled,
                         })
                         .collect();
                 }
@@ -176,6 +178,7 @@ mod tests {
                 hash_fields: None,
             },
             hooks: None,
+            has_hooks_file: false,
             dir: None,
         }
     }

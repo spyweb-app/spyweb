@@ -307,6 +307,7 @@ mod tests {
                 hash_fields: None,
             },
             hooks: None,
+            has_hooks_file: false,
             dir: dir.map(std::path::PathBuf::from),
         }
     }

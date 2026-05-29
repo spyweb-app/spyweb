@@ -288,6 +288,7 @@ fn load_config_from_file(path: &str) -> Result<Vec<Job>> {
         jobs.push(Job {
             config,
             hooks: None,
+            has_hooks_file: false,
             dir: None,
         });
     }
@@ -317,7 +318,8 @@ fn load_config_from_dir(path: &str, db: Arc<Db>) -> Result<Vec<Job>> {
             .map_err(|e| anyhow::anyhow!("Config error in '{}': {}", config_path.display(), e))?;
         validate_job_config(&config)?;
         let hook_path = dir.join("hooks.lua");
-        let hooks = if hook_path.exists() {
+        let has_hooks_file = hook_path.exists();
+        let hooks = if config.enabled && has_hooks_file {
             match JobHooks::load(&hook_path, Arc::clone(&db), &config.id()) {
                 Ok(h) => Some(h),
                 Err(e) => {
@@ -332,6 +334,7 @@ fn load_config_from_dir(path: &str, db: Arc<Db>) -> Result<Vec<Job>> {
         jobs.push(Job {
             config,
             hooks,
+            has_hooks_file,
             dir: Some(dir),
         });
     }
@@ -343,6 +346,7 @@ fn load_config_from_dir(path: &str, db: Arc<Db>) -> Result<Vec<Job>> {
 mod tests {
     use super::*;
     use crate::config::types::{Field, Job};
+    use tempfile::tempdir;
 
     fn mock_job(hash_fields: Option<Vec<&str>>) -> JobConfig {
         JobConfig {
@@ -376,6 +380,7 @@ mod tests {
         Job {
             config,
             hooks: None,
+            has_hooks_file: false,
             dir: None,
         }
     }
@@ -543,5 +548,35 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("duplicate job id(s): hello_world"));
+    }
+
+    #[test]
+    fn skips_hook_loading_for_disabled_jobs() {
+        let dir = tempdir().unwrap();
+        let job_dir = dir.path().join("disabled-job");
+        fs::create_dir_all(&job_dir).unwrap();
+
+        fs::write(
+            job_dir.join("config.toml"),
+            r#"
+name = "Disabled Job"
+url = "https://example.com"
+selector = ".item"
+enabled = false
+fields = ["title:.title"]
+"#,
+        )
+        .unwrap();
+
+        fs::write(job_dir.join("hooks.lua"), "this is not valid lua").unwrap();
+
+        let db_path = dir.path().join("test.redb");
+        let db = Arc::new(Db::open(db_path.to_str().unwrap()).unwrap());
+        let jobs = load_dir_jobs(dir.path().to_str().unwrap(), db).unwrap();
+
+        assert_eq!(jobs.len(), 1);
+        assert!(!jobs[0].config.enabled);
+        assert!(jobs[0].hooks.is_none());
+        assert!(jobs[0].has_hooks_file);
     }
 }
