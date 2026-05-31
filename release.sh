@@ -76,8 +76,10 @@ if [[ "$OS_NAME" == "macos" ]]; then
     echo "[*] Building Universal Binaries for macOS (Intel + Apple Silicon)..."
     rustup target add x86_64-apple-darwin aarch64-apple-darwin
     
-    cargo build --release --target x86_64-apple-darwin --bin spyweb --bin spyweb-tray --features tray
-    cargo build --release --target aarch64-apple-darwin --bin spyweb --bin spyweb-tray --features tray
+    cargo build --release --target x86_64-apple-darwin --bin spyweb
+    cargo build --release --target x86_64-apple-darwin --bin spyweb-tray --features tray
+    cargo build --release --target aarch64-apple-darwin --bin spyweb
+    cargo build --release --target aarch64-apple-darwin --bin spyweb-tray --features tray
     
     mkdir -p target/universal
     lipo -create -output target/universal/spyweb target/x86_64-apple-darwin/release/spyweb target/aarch64-apple-darwin/release/spyweb
@@ -103,7 +105,8 @@ if [[ "$OS_NAME" == "macos" ]]; then
 else
     # Linux or Windows build
     echo "[*] Building binaries (release)..."
-    cargo build --release --bin spyweb --bin spyweb-tray --features tray
+    cargo build --release --bin spyweb
+    cargo build --release --bin spyweb-tray --features tray
     cp "target/release/spyweb${EXE_EXT}" "$DIST_DIR/$PACKAGE_DIR/"
     cp "target/release/spyweb-tray${EXE_EXT}" "$DIST_DIR/$PACKAGE_DIR/"
     

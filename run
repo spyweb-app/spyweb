@@ -28,9 +28,7 @@ show_help() {
     echo "Flags:"
     echo "  -n              Compile only, do not run (use with wd/win-debug)"
     echo ""
-    echo "Feature options:"
-    echo "  tray            Enable desktop-only features (tray icon, notifications)"
-    echo ""
+
     echo "Short aliases (for the lazy):"
     echo "  wd  = win-debug"
     echo "  wr  = win-release"
@@ -46,8 +44,6 @@ show_help() {
 
 NO_RUN=0
 CMD=""
-FEATURE=""
-FEATURE_ARGS=()
 
 # Parse arguments
 for arg in "$@"; do
@@ -56,7 +52,8 @@ for arg in "$@"; do
             NO_RUN=1
             ;;
         tray)
-            FEATURE="tray"
+            echo "[!] Use the tray-specific commands (e.g. 'ltd', 'wtd') instead."
+            exit 1
             ;;
         "")
             ;;
@@ -84,22 +81,10 @@ case "$CMD" in
     w)   CMD="watch" ;;
 esac
 
-if [ "$FEATURE" = "tray" ]; then
-    FEATURE_ARGS=(--features tray)
-fi
-
-describe_features() {
-    if [ "${#FEATURE_ARGS[@]}" -eq 0 ]; then
-        echo "default/headless"
-    else
-        echo "${FEATURE_ARGS[*]}"
-    fi
-}
-
 case "$CMD" in
     win-debug)
-        echo "[*] Compiling (debug) for Windows [$(describe_features)]..."
-        cargo build --target x86_64-pc-windows-gnu "${FEATURE_ARGS[@]}"
+        echo "[*] Compiling (debug) for Windows [default/headless]..."
+        cargo build --target x86_64-pc-windows-gnu
         if [ "$NO_RUN" -eq 0 ]; then
             EXE_PATH="./target/x86_64-pc-windows-gnu/debug/${BIN_NAME}.exe"
             if [ -f "$EXE_PATH" ]; then
@@ -113,8 +98,8 @@ case "$CMD" in
         ;;
 
     win-release)
-        echo "[*] Compiling (release) for Windows [$(describe_features)]..."
-        cargo build --release --target x86_64-pc-windows-gnu "${FEATURE_ARGS[@]}"
+        echo "[*] Compiling (release) for Windows [default/headless]..."
+        cargo build --release --target x86_64-pc-windows-gnu
         ;;
 
     win-release-all)
@@ -125,12 +110,12 @@ case "$CMD" in
 
     linux-debug)
         echo "[*] Compiling & Running (debug) for Linux..."
-        cargo run "${FEATURE_ARGS[@]}" -- start
+        cargo run -- start
         ;;
         
     linux-release)
         echo "[*] Compiling (release) for Linux..."
-        cargo build --release "${FEATURE_ARGS[@]}"
+        cargo build --release
         ;;
 
     watch)
@@ -139,11 +124,7 @@ case "$CMD" in
             exit 1
         fi
         echo "[*] Watching for changes..."
-        if [ "${#FEATURE_ARGS[@]}" -eq 0 ]; then
-            cargo watch -c -w src -x "run -- start"
-        else
-            cargo watch -c -w src -x "run ${FEATURE_ARGS[*]} -- start"
-        fi
+        cargo watch -c -w src -x "run -- start"
         ;;
 
     win-tray-debug)
