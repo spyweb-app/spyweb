@@ -1,23 +1,24 @@
-use std::collections::HashMap;
+use anyhow::Result;
+use indexmap::IndexMap;
+use smol::channel::{Receiver, Sender, bounded};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
-use smol::channel::{Receiver, Sender, bounded};
-
-static IO_SENDER: OnceLock<Sender<IoTask>> = OnceLock::new();
-
-pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 pub const MAX_ROTATIONS: usize = 5;
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum IoOp {
     Append,
     Overwrite,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IoTask {
     pub path: PathBuf,
     pub content: Vec<u8>,
@@ -25,109 +26,247 @@ pub struct IoTask {
     pub add_timestamp: bool,
 }
 
-pub fn init() {
-    let (tx, rx) = bounded(16);
-    IO_SENDER.set(tx).expect("IO system already initialized");
+static IO_SERVICE: OnceLock<RwLock<IoService>> = OnceLock::new();
 
-    std::thread::spawn(move || {
-        smol::block_on(io_worker(rx));
-    });
+struct IoService {
+    sender: Option<Sender<IoTask>>,
+    worker: Option<JoinHandle<()>>,
 }
 
-pub async fn send_task(task: IoTask) -> anyhow::Result<()> {
-    let sender = IO_SENDER
-        .get()
-        .ok_or_else(|| anyhow::anyhow!("IO system not initialized"))?;
-    sender
-        .send(task)
-        .await
-        .map_err(|_| anyhow::anyhow!("IO worker channel closed"))
-}
-
-pub fn shutdown() {
-    if let Some(sender) = IO_SENDER.get() {
-        sender.close();
-        // The worker will finish draining and exit its loop
-    }
-}
-
-async fn io_worker(rx: Receiver<IoTask>) {
-    let mut files: HashMap<PathBuf, File> = HashMap::new();
-
-    while let Ok(task) = rx.recv().await {
-        if let Err(e) = handle_task(&mut files, task) {
-            crate::t_eprintln!("IO Worker error: {}", e);
+impl IoService {
+    fn new() -> Self {
+        Self {
+            sender: None,
+            worker: None,
         }
     }
 
-    // Graceful shutdown: flush and close files
-    for (_, mut file) in files {
-        let _ = file.flush();
+    fn valid_sender(&self) -> Option<Sender<IoTask>> {
+        self.sender.as_ref().and_then(|s| {
+            if !s.is_closed() {
+                Some(s.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn start(&mut self) -> Sender<IoTask> {
+        let (tx, rx) = bounded(128);
+        let handle = std::thread::spawn(|| worker_main(rx));
+        self.sender = Some(tx.clone());
+        self.worker = Some(handle);
+        tx
+    }
+
+    fn shutdown(&mut self) {
+        if let Some(ref sender) = self.sender {
+            sender.close();
+        }
+        self.sender = None;
+        if let Some(handle) = self.worker.take() {
+            let _ = handle.join();
+        }
     }
 }
 
-fn handle_task(files: &mut HashMap<PathBuf, File>, task: IoTask) -> anyhow::Result<()> {
-    // 1. Path validation (Security)
-    validate_path(&task.path)?;
+fn service() -> &'static RwLock<IoService> {
+    IO_SERVICE.get_or_init(|| RwLock::new(IoService::new()))
+}
 
-    // 2. Ensure parent directory exists
-    if let Some(parent) = task.path.parent()
+fn ensure_sender() -> Sender<IoTask> {
+    if let Some(sender) = service()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .valid_sender()
+    {
+        return sender;
+    }
+    let mut svc = service().write().unwrap_or_else(|e| e.into_inner());
+    svc.valid_sender().unwrap_or_else(|| svc.start())
+}
+
+pub async fn send_task(task: IoTask) -> Result<()> {
+    let sender = ensure_sender();
+    match sender.send(task).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let sender = {
+                let mut svc = service().write().unwrap_or_else(|e| e.into_inner());
+                svc.start()
+            };
+            sender
+                .send(e.0)
+                .await
+                .map_err(|_| anyhow::anyhow!("IO worker channel closed"))
+        }
+    }
+}
+
+pub fn shutdown() {
+    if let Some(svc) = IO_SERVICE.get() {
+        svc.write().unwrap_or_else(|e| e.into_inner()).shutdown();
+    }
+}
+
+fn get_or_create_file<'a>(
+    files: &'a mut IndexMap<PathBuf, File>,
+    path: &Path,
+) -> Result<&'a mut File> {
+    if let Some(idx) = files.get_index_of(path) {
+        files.move_index(idx, files.len() - 1);
+    } else {
+        if files.len() >= 64 {
+            files.shift_remove_index(0);
+        }
+        files.insert(
+            path.to_path_buf(),
+            OpenOptions::new().create(true).append(true).open(path)?,
+        );
+    }
+    Ok(files.get_mut(path).unwrap())
+}
+
+fn worker_main(rx: Receiver<IoTask>) {
+    let mut files = IndexMap::new();
+    loop {
+        let task = smol::block_on(async {
+            futures_lite::future::or(async { rx.recv().await.ok() }, async {
+                smol::Timer::after(IDLE_TIMEOUT).await;
+                None
+            })
+            .await
+        });
+
+        let Some(task) = task else {
+            break;
+        };
+
+        if let Err(e) = handle_task(&mut files, task) {
+            crate::t_eprintln!("IO Worker error: {}", e);
+        }
+
+        while let Ok(task) = rx.try_recv() {
+            if let Err(e) = handle_task(&mut files, task) {
+                crate::t_eprintln!("IO Worker error: {}", e);
+            }
+        }
+    }
+}
+
+fn handle_task(files: &mut IndexMap<PathBuf, File>, task: IoTask) -> Result<()> {
+    validate_path(&task.path)?;
+    match task.op {
+        IoOp::Append => append_to_file(files, &task.path, &task.content, task.add_timestamp),
+        IoOp::Overwrite => overwrite_file(files, &task.path, &task.content),
+    }
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent()
         && !parent.exists()
     {
         fs::create_dir_all(parent)?;
     }
+    Ok(())
+}
 
-    match task.op {
-        IoOp::Append => {
-            // Check if we need to rotate before appending
-            if task.path.exists() {
-                let metadata = fs::metadata(&task.path)?;
-                if metadata.len() + task.content.len() as u64 > MAX_FILE_SIZE {
-                    // Close existing handle if open
-                    files.remove(&task.path);
-                    rotate_file(&task.path)?;
-                }
-            }
+fn append_to_file(
+    files: &mut IndexMap<PathBuf, File>,
+    path: &Path,
+    content: &[u8],
+    add_timestamp: bool,
+) -> Result<()> {
+    ensure_parent_dir(path)?;
 
-            let file = if let Some(f) = files.get_mut(&task.path) {
-                f
-            } else {
-                let f = OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&task.path)?;
-                files.insert(task.path.clone(), f);
-                files.get_mut(&task.path).unwrap()
-            };
+    if should_rotate(path, content.len() as u64)? {
+        files.shift_remove(path);
+        rotate_file(path)?;
+    }
 
-            if task.add_timestamp {
-                let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-                writeln!(
-                    file,
-                    "[{}]: {}",
-                    timestamp,
-                    String::from_utf8_lossy(&task.content)
-                )?;
-            } else {
-                file.write_all(&task.content)?;
-            }
-            file.flush()?;
-        }
-        IoOp::Overwrite => {
-            // For overwrite, we don't rotate like logs, we just replace.
-            // But we still close the handle if we had one for appending.
-            files.remove(&task.path);
-            let mut file = File::create(&task.path)?;
-            file.write_all(&task.content)?;
-            file.flush()?;
-        }
+    let file = get_or_create_file(files, path)?;
+
+    if add_timestamp {
+        let timestamp = chrono::Local::now()
+            .format("[%Y-%m-%d %H:%M:%S]: ")
+            .to_string();
+        file.write_all(timestamp.as_bytes())?;
+        file.write_all(content)?;
+        file.write_all(b"\n")?;
+    } else {
+        file.write_all(content)?;
     }
 
     Ok(())
 }
 
-fn validate_path(path: &Path) -> anyhow::Result<()> {
-    // 1. Extension Allowlist
+fn overwrite_file(files: &mut IndexMap<PathBuf, File>, path: &Path, content: &[u8]) -> Result<()> {
+    ensure_parent_dir(path)?;
+    let mut file = File::create(path)?;
+    file.write_all(content)?;
+    file.sync_all()?;
+    files.shift_remove(path);
+    Ok(())
+}
+
+fn should_rotate(path: &Path, incoming_size: u64) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let metadata = fs::metadata(path)?;
+    Ok(metadata.len() + incoming_size > MAX_FILE_SIZE)
+}
+
+fn rotate_file(path: &Path) -> Result<()> {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let new_name = if ext.is_empty() {
+        format!("{}.{}", stem, timestamp)
+    } else {
+        format!("{}.{}.{}", stem, timestamp, ext)
+    };
+
+    fs::rename(path, parent.join(new_name))?;
+    prune_rotations(parent, stem, ext)?;
+    Ok(())
+}
+
+fn prune_rotations(parent: &Path, stem: &str, extension: &str) -> Result<()> {
+    let mut entries = Vec::new();
+    let prefix = format!("{}.", stem);
+    let suffix = if extension.is_empty() {
+        String::new()
+    } else {
+        format!(".{}", extension)
+    };
+
+    for entry in fs::read_dir(parent)? {
+        let entry = entry?;
+        if !entry.metadata()?.is_file() {
+            continue;
+        }
+        if let Some(name) = entry.file_name().to_str()
+            && name.starts_with(&prefix)
+            && (suffix.is_empty() || name.ends_with(&suffix))
+        {
+            entries.push((name.to_string(), entry.path()));
+        }
+    }
+
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    if entries.len() > MAX_ROTATIONS {
+        for (_, path) in entries.iter().take(entries.len() - MAX_ROTATIONS) {
+            let _ = fs::remove_file(path);
+        }
+    }
+    Ok(())
+}
+
+fn validate_path(path: &Path) -> Result<()> {
     let allowed_extensions = ["csv", "json", "jsonl", "txt", "log"];
     let ext = path
         .extension()
@@ -143,7 +282,6 @@ fn validate_path(path: &Path) -> anyhow::Result<()> {
         ));
     }
 
-    // 2. Traversal Prevention (Component-based)
     if path
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
@@ -151,7 +289,6 @@ fn validate_path(path: &Path) -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("Directory traversal attempt blocked."));
     }
 
-    // 3. Absolute Scoping & Symlink Protection
     let current_dir = std::env::current_dir()?;
     let abs_path = if path.is_absolute() {
         path.to_path_buf()
@@ -159,15 +296,21 @@ fn validate_path(path: &Path) -> anyhow::Result<()> {
         current_dir.join(path)
     };
 
-    // If file exists, canonicalize to detect symlink escapes
-    if abs_path.exists() {
-        let canonical = abs_path.canonicalize()?;
+    let mut check_path = abs_path.as_path();
+    while !check_path.exists() {
+        match check_path.parent() {
+            Some(parent) => check_path = parent,
+            None => break,
+        }
+    }
+
+    if check_path.exists() {
+        let canonical = check_path.canonicalize()?;
         if !canonical.starts_with(&current_dir) {
             return Err(anyhow::anyhow!("Path escapes sandbox via symlink."));
         }
     }
 
-    // 4. Directory Scoping
     #[cfg(not(test))]
     {
         let allowed_subdirs = ["jobs", "data", "logs"];
@@ -187,70 +330,20 @@ fn validate_path(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn rotate_file(path: &Path) -> anyhow::Result<()> {
-    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    let extension = path.extension().unwrap_or_default().to_string_lossy();
-    let parent = path.parent().unwrap_or(Path::new("."));
-
-    // 1. Rename current file to timestamped version
-    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let rotated_name = if extension.is_empty() {
-        format!("{}.{}", stem, timestamp)
-    } else {
-        format!("{}.{}.{}", stem, timestamp, extension)
-    };
-    let rotated_path = parent.join(rotated_name);
-
-    fs::rename(path, rotated_path)?;
-
-    // 2. Cleanup: Keep only MAX_ROTATIONS
-    let mut entries = Vec::new();
-    if let Ok(read_dir) = fs::read_dir(parent) {
-        for entry in read_dir.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            // Match files that start with "stem." and end with ".extension" (if any)
-            if name.starts_with(&format!("{}.", stem))
-                && (extension.is_empty() || name.ends_with(&format!(".{}", extension)))
-                && name != path.file_name().unwrap_or_default().to_string_lossy()
-                && let Ok(metadata) = entry.metadata()
-                && metadata.is_file()
-            {
-                entries.push((name, entry.path()));
-            }
-        }
-    }
-
-    // Sort by name (which starts with stem and then timestamp)
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
-
-    // If we have more than MAX_ROTATIONS, delete the oldest
-    if entries.len() > MAX_ROTATIONS {
-        let to_delete = entries.len() - MAX_ROTATIONS;
-        for entry in &entries[..to_delete] {
-            let _ = fs::remove_file(&entry.1);
-        }
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_validate_path() {
-        // Valid paths
         assert!(validate_path(Path::new("data.csv")).is_ok());
         assert!(validate_path(Path::new("logs/hook.log")).is_ok());
         assert!(validate_path(Path::new("jobs/myjob/output.json")).is_ok());
 
-        // Traversal attempts
         assert!(validate_path(Path::new("../secret.txt")).is_err());
         assert!(validate_path(Path::new("data/../../etc/passwd")).is_err());
         assert!(validate_path(Path::new("/etc/passwd")).is_err());
 
-        // Invalid extensions
         assert!(validate_path(Path::new("data.exe")).is_err());
         assert!(validate_path(Path::new("data.sh")).is_err());
         assert!(validate_path(Path::new("data")).is_err());
@@ -258,103 +351,93 @@ mod tests {
 
     #[test]
     fn test_io_rotation() {
-        smol::block_on(async {
-            let current_dir = std::env::current_dir().unwrap();
-            let test_dir = current_dir.join("target").join("test_io_rotation");
-            let _ = fs::remove_dir_all(&test_dir);
-            fs::create_dir_all(&test_dir).unwrap();
+        let current_dir = std::env::current_dir().unwrap();
+        let test_dir = current_dir.join("target").join("test_grok_io_rotation");
+        let _ = fs::remove_dir_all(&test_dir);
+        fs::create_dir_all(&test_dir).unwrap();
 
-            let file_path = test_dir.join("test.log");
+        let file_path = test_dir.join("test.log");
+        let mut files = IndexMap::new();
 
-            let (tx, _rx) = bounded(1024);
-            let _ = IO_SENDER.set(tx);
+        let large_content = vec![b'a'; (MAX_FILE_SIZE - 5) as usize];
+        handle_task(
+            &mut files,
+            IoTask {
+                path: file_path.clone(),
+                content: large_content,
+                op: IoOp::Append,
+                add_timestamp: false,
+            },
+        )
+        .unwrap();
 
-            let mut files = HashMap::new();
+        assert!(file_path.exists());
+        assert_eq!(fs::metadata(&file_path).unwrap().len(), MAX_FILE_SIZE - 5);
 
-            // 1. Write until limit
-            let large_content = vec![b'a'; (MAX_FILE_SIZE - 5) as usize];
-            handle_task(
-                &mut files,
-                IoTask {
-                    path: file_path.clone(),
-                    content: large_content,
-                    op: IoOp::Append,
-                    add_timestamp: false,
-                },
-            )
-            .unwrap();
+        handle_task(
+            &mut files,
+            IoTask {
+                path: file_path.clone(),
+                content: vec![b'b'; 10],
+                op: IoOp::Append,
+                add_timestamp: false,
+            },
+        )
+        .unwrap();
 
-            assert!(file_path.exists());
-            assert_eq!(fs::metadata(&file_path).unwrap().len(), MAX_FILE_SIZE - 5);
+        assert!(file_path.exists());
+        assert_eq!(fs::metadata(&file_path).unwrap().len(), 10);
 
-            // 2. Trigger rotation
-            handle_task(
-                &mut files,
-                IoTask {
-                    path: file_path.clone(),
-                    content: vec![b'b'; 10],
-                    op: IoOp::Append,
-                    add_timestamp: false,
-                },
-            )
-            .unwrap();
-
-            assert!(file_path.exists());
-            assert_eq!(fs::metadata(&file_path).unwrap().len(), 10);
-
-            // Find the rotated file (it will have a timestamp)
-            let mut rotated_found = false;
-            if let Ok(read_dir) = fs::read_dir(&test_dir) {
-                for entry in read_dir.flatten() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if name.starts_with("test.2") && name.ends_with(".log") {
-                        rotated_found = true;
-                        assert_eq!(entry.metadata().unwrap().len(), MAX_FILE_SIZE - 5);
-                    }
+        let mut rotated_found = false;
+        if let Ok(read_dir) = fs::read_dir(&test_dir) {
+            for entry in read_dir.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                if path != file_path && name.starts_with("test.") && name.ends_with(".log") {
+                    rotated_found = true;
+                    assert_eq!(entry.metadata().unwrap().len(), MAX_FILE_SIZE - 5);
                 }
             }
-            assert!(rotated_found, "Timestamped rotated file not found");
-            let _ = fs::remove_dir_all(&test_dir);
-        });
+        }
+        assert!(rotated_found, "Timestamped rotated file not found");
+        let _ = fs::remove_dir_all(&test_dir);
     }
 
     #[test]
     fn test_fs_overwrite() {
-        smol::block_on(async {
-            let current_dir = std::env::current_dir().unwrap();
-            let test_dir = current_dir.join("target").join("test_io_overwrite");
-            let _ = fs::remove_dir_all(&test_dir);
-            fs::create_dir_all(&test_dir).unwrap();
+        let current_dir = std::env::current_dir().unwrap();
+        let test_dir = current_dir.join("target").join("test_grok_io_overwrite");
+        let _ = fs::remove_dir_all(&test_dir);
+        fs::create_dir_all(&test_dir).unwrap();
 
-            let file_path = test_dir.join("state.json");
-            let mut files = HashMap::new();
+        let file_path = test_dir.join("state.json");
+        let mut files = IndexMap::new();
 
-            handle_task(
-                &mut files,
-                IoTask {
-                    path: file_path.clone(),
-                    content: b"first".to_vec(),
-                    op: IoOp::Overwrite,
-                    add_timestamp: false,
-                },
-            )
-            .unwrap();
+        handle_task(
+            &mut files,
+            IoTask {
+                path: file_path.clone(),
+                content: b"first".to_vec(),
+                op: IoOp::Overwrite,
+                add_timestamp: false,
+            },
+        )
+        .unwrap();
 
-            assert_eq!(fs::read_to_string(&file_path).unwrap(), "first");
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "first");
 
-            handle_task(
-                &mut files,
-                IoTask {
-                    path: file_path.clone(),
-                    content: b"second".to_vec(),
-                    op: IoOp::Overwrite,
-                    add_timestamp: false,
-                },
-            )
-            .unwrap();
+        handle_task(
+            &mut files,
+            IoTask {
+                path: file_path.clone(),
+                content: b"second".to_vec(),
+                op: IoOp::Overwrite,
+                add_timestamp: false,
+            },
+        )
+        .unwrap();
 
-            assert_eq!(fs::read_to_string(&file_path).unwrap(), "second");
-            let _ = fs::remove_dir_all(&test_dir);
-        });
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "second");
+        let _ = fs::remove_dir_all(&test_dir);
     }
 }

@@ -254,13 +254,11 @@ pub fn listen_command() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::Debug { job_name } => {
-            crate::services::io::init();
             let res = smol::block_on(crate::scraper::runner::debug_job(&job_name));
             crate::services::utils::shutdown_system();
             res
         }
         Commands::Test { job_name, pattern } => {
-            crate::services::io::init();
             let res = crate::lua::test_runner::run_tests(job_name, pattern);
             crate::services::utils::shutdown_system();
             res

@@ -17,8 +17,6 @@ pub fn start_app() -> Result<()> {
 }
 
 pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
-    crate::services::io::init();
-
     ctrlc::set_handler(move || {
         crate::t_println!("\nShutting down gracefully...");
         crate::services::utils::shutdown_system();
@@ -46,7 +44,7 @@ pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(2)
-        .clamp(1, 64);
+        .clamp(2, 64);
 
     for _ in 0..thread_count {
         let ex = Arc::clone(&ex);
