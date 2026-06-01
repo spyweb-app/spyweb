@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -22,7 +23,7 @@ const DEFAULT_HEADERS: &[(&str, &str)] = &[
         "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
     ),
     ("Accept-Language", "en-US,en;q=0.9"),
-    ("Accept-Encoding", "gzip, deflate, br"),
+    ("Accept-Encoding", "gzip, deflate"),
     (
         "sec-ch-ua",
         r#""Chromium";v="148", "Google Chrome";v="148", "Not-A.Brand";v="24""#,
@@ -40,7 +41,7 @@ const DEFAULT_HEADERS: &[(&str, &str)] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestConfig {
     pub url: String,
-    pub headers: IndexMap<String, String>,
+    pub headers: Arc<IndexMap<String, String>>,
 }
 
 impl RequestConfig {
@@ -60,7 +61,7 @@ impl RequestConfig {
         }
         Self {
             url: job.url.clone(),
-            headers,
+            headers: Arc::new(headers),
         }
     }
 }
@@ -191,7 +192,7 @@ impl RequestHandler {
 
         let mut request = agent.get(&req.url);
 
-        for (name, value) in &req.headers {
+        for (name, value) in req.headers.iter() {
             request = request.header(name, value);
         }
 

@@ -2,6 +2,7 @@ use anyhow::Result;
 use indexmap::IndexMap;
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::scraper::extractor::ExtractedItem;
 use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
@@ -13,7 +14,7 @@ pub fn request_to_lua(lua: &Lua, req: &RequestConfig) -> Result<Table> {
     table.set("url", req.url.as_str())?;
 
     let headers = lua.create_table()?;
-    for (k, v) in &req.headers {
+    for (k, v) in req.headers.iter() {
         headers.set(k.as_str(), v.as_str())?;
     }
     table.set("headers", headers)?;
@@ -24,14 +25,14 @@ pub fn request_to_lua(lua: &Lua, req: &RequestConfig) -> Result<Table> {
 pub fn lua_to_request(table: Table, original: RequestConfig) -> Result<RequestConfig> {
     let url: String = table.get::<Option<String>>("url")?.unwrap_or(original.url);
 
-    let headers: IndexMap<String, String> = match table.get::<Option<Table>>("headers")? {
+    let headers: Arc<IndexMap<String, String>> = match table.get::<Option<Table>>("headers")? {
         Some(h) => {
             let mut map = IndexMap::new();
             for pair in h.pairs::<String, String>() {
                 let (k, v) = pair?;
                 map.insert(k, v);
             }
-            map
+            Arc::new(map)
         }
         None => original.headers,
     };

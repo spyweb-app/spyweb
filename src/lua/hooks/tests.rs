@@ -43,7 +43,7 @@ end
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com".into(),
-            headers: IndexMap::new(),
+            headers: Arc::new(IndexMap::new()),
         },
         proxy: None,
         result: Ok(RequestResult {

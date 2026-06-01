@@ -4,6 +4,7 @@ use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
 use indexmap::IndexMap;
 use mlua::{Lua, Table};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[test]
 fn test_request_config_roundtrip() {
@@ -12,7 +13,7 @@ fn test_request_config_roundtrip() {
     headers.insert("User-Agent".into(), "SpyWeb".into());
     let req = RequestConfig {
         url: "https://example.com".into(),
-        headers,
+        headers: Arc::new(headers),
     };
 
     let t = request_to_lua(&lua, &req).unwrap();
@@ -52,7 +53,7 @@ fn test_response_roundtrip() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com".into(),
-            headers: IndexMap::from([("User-Agent".into(), "SpyWeb".into())]),
+            headers: Arc::new(IndexMap::from([("User-Agent".into(), "SpyWeb".into())])),
         },
         proxy: None,
         result: Ok(res.clone()),
@@ -88,7 +89,7 @@ fn test_fetch_error_envelope_can_be_turned_into_response() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com/products".into(),
-            headers: IndexMap::from([("Accept".into(), "text/html".into())]),
+            headers: Arc::new(IndexMap::from([("Accept".into(), "text/html".into())])),
         },
         proxy: Some("http://proxy-1:8080".into()),
         result: Err("request failed for job 'test': dns lookup failed".into()),
@@ -135,7 +136,7 @@ fn test_fetch_error_backcompat_top_level_response_still_works() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com".into(),
-            headers: IndexMap::new(),
+            headers: Arc::new(IndexMap::new()),
         },
         proxy: None,
         result: Err("request failed for job 'test': timed out".into()),
@@ -169,7 +170,7 @@ fn test_http_error_response_has_response_and_not_ok() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com/protected".into(),
-            headers: IndexMap::new(),
+            headers: Arc::new(IndexMap::new()),
         },
         proxy: None,
         result: Ok(RequestResult {
