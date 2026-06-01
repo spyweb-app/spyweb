@@ -44,7 +44,7 @@ pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(2)
-        .clamp(2, 64);
+        .clamp(1, 64);
 
     for _ in 0..thread_count {
         let ex = Arc::clone(&ex);
@@ -52,16 +52,17 @@ pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
         thread::spawn(move || smol::block_on(ex.run(s.recv())));
     }
 
-    let server_db = Arc::clone(&db);
-    let server_active_jobs = Arc::clone(&active_job_ids);
-    ex.spawn(async move {
-        let server = WebServer::new(server_db, server_active_jobs);
-        let addr = crate::config::get_base_url_with_override(port_override);
-        if let Err(e) = server.listen(&addr) {
-            crate::t_eprintln!("Server error: {}", e);
-        }
-    })
-    .detach();
+    {
+        let server_db = Arc::clone(&db);
+        let server_active_jobs = Arc::clone(&active_job_ids);
+        thread::spawn(move || {
+            let server = WebServer::new(server_db, server_active_jobs);
+            let addr = crate::config::get_base_url_with_override(port_override);
+            if let Err(e) = server.listen(&addr) {
+                crate::t_eprintln!("Server error: {}", e);
+            }
+        });
+    }
 
     let (reload_tx, reload_rx) = smol::channel::unbounded::<()>();
     thread::spawn(move || {
