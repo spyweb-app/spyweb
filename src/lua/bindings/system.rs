@@ -99,6 +99,28 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
             })?,
         )?;
 
+        let read_dir = dir.clone();
+        lua.globals().set(
+            "fs_read",
+            lua.create_async_function(move |_, path_str: String| {
+                let read_dir = read_dir.clone();
+                async move {
+                    if std::path::Path::new(&path_str).is_absolute() {
+                        return Err(mlua::Error::runtime("Absolute paths are not allowed"));
+                    }
+                    let path = read_dir.join(&path_str);
+                    crate::services::io::validate_path(&path)
+                        .map_err(|e| mlua::Error::runtime(format!("fs_read rejected: {e}")))?;
+                    let result = smol::unblock(move || std::fs::read_to_string(&path)).await;
+                    match result {
+                        Ok(content) => Ok(Some(content)),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                        Err(e) => Err(mlua::Error::runtime(format!("fs_read failed: {e}"))),
+                    }
+                }
+            })?,
+        )?;
+
         #[cfg(feature = "luau")]
         {
             let require_dir = dir.clone();

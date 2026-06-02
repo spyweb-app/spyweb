@@ -99,6 +99,7 @@
                                 <li><a href="#log">log</a></li>
                                 <li><a href="#fs_append">fs_append</a></li>
                                 <li><a href="#fs_overwrite">fs_overwrite</a></li>
+                                <li><a href="#fs_read">fs_read</a></li>
                                 <li><a href="#env_get">env_get</a></li>
                                 <li><a href="#selector_matches">selector_matches</a></li>
                                 <li><a href="#last_fetch">last_fetch</a></li>
@@ -714,14 +715,6 @@ end</code></pre>
                             <span class="tag is-info mr-2">7</span> before_store(items)
                         </h3>
                         <div class="content">
-                            <div class="notification is-danger">
-                                <strong>⚠️ Footgun warning:</strong> Items dropped by <code>before_store</code>
-                                returning nil never enter the database. This means they will <strong>appear as
-                                    new
-                                    again</strong> on the next run, because the DB has no record of them. This
-                                is
-                                intentional but can cause infinite notification loops if misused.
-                            </div>
                             <p>Last chance to drop items before dedup + insert. Return <code>nil</code> to skip
                                 storing
                                 <strong>and</strong> notifying.
@@ -1119,13 +1112,26 @@ end</code></pre>
                             <p>Replaces the entire content of a file in the job's directory. Ideal for keeping a
                                 "latest"
                                 snapshot of your scraping results.</p>
-                            <pre><code class="language-lua">function before_store(items)
-    local state = json_encode({ 
-        last_run = os.date(), 
-        count = #items 
-    })
-    fs_overwrite("latest_run.json", state)
-    return items
+                            <pre><code class="language-lua">function after_fetch(fetch_result)
+    if fetch_result.response then
+        local etag = fetch_result.response.headers["ETag"]
+        if etag then
+            fs_overwrite("last_response.json", json_encode({ etag = etag }))
+        end
+    end
+    return fetch_result
+end</code></pre>
+
+                            <h3 class="title is-4" id="fs_read"><code>fs_read(filename)</code> <span class="tag is-small is-dark">async</span></h3>
+                            <p>Reads a file from the job's directory and returns its content as a string. Returns
+                                <code>nil</code> if the file does not exist.</p>
+                            <pre><code class="language-lua">function before_fetch(request)
+    local cached = fs_read("last_response.json")
+    if cached then
+        local data = json_decode(cached)
+        request.headers["If-None-Match"] = data.etag
+    end
+    return request
 end</code></pre>
 
                             <h3 class="title is-4" id="env_get"><code>env_get(key)</code> <span class="tag is-small is-dark">sync</span></h3>
@@ -1886,13 +1892,6 @@ end</code></pre>
                                         <td>Hook errors are logged to stderr and skipped. The pipeline continues
                                             with
                                             the original data. A broken script never kills a job.</td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>before_store footgun</strong></td>
-                                        <td>Items dropped by <code>before_store</code> have no DB record and will
-                                            reappear as new next run. Use <code>filter_item</code> for permanent
-                                            drops.
-                                        </td>
                                     </tr>
                                     <tr>
                                         <td><strong>Threading</strong></td>

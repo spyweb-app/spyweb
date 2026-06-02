@@ -266,7 +266,7 @@ fn prune_rotations(parent: &Path, stem: &str, extension: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_path(path: &Path) -> Result<()> {
+pub(crate) fn validate_path(path: &Path) -> Result<()> {
     let allowed_extensions = ["csv", "json", "jsonl", "txt", "log"];
     let ext = path
         .extension()

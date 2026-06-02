@@ -218,7 +218,6 @@ before_webhook(payload)       ← reshape or silence webhook POSTs
 ### Important Behaviors
 
 - **`filter_item` vs keywords** — They are mutually exclusive. If `filter_item()` exists, the built-in keyword filter does not run.
-- **`before_store` warning** — Items dropped here never enter the DB and **will reappear as new** on the next run.
 - **`before_notify`** — Items are already stored when this runs. Dropping here only silences the notification.
 - **Lua storage** — `store_*` is job-scoped persistent state. `global_store_*` is shared across jobs. Both survive hot-reload and restart.
 - **Globals persist** — Plain Lua globals survive across runs only while the job process stays alive. Hot-reload resets them.

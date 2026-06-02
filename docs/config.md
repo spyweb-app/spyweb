@@ -169,7 +169,8 @@ SpyWeb provides safe, non-blocking file operations for hooks. These operations a
 - **`log(message)`**: Appends a timestamped line to `hook.log`.
 - **`fs_append(filename, content)`**: Appends raw content to a file. Useful for CSV/JSONL exports.
 - **`fs_overwrite(filename, content)`**: Replaces a file's content. Ideal for saving `latest_state.json`.
+- **`fs_read(filename)`**: Reads a file and returns its content as a string, or `nil` if the file does not exist.
 
-> **Security Note:** Only `.csv`, `.json`, `.jsonl`, `.txt`, and `.log` extensions are allowed. Absolute paths and directory traversal (`../`) are strictly prohibited.
+> **Security Note:** Only `.csv`, `.json`, `.jsonl`, `.txt`, and `.log` extensions are allowed. Absolute paths and directory traversal (`../`) are strictly prohibited. All paths are resolved relative to the job directory.
 
 For a full reference of all 9 hook stages and built-in Lua functions like `dump()`, `http_get()`, and `store_set()`, see the [Master Guide](https://docs.spyweb.app/).

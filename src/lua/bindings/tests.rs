@@ -657,3 +657,46 @@ fn test_cdp_page_helpers_log_and_continue_on_page_failures() {
     .exec()
     .unwrap();
 }
+
+#[test]
+fn test_fs_read_binding() {
+    let current_dir = std::env::current_dir().unwrap();
+    let test_dir = current_dir.join("target").join("test_fs_read_binding");
+    let job_dir = test_dir.join("myjob");
+    std::fs::create_dir_all(&job_dir).unwrap();
+
+    let result = smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, Some(job_dir.clone())).unwrap();
+
+        lua.load("fs_overwrite(\"test.json\", \"hello world\")")
+            .exec_async()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let content: Option<String> = lua
+            .load(r#"return fs_read("test.json")"#)
+            .eval_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        assert_eq!(content.as_deref(), Some("hello world"));
+
+        let missing: Option<String> = lua
+            .load(r#"return fs_read("nope.json")"#)
+            .eval_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        assert_eq!(missing, None);
+
+        let err: mlua::Result<String> = lua
+            .load(r#"return fs_read("/etc/passwd")"#)
+            .eval_async()
+            .await;
+        assert!(err.is_err(), "absolute paths should be rejected");
+
+        Ok::<_, String>(())
+    });
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+    result.unwrap();
+}
