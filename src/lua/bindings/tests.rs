@@ -40,16 +40,36 @@ fn test_http_bindings() {
             } else {
                 rouille::Response::text("GET-OK!")
             }
-        } else if request.method() == "POST" {
-            let mut body = String::new();
+        } else if request.method() == "HEAD" {
+            rouille::Response::text("HEAD-OK!").with_unique_header("X-Test", "head-check")
+        } else if request.method() == "POST"
+            && request
+                .header("Content-Type")
+                .map_or(false, |ct| ct.starts_with("multipart/form-data"))
+        {
+            let mut body = Vec::new();
             if let Some(mut reader) = request.data() {
-                let _ = reader.read_to_string(&mut body);
+                let _ = reader.read_to_end(&mut body);
             }
-            assert_eq!(body, "my-body");
+            let body_str = String::from_utf8_lossy(&body);
+            if body_str.contains("my-file-content") && body_str.contains("my-caption") {
+                rouille::Response::text("MULTIPART-OK!")
+            } else {
+                rouille::Response::text("MULTIPART-RECEIVED")
+            }
+        } else if request.method() == "POST" {
+            let mut body = Vec::new();
+            if let Some(mut reader) = request.data() {
+                let _ = reader.read_to_end(&mut body);
+            }
             if request.header("Content-Type") == Some("application/json") {
                 rouille::Response::text("POST-OK-JSON!")
-            } else {
+            } else if body == b"my-body" {
                 rouille::Response::text("POST-OK!")
+            } else if body == b"binary-data\x00\xff" {
+                rouille::Response::text("BINARY-OK!")
+            } else {
+                rouille::Response::text("POST-UNKNOWN!")
             }
         } else {
             rouille::Response::empty_404()
@@ -88,6 +108,62 @@ fn test_http_bindings() {
         let res: mlua::Table = lua.load(&code_post_headers).eval_async().await.unwrap();
         assert_eq!(res.get::<String>("body").unwrap(), "POST-OK-JSON!");
         assert_eq!(res.get::<u16>("status").unwrap(), 200);
+
+        // Test http_request with GET
+        let code_req_get = format!(r#"http_request({{ url = "http://127.0.0.1:{}/" }})"#, port);
+        let res: mlua::Table = lua.load(&code_req_get).eval_async().await.unwrap();
+        assert_eq!(res.get::<String>("body").unwrap(), "GET-OK!");
+        assert_eq!(res.get::<u16>("status").unwrap(), 200);
+
+        // Test http_request with POST
+        let code_req_post = format!(
+            r#"http_request({{ method = "POST", url = "http://127.0.0.1:{}/", body = "my-body" }})"#,
+            port
+        );
+        let res: mlua::Table = lua.load(&code_req_post).eval_async().await.unwrap();
+        assert_eq!(res.get::<String>("body").unwrap(), "POST-OK!");
+        assert_eq!(res.get::<u16>("status").unwrap(), 200);
+
+        // Test http_request with HEAD
+        let code_req_head = format!(
+            r#"http_request({{ method = "HEAD", url = "http://127.0.0.1:{}/" }})"#,
+            port
+        );
+        let res: mlua::Table = lua.load(&code_req_head).eval_async().await.unwrap();
+        assert_eq!(res.get::<u16>("status").unwrap(), 200);
+        assert_eq!(res.get::<String>("body").unwrap(), "");
+
+        // Test http_request with binary body
+        let code_binary = format!(
+            r#"http_request({{ method = "POST", url = "http://127.0.0.1:{}/", body = "binary-data\x00\xff" }})"#,
+            port
+        );
+        let res: mlua::Table = lua.load(&code_binary).eval_async().await.unwrap();
+        assert_eq!(res.get::<String>("body").unwrap(), "BINARY-OK!");
+        assert_eq!(res.get::<u16>("status").unwrap(), 200);
+
+        // Test http_multipart with text fields
+        let code_multi_text = format!(
+            r#"http_multipart("http://127.0.0.1:{}/", {{ caption = "my-caption", desc = "hello" }})"#,
+            port
+        );
+        let res: mlua::Table = lua.load(&code_multi_text).eval_async().await.unwrap();
+        // Just verify it reached the server and got a response
+        assert_eq!(res.get::<u16>("status").unwrap(), 200);
+
+        // Test http_multipart with file field
+        let code_multi_file = format!(
+            r#"
+            local res = http_multipart("http://127.0.0.1:{0}/", {{
+                file = {{ content = "my-file-content", filename = "test.txt", type = "text/plain" }},
+                caption = "my-caption"
+            }})
+            assert(res.status == 200)
+            assert(res.body == "MULTIPART-OK!")
+            "#,
+            port
+        );
+        lua.load(&code_multi_file).exec_async().await.unwrap();
     });
 }
 

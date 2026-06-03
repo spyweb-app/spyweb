@@ -13,6 +13,7 @@ fn test_request_config_roundtrip() {
     headers.insert("User-Agent".into(), "SpyWeb".into());
     let req = RequestConfig {
         url: "https://example.com".into(),
+        method: "HEAD".into(),
         headers: Arc::new(headers),
     };
 
@@ -22,6 +23,7 @@ fn test_request_config_roundtrip() {
     lua.load(
         r#"
         req.url = "https://example.com/mutated"
+        req.method = "GET"
         req.headers["Authorization"] = "Bearer token"
     "#,
     )
@@ -32,6 +34,7 @@ fn test_request_config_roundtrip() {
     let final_req = lua_to_request(t2, req).unwrap();
 
     assert_eq!(final_req.url, "https://example.com/mutated");
+    assert_eq!(final_req.method, "GET");
     assert_eq!(final_req.headers.get("User-Agent").unwrap(), "SpyWeb");
     assert_eq!(
         final_req.headers.get("Authorization").unwrap(),
@@ -53,6 +56,7 @@ fn test_response_roundtrip() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com".into(),
+            method: "GET".into(),
             headers: Arc::new(IndexMap::from([("User-Agent".into(), "SpyWeb".into())])),
         },
         proxy: None,
@@ -89,6 +93,7 @@ fn test_fetch_error_envelope_can_be_turned_into_response() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com/products".into(),
+            method: "GET".into(),
             headers: Arc::new(IndexMap::from([("Accept".into(), "text/html".into())])),
         },
         proxy: Some("http://proxy-1:8080".into()),
@@ -136,6 +141,7 @@ fn test_fetch_error_backcompat_top_level_response_still_works() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com".into(),
+            method: "GET".into(),
             headers: Arc::new(IndexMap::new()),
         },
         proxy: None,
@@ -170,6 +176,7 @@ fn test_http_error_response_has_response_and_not_ok() {
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com/protected".into(),
+            method: "GET".into(),
             headers: Arc::new(IndexMap::new()),
         },
         proxy: None,

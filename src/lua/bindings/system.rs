@@ -45,6 +45,7 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
                         content: msg.into_bytes(),
                         op: crate::services::io::IoOp::Append,
                         add_timestamp: true,
+                        reply: None,
                     };
                     crate::services::io::send_task(task)
                         .await
@@ -68,6 +69,7 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
                         content: content.into_bytes(),
                         op: crate::services::io::IoOp::Append,
                         add_timestamp: false,
+                        reply: None,
                     };
                     crate::services::io::send_task(task)
                         .await
@@ -91,6 +93,7 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
                         content: content.into_bytes(),
                         op: crate::services::io::IoOp::Overwrite,
                         add_timestamp: false,
+                        reply: None,
                     };
                     crate::services::io::send_task(task)
                         .await
@@ -116,6 +119,29 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
                         Ok(content) => Ok(Some(content)),
                         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
                         Err(e) => Err(mlua::Error::runtime(format!("fs_read failed: {e}"))),
+                    }
+                }
+            })?,
+        )?;
+
+        let read_binary_dir = dir.clone();
+        lua.globals().set(
+            "fs_read_binary",
+            lua.create_async_function(move |_, path_str: String| {
+                let read_binary_dir = read_binary_dir.clone();
+                async move {
+                    if std::path::Path::new(&path_str).is_absolute() {
+                        return Err(mlua::Error::runtime("Absolute paths are not allowed"));
+                    }
+                    let path = read_binary_dir.join(&path_str);
+                    crate::services::io::validate_path(&path).map_err(|e| {
+                        mlua::Error::runtime(format!("fs_read_binary rejected: {e}"))
+                    })?;
+                    let result = smol::unblock(move || std::fs::read(&path)).await;
+                    match result {
+                        Ok(content) => Ok(Some(content)),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                        Err(e) => Err(mlua::Error::runtime(format!("fs_read_binary failed: {e}"))),
                     }
                 }
             })?,

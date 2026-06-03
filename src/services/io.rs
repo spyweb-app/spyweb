@@ -18,12 +18,25 @@ pub enum IoOp {
     Overwrite,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct IoTask {
     pub path: PathBuf,
     pub content: Vec<u8>,
     pub op: IoOp,
     pub add_timestamp: bool,
+    pub reply: Option<Sender<Result<()>>>,
+}
+
+impl Clone for IoTask {
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            content: self.content.clone(),
+            op: self.op.clone(),
+            add_timestamp: self.add_timestamp,
+            reply: None,
+        }
+    }
 }
 
 static IO_SERVICE: OnceLock<RwLock<IoService>> = OnceLock::new();
@@ -86,21 +99,25 @@ fn ensure_sender() -> Sender<IoTask> {
     svc.valid_sender().unwrap_or_else(|| svc.start())
 }
 
-pub async fn send_task(task: IoTask) -> Result<()> {
+pub async fn send_task(mut task: IoTask) -> Result<()> {
+    let (tx, rx) = bounded(1);
+    task.reply = Some(tx);
+
     let sender = ensure_sender();
-    match sender.send(task).await {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            let sender = {
-                let mut svc = service().write().unwrap_or_else(|e| e.into_inner());
-                svc.start()
-            };
-            sender
-                .send(e.0)
-                .await
-                .map_err(|_| anyhow::anyhow!("IO worker channel closed"))
-        }
+    if let Err(e) = sender.send(task).await {
+        let sender = {
+            let mut svc = service().write().unwrap_or_else(|e| e.into_inner());
+            svc.start()
+        };
+        sender
+            .send(e.0)
+            .await
+            .map_err(|_| anyhow::anyhow!("IO worker channel closed"))?;
     }
+
+    rx.recv()
+        .await
+        .map_err(|_| anyhow::anyhow!("IO worker dropped reply channel"))?
 }
 
 pub fn shutdown() {
@@ -142,13 +159,17 @@ fn worker_main(rx: Receiver<IoTask>) {
             break;
         };
 
-        if let Err(e) = handle_task(&mut files, task) {
-            crate::t_eprintln!("IO Worker error: {}", e);
+        let reply = task.reply.clone();
+        let res = handle_task(&mut files, task);
+        if let Some(tx) = reply {
+            let _ = smol::block_on(tx.send(res));
         }
 
         while let Ok(task) = rx.try_recv() {
-            if let Err(e) = handle_task(&mut files, task) {
-                crate::t_eprintln!("IO Worker error: {}", e);
+            let reply = task.reply.clone();
+            let res = handle_task(&mut files, task);
+            if let Some(tx) = reply {
+                let _ = smol::block_on(tx.send(res));
             }
         }
     }
@@ -367,6 +388,7 @@ mod tests {
                 content: large_content,
                 op: IoOp::Append,
                 add_timestamp: false,
+                reply: None,
             },
         )
         .unwrap();
@@ -381,6 +403,7 @@ mod tests {
                 content: vec![b'b'; 10],
                 op: IoOp::Append,
                 add_timestamp: false,
+                reply: None,
             },
         )
         .unwrap();
@@ -420,6 +443,7 @@ mod tests {
                 content: b"first".to_vec(),
                 op: IoOp::Overwrite,
                 add_timestamp: false,
+                reply: None,
             },
         )
         .unwrap();
@@ -433,6 +457,7 @@ mod tests {
                 content: b"second".to_vec(),
                 op: IoOp::Overwrite,
                 add_timestamp: false,
+                reply: None,
             },
         )
         .unwrap();

@@ -43,6 +43,7 @@ end
     let attempt = FetchAttempt {
         request: RequestConfig {
             url: "https://example.com".into(),
+            method: "GET".into(),
             headers: Arc::new(IndexMap::new()),
         },
         proxy: None,
@@ -105,6 +106,7 @@ end
 
     let req = RequestConfig {
         url: "https://example.com".into(),
+        method: "GET".into(),
         headers: Default::default(),
     };
 
@@ -125,6 +127,7 @@ end
     // Test Lua-returned error
     let req_fail = RequestConfig {
         url: "https://fail.com".into(),
+        method: "GET".into(),
         headers: Default::default(),
     };
     let attempt_fail = smol::block_on(hooks.override_fetch(req_fail)).unwrap();
@@ -208,6 +211,7 @@ end
 
     let req = RequestConfig {
         url: "https://example.com".into(),
+        method: "GET".into(),
         headers: Default::default(),
     };
 
@@ -281,6 +285,7 @@ end
 
     let req = RequestConfig {
         url: "https://example.com".into(),
+        method: "GET".into(),
         headers: Default::default(),
     };
 

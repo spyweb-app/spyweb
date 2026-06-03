@@ -12,6 +12,7 @@ use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
 pub fn request_to_lua(lua: &Lua, req: &RequestConfig) -> Result<Table> {
     let table = lua.create_table()?;
     table.set("url", req.url.as_str())?;
+    table.set("method", req.method.as_str())?;
 
     let headers = lua.create_table()?;
     for (k, v) in req.headers.iter() {
@@ -24,6 +25,9 @@ pub fn request_to_lua(lua: &Lua, req: &RequestConfig) -> Result<Table> {
 
 pub fn lua_to_request(table: Table, original: RequestConfig) -> Result<RequestConfig> {
     let url: String = table.get::<Option<String>>("url")?.unwrap_or(original.url);
+    let method: String = table
+        .get::<Option<String>>("method")?
+        .unwrap_or(original.method);
 
     let headers: Arc<IndexMap<String, String>> = match table.get::<Option<Table>>("headers")? {
         Some(h) => {
@@ -37,7 +41,11 @@ pub fn lua_to_request(table: Table, original: RequestConfig) -> Result<RequestCo
         None => original.headers,
     };
 
-    Ok(RequestConfig { url, headers })
+    Ok(RequestConfig {
+        url,
+        method,
+        headers,
+    })
 }
 
 pub fn response_to_lua(lua: &Lua, res: &RequestResult) -> Result<Table> {

@@ -41,6 +41,7 @@ const DEFAULT_HEADERS: &[(&str, &str)] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestConfig {
     pub url: String,
+    pub method: String,
     pub headers: Arc<IndexMap<String, String>>,
 }
 
@@ -61,6 +62,7 @@ impl RequestConfig {
         }
         Self {
             url: job.url.clone(),
+            method: "GET".into(),
             headers: Arc::new(headers),
         }
     }
@@ -190,31 +192,60 @@ impl RequestHandler {
             }
         };
 
-        let mut request = agent.get(&req.url);
-
-        for (name, value) in req.headers.iter() {
-            request = request.header(name, value);
-        }
-
-        let result = request
-            .call()
-            .with_context(|| format!("request failed for job '{}'", job.name))
-            .and_then(|mut response| {
-                let status = response.status().as_u16();
-                let headers = flatten_headers(response.headers());
-                let body = response
-                    .body_mut()
-                    .read_to_string()
-                    .context("failed to read response body")?;
-
-                Ok(RequestResult {
-                    url: req.url.clone(),
-                    status,
-                    headers,
-                    body,
-                    proxy: selected_proxy.clone(),
-                })
-            });
+        let result = match req.method.to_uppercase().as_str() {
+            "HEAD" | "DELETE" => {
+                let mut request = match req.method.to_uppercase().as_str() {
+                    "HEAD" => agent.head(&req.url),
+                    _ => agent.delete(&req.url),
+                };
+                for (name, value) in req.headers.iter() {
+                    request = request.header(name, value);
+                }
+                request
+                    .call()
+                    .with_context(|| format!("request failed for job '{}'", job.name))
+                    .and_then(|mut response| {
+                        let status = response.status().as_u16();
+                        let headers = flatten_headers(response.headers());
+                        let body = response
+                            .body_mut()
+                            .read_to_string()
+                            .context("failed to read response body")?;
+                        Ok(RequestResult {
+                            url: req.url.clone(),
+                            status,
+                            headers,
+                            body,
+                            proxy: selected_proxy.clone(),
+                        })
+                    })
+            }
+            _ => {
+                // GET (default) and any other method fall through to a standard GET
+                let mut request = agent.get(&req.url);
+                for (name, value) in req.headers.iter() {
+                    request = request.header(name, value);
+                }
+                request
+                    .call()
+                    .with_context(|| format!("request failed for job '{}'", job.name))
+                    .and_then(|mut response| {
+                        let status = response.status().as_u16();
+                        let headers = flatten_headers(response.headers());
+                        let body = response
+                            .body_mut()
+                            .read_to_string()
+                            .context("failed to read response body")?;
+                        Ok(RequestResult {
+                            url: req.url.clone(),
+                            status,
+                            headers,
+                            body,
+                            proxy: selected_proxy.clone(),
+                        })
+                    })
+            }
+        };
 
         FetchAttempt {
             request: req.clone(),
