@@ -89,6 +89,8 @@
                                 <li><a href="#storage">Persistent Storage</a></li>
                                 <li><a href="#http_get">http_get</a></li>
                                 <li><a href="#http_post">http_post</a></li>
+                                <li><a href="#http_request">http_request</a></li>
+                                <li><a href="#http_multipart">http_multipart</a></li>
                                 <li><a href="#json_encode">json_encode</a></li>
                                 <li><a href="#json_decode">json_decode</a></li>
                                 <li><a href="#defer">defer</a></li>
@@ -100,6 +102,7 @@
                                 <li><a href="#fs_append">fs_append</a></li>
                                 <li><a href="#fs_overwrite">fs_overwrite</a></li>
                                 <li><a href="#fs_read">fs_read</a></li>
+                                <li><a href="#fs_read_binary">fs_read_binary</a></li>
                                 <li><a href="#env_get">env_get</a></li>
                                 <li><a href="#selector_matches">selector_matches</a></li>
                                 <li><a href="#last_fetch">last_fetch</a></li>
@@ -995,6 +998,91 @@ end</code></pre>
     ["Accept"] = "application/json"
 })</code></pre>
 
+                            <h3 class="title is-4" id="http_request"><code>http_request(options)</code> <span class="tag is-small is-dark">async</span></h3>
+                            <p>Performs an arbitrary HTTP request with full control over method, URL, body,
+                                and headers. The <code>options</code> argument is a Lua table with these fields:
+                            </p>
+                            <div class="table-container">
+                                <table class="table is-bordered is-fullwidth">
+                                    <thead>
+                                        <tr>
+                                            <th>Field</th>
+                                            <th>Type</th>
+                                            <th>Required</th>
+                                            <th>Description</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td><code>method</code></td>
+                                            <td>string</td>
+                                            <td>Yes</td>
+                                            <td>HTTP method (GET, HEAD, POST, PUT, DELETE, etc.)</td>
+                                        </tr>
+                                        <tr>
+                                            <td><code>url</code></td>
+                                            <td>string</td>
+                                            <td>Yes</td>
+                                            <td>Target URL</td>
+                                        </tr>
+                                        <tr>
+                                            <td><code>body</code></td>
+                                            <td>string | nil</td>
+                                            <td>No</td>
+                                            <td>Request body (binary-safe, not used for GET/HEAD/DELETE)</td>
+                                        </tr>
+                                        <tr>
+                                            <td><code>headers</code></td>
+                                            <td>table | nil</td>
+                                            <td>No</td>
+                                            <td>Optional key-value header pairs</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <pre><code class="language-lua">-- HEAD request (no body)
+local resp = http_request({ method = "HEAD", url = "https://example.com" })
+
+-- POST with JSON body
+local resp = http_request({
+    method = "POST",
+    url = "https://api.example.com/data",
+    body = '{"key":"value"}',
+    headers = { ["Content-Type"] = "application/json" }
+})</code></pre>
+
+                            <h3 class="title is-4" id="http_multipart"><code>http_multipart(url, fields, [headers])</code> <span class="tag is-small is-dark">async</span></h3>
+                            <p>Performs a <code>multipart/form-data</code> POST request for file uploads.
+                                The <code>fields</code> argument is a Lua table where each value is either:
+                            </p>
+                            <ul>
+                                <li>A <strong>string</strong> — sent as a text form field.</li>
+                                <li>A <strong>table</strong> — sent as a file attachment, with these keys:
+                                    <ul>
+                                        <li><code>content</code> (required) — file bytes (binary-safe Lua string).</li>
+                                        <li><code>filename</code> (optional) — the server-side file name.</li>
+                                        <li><code>type</code> (optional) — MIME type (e.g. <code>"image/png"</code>).</li>
+                                    </ul>
+                                </li>
+                            </ul>
+                            <p>Use together with <code>page:screenshot()</code> and <code>fs_read_binary()</code> for
+                                screenshot upload workflows.</p>
+                            <pre><code class="language-lua">-- Text fields only
+http_multipart("https://api.example.com/form", {
+    name = "SpyWeb",
+    version = "1.0"
+})
+
+-- File upload (screenshot)
+local page = cdp.launch({ headless = true }):attach()
+page:open("https://example.com")
+page:screenshot("page.png", { full_page = true })
+local image_data = fs_read_binary("page.png")
+http_multipart("https://hooks.example.com/upload", {
+    screenshot = { content = image_data, filename = "page.png", type = "image/png" },
+    caption = "my screenshot"
+})</code></pre>
+
                             <h3 class="title is-4" id="json_encode"><code>json_encode(table)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Converts a Lua table or value into a JSON string. Handles nested tables, arrays,
                                 booleans, and nulls automatically using the built-in high-performance JSON
@@ -1133,6 +1221,16 @@ end</code></pre>
     end
     return request
 end</code></pre>
+
+                            <h3 class="title is-4" id="fs_read_binary"><code>fs_read_binary(filename)</code> <span class="tag is-small is-dark">async</span></h3>
+                            <p>Reads a file from the job's directory and returns its content as a binary-safe
+                                string (preserving all bytes). Returns <code>nil</code> if the file does not exist.
+                                Unlike <code>fs_read</code>, this function handles non-UTF-8 files such as images
+                                and other binary formats.</p>
+                            <pre><code class="language-lua">local png_data = fs_read_binary("screenshot.png")
+local resp = http_multipart("https://api.example.com/upload", {
+    file = { content = png_data, filename = "page.png", type = "image/png" }
+})</code></pre>
 
                             <h3 class="title is-4" id="env_get"><code>env_get(key)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Retrieves a read-only environment variable from the host system. For security, SpyWeb

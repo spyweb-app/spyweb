@@ -82,6 +82,9 @@ Tests get the same core bindings as production jobs, including:
 
 - `http_get`
 - `http_post`
+- `http_request` — generic `{ method, url, body?, headers? }`
+- `http_multipart` — multipart file uploads
+- `fs_read_binary` — binary file reads
 - storage helpers such as `store_set`, `store_get`, `global_store_set`, `global_store_get`
 - `spyweb.assert_eq`
 - `spyweb.assert_ne`
@@ -95,6 +98,12 @@ function test_fetch_remote_page()
     local res = http_get("http://127.0.0.1:8080/")
     spyweb.assert_eq(res.status, 200)
     spyweb.assert_eq(res.body, "OK")
+end
+
+function test_head_request()
+    local res = http_request({ method = "HEAD", url = "http://127.0.0.1:8080/" })
+    spyweb.assert_eq(res.status, 200)
+    spyweb.assert_eq(res.body, "")
 end
 ```
 

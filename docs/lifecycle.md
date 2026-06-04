@@ -104,6 +104,7 @@ function on_finally()
     local count = items_found or 0
     
     -- Async network calls are fully supported here
+    -- Use http_post/http_get for simple calls, or http_request for full control
     http_post("https://metrics.example.com/push", '{"items": ' .. count .. '}', {
         ["Content-Type"] = "application/json"
     })

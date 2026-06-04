@@ -157,7 +157,7 @@ Available tags: `{job_name}`, `{url}`, `{item_count}`, `{timestamp}`, `{matches}
 For advanced workflows, you can place a `hooks.lua` file in the same directory as your `config.toml`. SpyWeb will automatically detect and run these hooks during the scraping pipeline.
 
 Common use cases for hooks:
-- **`before_fetch`**: Handle pagination or custom authentication.
+- **`before_fetch`**: Handle pagination, custom authentication, or change HTTP method (set `request.method = "HEAD"`).
 - **`override_fetch`**: Use a headless browser or external API for fetching.
 - **`after_fetch`**: Recover from network errors or clean the HTML body.
 - **`override_extract`**: Parse JSON/XML APIs instead of HTML.
@@ -173,4 +173,4 @@ SpyWeb provides safe, non-blocking file operations for hooks. These operations a
 
 > **Security Note:** Only `.csv`, `.json`, `.jsonl`, `.txt`, and `.log` extensions are allowed. Absolute paths and directory traversal (`../`) are strictly prohibited. All paths are resolved relative to the job directory.
 
-For a full reference of all 9 hook stages and built-in Lua functions like `dump()`, `http_get()`, and `store_set()`, see the [Master Guide](https://docs.spyweb.app/).
+For a full reference of all 9 hook stages and built-in Lua functions like `dump()`, `http_get()`, `http_request()`, and `store_set()`, see the [Master Guide](https://docs.spyweb.app/).
