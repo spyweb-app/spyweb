@@ -35,6 +35,8 @@ fn job(selector: &str, fields: Vec<Field>, keywords: Option<Vec<&str>>) -> JobCo
         notification: None,
         headers: None,
         hash_fields: None,
+        workers: None,
+        urls: None,
     }
 }
 

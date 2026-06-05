@@ -224,14 +224,8 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
     lua.globals().set(
         "defer",
         lua.create_function(|lua, f: mlua::Function| {
-            let deferred: mlua::Table = match lua.globals().get::<mlua::Table>("__deferred") {
-                Ok(t) => t,
-                Err(_) => {
-                    let t = lua.create_table()?;
-                    lua.globals().set("__deferred", t.clone())?;
-                    t
-                }
-            };
+            let ctx: mlua::Table = lua.named_registry_value("active_ctx")?;
+            let deferred: mlua::Table = ctx.get("__deferred")?;
             deferred.push(f)?;
             Ok(())
         })?,

@@ -45,7 +45,7 @@ fn test_http_bindings() {
         } else if request.method() == "POST"
             && request
                 .header("Content-Type")
-                .map_or(false, |ct| ct.starts_with("multipart/form-data"))
+                .is_some_and(|ct| ct.starts_with("multipart/form-data"))
         {
             let mut body = Vec::new();
             if let Some(mut reader) = request.data() {

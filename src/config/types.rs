@@ -44,6 +44,10 @@ pub struct JobConfig {
     pub headers: Option<HashMap<String, String>>,
 
     pub hash_fields: Option<Vec<String>>,
+    #[serde(default)]
+    pub workers: Option<usize>,
+    #[serde(default)]
+    pub urls: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -121,6 +125,15 @@ impl JobConfig {
     pub fn id(&self) -> String {
         normalize_job_id(&self.name)
     }
+
+    pub fn worker_count(&self) -> usize {
+        self.workers.unwrap_or(1)
+    }
+
+    pub fn has_urls(&self) -> bool {
+        self.urls.as_ref().is_some_and(|urls| !urls.is_empty())
+    }
+
     pub fn field_names(&self) -> Vec<String> {
         self.fields
             .iter()

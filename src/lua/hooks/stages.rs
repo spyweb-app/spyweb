@@ -1,14 +1,14 @@
-use super::JobHooks;
+use super::*;
 use crate::lua::conversions;
 use crate::scraper::extractor::ExtractedItem;
 use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
 use anyhow::Result;
 
-fn run_deferred(lua: &mlua::Lua, hook_name: &str) {
+pub(crate) fn run_deferred(lua: &mlua::Lua, ctx: &mlua::Table, hook_name: &str) {
     loop {
-        let queue = match lua.globals().get::<mlua::Table>("__deferred") {
+        let queue = match ctx.get::<mlua::Table>("__deferred") {
             Ok(t) => t,
-            Err(_) => return, // no queue, nothing to do
+            Err(_) => return,
         };
 
         let len = queue.raw_len();
@@ -16,11 +16,12 @@ fn run_deferred(lua: &mlua::Lua, hook_name: &str) {
             return;
         }
 
-        if let Ok(fresh) = lua.create_table() {
-            let _ = lua.globals().set("__deferred", fresh);
+        if let Ok(fresh) = lua.create_table()
+            && let Ok(store) = JobHooks::ctx_store(ctx)
+        {
+            let _ = store.raw_set("__deferred", fresh);
         }
 
-        // Drain LIFO
         for i in (1..=len).rev() {
             match queue.get::<mlua::Function>(i) {
                 Ok(f) => {
@@ -37,22 +38,26 @@ fn run_deferred(lua: &mlua::Lua, hook_name: &str) {
 }
 
 impl JobHooks {
-    pub async fn before_fetch(&self, req: RequestConfig) -> Result<Option<RequestConfig>> {
-        if !self.has_before_fetch {
+    pub async fn before_fetch(
+        &self,
+        req: RequestConfig,
+        ctx: &mlua::Table,
+    ) -> Result<Option<RequestConfig>> {
+        if self.hook_mask & HOOK_BEFORE_FETCH == 0 {
             return Ok(Some(req));
         }
-        let sample = self.telemetry_stage_start().await?;
-        match self.try_before_fetch(&req).await {
+        let sample = self.telemetry_stage_start(ctx).await?;
+        match self.try_before_fetch(&req, ctx).await {
             Ok(result) => {
                 let _ = self
-                    .record_telemetry_stage("before_fetch", sample, "success", None)
+                    .record_telemetry_stage(ctx, "before_fetch", sample, "success", None)
                     .await;
                 Ok(result)
             }
             Err(e) => {
                 let rendered = self.render_and_log_hook_error("before_fetch", e);
                 let _ = self
-                    .record_telemetry_stage("before_fetch", sample, "error", Some(rendered))
+                    .record_telemetry_stage(ctx, "before_fetch", sample, "error", Some(rendered))
                     .await;
                 Ok(Some(req))
             }
@@ -62,12 +67,14 @@ impl JobHooks {
     pub(crate) async fn try_before_fetch(
         &self,
         req: &RequestConfig,
+        ctx: &mlua::Table,
     ) -> Result<Option<RequestConfig>> {
         let lua = self.lua.lock().await;
+        lua.set_named_registry_value("active_ctx", ctx.clone())?;
         let func: mlua::Function = lua.globals().get("before_fetch")?;
         let table = conversions::request_to_lua(&lua, req)?;
-        let ret = func.call_async::<mlua::Value>(table).await;
-        run_deferred(&lua, "before_fetch");
+        let ret = func.call_async::<mlua::Value>((table, ctx.clone())).await;
+        run_deferred(&lua, ctx, "before_fetch");
         match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => Ok(Some(conversions::lua_to_request(t, req.clone())?)),
@@ -76,27 +83,31 @@ impl JobHooks {
     }
 
     pub fn has_override_fetch(&self) -> bool {
-        self.has_override_fetch
+        self.hook_mask & HOOK_OVERRIDE_FETCH != 0
     }
 
-    pub async fn override_fetch(&self, req: RequestConfig) -> Result<FetchAttempt> {
-        let sample = self.telemetry_stage_start().await?;
-        match self.try_override_fetch(&req).await {
+    pub async fn override_fetch(
+        &self,
+        req: RequestConfig,
+        ctx: &mlua::Table,
+    ) -> Result<FetchAttempt> {
+        let sample = self.telemetry_stage_start(ctx).await?;
+        match self.try_override_fetch(&req, ctx).await {
             Ok(result) => {
-                self.set_last_fetch(&result).await?;
+                self.set_last_fetch(ctx, &result).await?;
                 let (status, error) = match &result.result {
                     Ok(_) => ("success", None),
                     Err(err) => ("error", Some(err.clone())),
                 };
                 let _ = self
-                    .record_telemetry_stage("override_fetch", sample, status, error)
+                    .record_telemetry_stage(ctx, "override_fetch", sample, status, error)
                     .await;
                 Ok(result)
             }
             Err(e) => {
                 let rendered = self.render_and_log_hook_error("override_fetch", e);
                 let _ = self
-                    .record_telemetry_stage("override_fetch", sample, "error", Some(rendered))
+                    .record_telemetry_stage(ctx, "override_fetch", sample, "error", Some(rendered))
                     .await;
                 Ok(FetchAttempt {
                     request: req,
@@ -107,13 +118,18 @@ impl JobHooks {
         }
     }
 
-    pub(crate) async fn try_override_fetch(&self, req: &RequestConfig) -> Result<FetchAttempt> {
+    pub(crate) async fn try_override_fetch(
+        &self,
+        req: &RequestConfig,
+        ctx: &mlua::Table,
+    ) -> Result<FetchAttempt> {
         let lua = self.lua.lock().await;
+        lua.set_named_registry_value("active_ctx", ctx.clone())?;
         let func: mlua::Function = lua.globals().get("override_fetch")?;
         let table = conversions::request_to_lua(&lua, req)?;
-        let ret = func.call_async::<mlua::Value>(table).await;
+        let ret = func.call_async::<mlua::Value>((table, ctx.clone())).await;
         let _ = lua.gc_collect();
-        run_deferred(&lua, "override_fetch");
+        run_deferred(&lua, ctx, "override_fetch");
         match ret? {
             mlua::Value::Table(t) => {
                 if let Some(err_msg) = t.get::<Option<String>>("error")? {
@@ -137,23 +153,27 @@ impl JobHooks {
         }
     }
 
-    pub async fn after_fetch(&self, attempt: FetchAttempt) -> Result<Option<RequestResult>> {
-        if !self.has_after_fetch {
+    pub async fn after_fetch(
+        &self,
+        attempt: FetchAttempt,
+        ctx: &mlua::Table,
+    ) -> Result<Option<RequestResult>> {
+        if self.hook_mask & HOOK_AFTER_FETCH == 0 {
             return attempt.result.map(Some).map_err(anyhow::Error::msg);
         }
-        let fetch_table = self.last_fetch_table(&attempt).await?;
-        let sample = self.telemetry_stage_start().await?;
-        match self.try_after_fetch(&attempt, fetch_table).await {
+        let fetch_table = self.last_fetch_table(ctx, &attempt).await?;
+        let sample = self.telemetry_stage_start(ctx).await?;
+        match self.try_after_fetch(&attempt, fetch_table, ctx).await {
             Ok(result) => {
                 let _ = self
-                    .record_telemetry_stage("after_fetch", sample, "success", None)
+                    .record_telemetry_stage(ctx, "after_fetch", sample, "success", None)
                     .await;
                 Ok(result)
             }
             Err(e) => {
                 let rendered = self.render_and_log_hook_error("after_fetch", e);
                 let _ = self
-                    .record_telemetry_stage("after_fetch", sample, "error", Some(rendered))
+                    .record_telemetry_stage(ctx, "after_fetch", sample, "error", Some(rendered))
                     .await;
                 match attempt.result {
                     Ok(res) => Ok(Some(res)),
@@ -163,20 +183,28 @@ impl JobHooks {
         }
     }
 
-    pub(crate) async fn set_last_fetch(&self, attempt: &FetchAttempt) -> Result<()> {
+    pub(crate) async fn set_last_fetch(
+        &self,
+        ctx: &mlua::Table,
+        attempt: &FetchAttempt,
+    ) -> Result<()> {
         let lua = self.lua.lock().await;
         let table = conversions::fetch_result_to_lua(&lua, attempt)?;
-        lua.globals().set("last_fetch", table)?;
+        Self::ctx_store(ctx)?.raw_set("last_fetch", table.clone())?;
         Ok(())
     }
 
-    async fn last_fetch_table(&self, attempt: &FetchAttempt) -> Result<mlua::Table> {
-        let lua = self.lua.lock().await;
-        match lua.globals().get::<mlua::Table>("last_fetch") {
+    async fn last_fetch_table(
+        &self,
+        ctx: &mlua::Table,
+        attempt: &FetchAttempt,
+    ) -> Result<mlua::Table> {
+        match ctx.get::<mlua::Table>("last_fetch") {
             Ok(table) => Ok(table),
             Err(_) => {
+                let lua = self.lua.lock().await;
                 let table = conversions::fetch_result_to_lua(&lua, attempt)?;
-                lua.globals().set("last_fetch", table.clone())?;
+                Self::ctx_store(ctx)?.raw_set("last_fetch", table.clone())?;
                 Ok(table)
             }
         }
@@ -186,11 +214,15 @@ impl JobHooks {
         &self,
         attempt: &FetchAttempt,
         fetch_table: mlua::Table,
+        ctx: &mlua::Table,
     ) -> Result<Option<RequestResult>> {
         let lua = self.lua.lock().await;
+        lua.set_named_registry_value("active_ctx", ctx.clone())?;
         let func: mlua::Function = lua.globals().get("after_fetch")?;
-        let ret = func.call_async::<mlua::Value>(fetch_table).await;
-        run_deferred(&lua, "after_fetch");
+        let ret = func
+            .call_async::<mlua::Value>((fetch_table, ctx.clone()))
+            .await;
+        run_deferred(&lua, ctx, "after_fetch");
         match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => match &attempt.result {
@@ -208,22 +240,32 @@ impl JobHooks {
     }
 
     pub fn has_override_extract(&self) -> bool {
-        self.has_override_extract
+        self.hook_mask & HOOK_OVERRIDE_EXTRACT != 0
     }
 
-    pub async fn override_extract(&self, response: &RequestResult) -> Result<Vec<ExtractedItem>> {
-        let sample = self.telemetry_stage_start().await?;
-        match self.try_override_extract(response).await {
+    pub async fn override_extract(
+        &self,
+        response: &RequestResult,
+        ctx: &mlua::Table,
+    ) -> Result<Vec<ExtractedItem>> {
+        let sample = self.telemetry_stage_start(ctx).await?;
+        match self.try_override_extract(response, ctx).await {
             Ok(result) => {
                 let _ = self
-                    .record_telemetry_stage("override_extract", sample, "success", None)
+                    .record_telemetry_stage(ctx, "override_extract", sample, "success", None)
                     .await;
                 Ok(result)
             }
             Err(e) => {
                 let rendered = self.render_and_log_hook_error("override_extract", e);
                 let _ = self
-                    .record_telemetry_stage("override_extract", sample, "error", Some(rendered))
+                    .record_telemetry_stage(
+                        ctx,
+                        "override_extract",
+                        sample,
+                        "error",
+                        Some(rendered),
+                    )
                     .await;
                 Ok(vec![])
             }
@@ -233,12 +275,14 @@ impl JobHooks {
     pub(crate) async fn try_override_extract(
         &self,
         response: &RequestResult,
+        ctx: &mlua::Table,
     ) -> Result<Vec<ExtractedItem>> {
         let lua = self.lua.lock().await;
+        lua.set_named_registry_value("active_ctx", ctx.clone())?;
         let func: mlua::Function = lua.globals().get("override_extract")?;
         let table = conversions::response_to_lua(&lua, response)?;
-        let ret = func.call_async::<mlua::Value>(table).await;
-        run_deferred(&lua, "override_extract");
+        let ret = func.call_async::<mlua::Value>((table, ctx.clone())).await;
+        run_deferred(&lua, ctx, "override_extract");
         match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(vec![]),
             mlua::Value::Table(t) => conversions::lua_to_items(t, vec![]),
@@ -246,22 +290,26 @@ impl JobHooks {
         }
     }
 
-    pub async fn after_extract(&self, items: Vec<ExtractedItem>) -> Result<Vec<ExtractedItem>> {
-        if !self.has_after_extract {
+    pub async fn after_extract(
+        &self,
+        items: Vec<ExtractedItem>,
+        ctx: &mlua::Table,
+    ) -> Result<Vec<ExtractedItem>> {
+        if self.hook_mask & HOOK_AFTER_EXTRACT == 0 {
             return Ok(items);
         }
-        let sample = self.telemetry_stage_start().await?;
-        match self.try_after_extract(&items).await {
+        let sample = self.telemetry_stage_start(ctx).await?;
+        match self.try_after_extract(&items, ctx).await {
             Ok(result) => {
                 let _ = self
-                    .record_telemetry_stage("after_extract", sample, "success", None)
+                    .record_telemetry_stage(ctx, "after_extract", sample, "success", None)
                     .await;
                 Ok(result)
             }
             Err(e) => {
                 let rendered = self.render_and_log_hook_error("after_extract", e);
                 let _ = self
-                    .record_telemetry_stage("after_extract", sample, "error", Some(rendered))
+                    .record_telemetry_stage(ctx, "after_extract", sample, "error", Some(rendered))
                     .await;
                 Ok(items)
             }
@@ -271,12 +319,14 @@ impl JobHooks {
     pub(crate) async fn try_after_extract(
         &self,
         items: &[ExtractedItem],
+        ctx: &mlua::Table,
     ) -> Result<Vec<ExtractedItem>> {
         let lua = self.lua.lock().await;
+        lua.set_named_registry_value("active_ctx", ctx.clone())?;
         let func: mlua::Function = lua.globals().get("after_extract")?;
         let table = conversions::items_to_lua(&lua, items)?;
-        let ret = func.call_async::<mlua::Value>(table).await;
-        run_deferred(&lua, "after_extract");
+        let ret = func.call_async::<mlua::Value>((table, ctx.clone())).await;
+        run_deferred(&lua, ctx, "after_extract");
         match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(vec![]),
             mlua::Value::Table(t) => conversions::lua_to_items(t, items.to_vec()),
@@ -284,15 +334,19 @@ impl JobHooks {
         }
     }
 
-    pub async fn filter_item(&self, item: ExtractedItem) -> Result<Option<ExtractedItem>> {
-        if !self.has_filter_item {
+    pub async fn filter_item(
+        &self,
+        item: ExtractedItem,
+        ctx: &mlua::Table,
+    ) -> Result<Option<ExtractedItem>> {
+        if self.hook_mask & HOOK_FILTER_ITEM == 0 {
             return Ok(Some(item));
         }
-        match self.try_filter_item(&item).await {
+        match self.try_filter_item(&item, ctx).await {
             Ok(result) => Ok(result),
             Err(e) => {
                 let rendered = self.render_and_log_hook_error("filter_item", e);
-                self.remember_filter_error(rendered).await;
+                self.remember_filter_error(ctx, rendered).await;
                 Ok(Some(item))
             }
         }
@@ -301,12 +355,14 @@ impl JobHooks {
     pub(crate) async fn try_filter_item(
         &self,
         item: &ExtractedItem,
+        ctx: &mlua::Table,
     ) -> Result<Option<ExtractedItem>> {
         let lua = self.lua.lock().await;
+        lua.set_named_registry_value("active_ctx", ctx.clone())?;
         let func: mlua::Function = lua.globals().get("filter_item")?;
         let table = conversions::item_to_lua(&lua, item)?;
-        let ret = func.call_async::<mlua::Value>(table).await;
-        run_deferred(&lua, "filter_item");
+        let ret = func.call_async::<mlua::Value>((table, ctx.clone())).await;
+        run_deferred(&lua, ctx, "filter_item");
         match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => Ok(Some(conversions::lua_to_item(t, item.clone())?)),
@@ -317,22 +373,23 @@ impl JobHooks {
     pub async fn before_store(
         &self,
         items: Vec<ExtractedItem>,
+        ctx: &mlua::Table,
     ) -> Result<Option<Vec<ExtractedItem>>> {
-        if !self.has_before_store {
+        if self.hook_mask & HOOK_BEFORE_STORE == 0 {
             return Ok(Some(items));
         }
-        let sample = self.telemetry_stage_start().await?;
-        match self.try_before_store(&items).await {
+        let sample = self.telemetry_stage_start(ctx).await?;
+        match self.try_before_store(&items, ctx).await {
             Ok(result) => {
                 let _ = self
-                    .record_telemetry_stage("before_store", sample, "success", None)
+                    .record_telemetry_stage(ctx, "before_store", sample, "success", None)
                     .await;
                 Ok(result)
             }
             Err(e) => {
                 let rendered = self.render_and_log_hook_error("before_store", e);
                 let _ = self
-                    .record_telemetry_stage("before_store", sample, "error", Some(rendered))
+                    .record_telemetry_stage(ctx, "before_store", sample, "error", Some(rendered))
                     .await;
                 Ok(Some(items))
             }
@@ -342,12 +399,14 @@ impl JobHooks {
     pub(crate) async fn try_before_store(
         &self,
         items: &[ExtractedItem],
+        ctx: &mlua::Table,
     ) -> Result<Option<Vec<ExtractedItem>>> {
         let lua = self.lua.lock().await;
+        lua.set_named_registry_value("active_ctx", ctx.clone())?;
         let func: mlua::Function = lua.globals().get("before_store")?;
         let table = conversions::items_to_lua(&lua, items)?;
-        let ret = func.call_async::<mlua::Value>(table).await;
-        run_deferred(&lua, "before_store");
+        let ret = func.call_async::<mlua::Value>((table, ctx.clone())).await;
+        run_deferred(&lua, ctx, "before_store");
         match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => Ok(Some(conversions::lua_to_items(t, items.to_vec())?)),
@@ -358,22 +417,23 @@ impl JobHooks {
     pub async fn before_notify(
         &self,
         items: Vec<ExtractedItem>,
+        ctx: &mlua::Table,
     ) -> Result<Option<Vec<ExtractedItem>>> {
-        if !self.has_before_notify {
+        if self.hook_mask & HOOK_BEFORE_NOTIFY == 0 {
             return Ok(Some(items));
         }
-        let sample = self.telemetry_stage_start().await?;
-        match self.try_before_notify(&items).await {
+        let sample = self.telemetry_stage_start(ctx).await?;
+        match self.try_before_notify(&items, ctx).await {
             Ok(result) => {
                 let _ = self
-                    .record_telemetry_stage("before_notify", sample, "success", None)
+                    .record_telemetry_stage(ctx, "before_notify", sample, "success", None)
                     .await;
                 Ok(result)
             }
             Err(e) => {
                 let rendered = self.render_and_log_hook_error("before_notify", e);
                 let _ = self
-                    .record_telemetry_stage("before_notify", sample, "error", Some(rendered))
+                    .record_telemetry_stage(ctx, "before_notify", sample, "error", Some(rendered))
                     .await;
                 Ok(Some(items))
             }
@@ -383,12 +443,14 @@ impl JobHooks {
     pub(crate) async fn try_before_notify(
         &self,
         items: &[ExtractedItem],
+        ctx: &mlua::Table,
     ) -> Result<Option<Vec<ExtractedItem>>> {
         let lua = self.lua.lock().await;
+        lua.set_named_registry_value("active_ctx", ctx.clone())?;
         let func: mlua::Function = lua.globals().get("before_notify")?;
         let table = conversions::items_to_lua(&lua, items)?;
-        let ret = func.call_async::<mlua::Value>(table).await;
-        run_deferred(&lua, "before_notify");
+        let ret = func.call_async::<mlua::Value>((table, ctx.clone())).await;
+        run_deferred(&lua, ctx, "before_notify");
         match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => Ok(Some(conversions::lua_to_items(t, items.to_vec())?)),
@@ -399,22 +461,23 @@ impl JobHooks {
     pub async fn before_webhook(
         &self,
         payload: serde_json::Value,
+        ctx: &mlua::Table,
     ) -> Result<Option<serde_json::Value>> {
-        if !self.has_before_webhook {
+        if self.hook_mask & HOOK_BEFORE_WEBHOOK == 0 {
             return Ok(Some(payload));
         }
-        let sample = self.telemetry_stage_start().await?;
-        match self.try_before_webhook(&payload).await {
+        let sample = self.telemetry_stage_start(ctx).await?;
+        match self.try_before_webhook(&payload, ctx).await {
             Ok(result) => {
                 let _ = self
-                    .record_telemetry_stage("before_webhook", sample, "success", None)
+                    .record_telemetry_stage(ctx, "before_webhook", sample, "success", None)
                     .await;
                 Ok(result)
             }
             Err(e) => {
                 let rendered = self.render_and_log_hook_error("before_webhook", e);
                 let _ = self
-                    .record_telemetry_stage("before_webhook", sample, "error", Some(rendered))
+                    .record_telemetry_stage(ctx, "before_webhook", sample, "error", Some(rendered))
                     .await;
                 Ok(Some(payload))
             }
@@ -424,12 +487,14 @@ impl JobHooks {
     pub(crate) async fn try_before_webhook(
         &self,
         payload: &serde_json::Value,
+        ctx: &mlua::Table,
     ) -> Result<Option<serde_json::Value>> {
         let lua = self.lua.lock().await;
+        lua.set_named_registry_value("active_ctx", ctx.clone())?;
         let func: mlua::Function = lua.globals().get("before_webhook")?;
         let table = conversions::json_to_lua(&lua, payload)?;
-        let ret = func.call_async::<mlua::Value>(table).await;
-        run_deferred(&lua, "before_webhook");
+        let ret = func.call_async::<mlua::Value>((table, ctx.clone())).await;
+        run_deferred(&lua, ctx, "before_webhook");
         match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
             mlua::Value::Table(t) => Ok(Some(conversions::lua_to_json(&mlua::Value::Table(t))?)),

@@ -106,6 +106,8 @@ mod tests {
             notification: None,
             headers: None,
             hash_fields: None,
+            workers: None,
+            urls: None,
         };
 
         let field_specs = vec![
@@ -146,6 +148,8 @@ mod tests {
             notification: None,
             headers: None,
             hash_fields: None,
+            workers: None,
+            urls: None,
         };
 
         let field_specs = vec![FieldSpec {

@@ -145,6 +145,8 @@ mod tests {
                 notification: None,
                 headers: None,
                 hash_fields: None,
+                workers: None,
+                urls: None,
             },
             hooks: None,
             has_hooks_file: false,

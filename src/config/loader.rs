@@ -79,6 +79,22 @@ fn validate_url(value: &str, field_name: &str, job_name: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_url_list(values: &[String], field_name: &str, job_name: &str) -> Result<()> {
+    if values.is_empty() {
+        bail!(
+            "Invalid {} for job '{}': value cannot be empty",
+            field_name,
+            job_name
+        );
+    }
+
+    for value in values {
+        validate_url(value, field_name, job_name)?;
+    }
+
+    Ok(())
+}
+
 fn validate_job_config(config: &JobConfig) -> Result<()> {
     if config.name.trim().is_empty() {
         bail!("Invalid job config: name cannot be blank");
@@ -112,7 +128,20 @@ fn validate_job_config(config: &JobConfig) -> Result<()> {
         );
     }
 
+    if let Some(workers) = config.workers
+        && workers == 0
+    {
+        bail!(
+            "Invalid job config for '{}': workers must be > 0",
+            config.name
+        );
+    }
+
     validate_url(&config.url, "url", &config.name)?;
+
+    if let Some(urls) = &config.urls {
+        validate_url_list(urls, "urls", &config.name)?;
+    }
 
     if let Some(webhook) = &config.webhook
         && webhook.enabled
@@ -373,6 +402,8 @@ mod tests {
             headers: None,
             hash_fields: hash_fields
                 .map(|fields| fields.into_iter().map(ToOwned::to_owned).collect()),
+            workers: None,
+            urls: None,
         }
     }
 

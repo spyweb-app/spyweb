@@ -1,6 +1,7 @@
 use super::JobHooks;
 use crate::cdp::browser;
 use anyhow::Result;
+use std::future::Future;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const TELEMETRY_STAGES: [(&str, &str); 14] = [
@@ -21,9 +22,78 @@ const TELEMETRY_STAGES: [(&str, &str); 14] = [
 ];
 
 pub(crate) struct TelemetrySample {
-    pub(crate) started: Instant,
-    pub(crate) offset_ms: f64,
-    pub(crate) mem_before: usize,
+    started: Instant,
+    offset_ms: f64,
+    mem_before: usize,
+}
+
+pub(crate) struct StageToken(Option<TelemetrySample>);
+
+pub(crate) struct TelemetryHandle<'a> {
+    hooks: Option<&'a JobHooks>,
+    ctx: Option<&'a mlua::Table>,
+}
+
+impl<'a> TelemetryHandle<'a> {
+    pub fn new(hooks: Option<&'a JobHooks>, ctx: Option<&'a mlua::Table>) -> Self {
+        Self { hooks, ctx }
+    }
+
+    pub fn hooks(&self) -> Option<&'a JobHooks> {
+        self.hooks
+    }
+
+    pub fn ctx(&self) -> Option<&'a mlua::Table> {
+        self.ctx
+    }
+
+    pub async fn init(&self) -> Result<()> {
+        if let (Some(h), Some(ctx)) = (self.hooks, self.ctx) {
+            h.init_telemetry(ctx).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn finalize(&self, duration: Duration) {
+        if let (Some(h), Some(ctx)) = (self.hooks, self.ctx) {
+            let _ = h.finalize_telemetry(ctx, duration).await;
+        }
+    }
+
+    pub async fn start(&self) -> StageToken {
+        match (self.hooks, self.ctx) {
+            (Some(h), Some(ctx)) => StageToken(h.telemetry_stage_start(ctx).await.ok()),
+            _ => StageToken(None),
+        }
+    }
+
+    pub async fn record(&self, name: &str, token: StageToken, status: &str, error: Option<String>) {
+        if let (Some(h), Some(ctx), Some(sample)) = (self.hooks, self.ctx, token.0) {
+            let _ = h
+                .record_telemetry_stage(ctx, name, sample, status, error)
+                .await;
+        }
+    }
+
+    pub async fn stage<T, F>(&self, name: &str, fut: F) -> Result<T>
+    where
+        F: Future<Output = Result<T>>,
+    {
+        let token = self.start().await;
+        let result = fut.await;
+        let (status, error) = match &result {
+            Ok(_) => ("success", None),
+            Err(e) => ("error", Some(e.to_string())),
+        };
+        self.record(name, token, status, error).await;
+        result
+    }
+
+    pub async fn cleanup(&self) {
+        if let (Some(h), Some(ctx)) = (self.hooks, self.ctx) {
+            h.cleanup_cycle_state(ctx).await;
+        }
+    }
 }
 
 impl JobHooks {
@@ -37,7 +107,7 @@ impl JobHooks {
         rendered
     }
 
-    pub(crate) async fn init_telemetry(&self) -> Result<()> {
+    pub(crate) async fn init_telemetry(&self, ctx: &mlua::Table) -> Result<()> {
         let lua = self.lua.lock().await;
         let telemetry = lua.create_table()?;
         let stages = lua.create_table()?;
@@ -62,16 +132,14 @@ impl JobHooks {
 
         telemetry.set("stages", stages)?;
         telemetry.set("map", map)?;
-        lua.globals().set("spyweb_telemetry", telemetry)?;
-        let _ = lua.globals().set("__spyweb_filter_error", mlua::Value::Nil);
+        JobHooks::ctx_store(ctx)?.raw_set("telemetry", telemetry.clone())?;
         Ok(())
     }
 
-    pub(crate) async fn telemetry_stage_start(&self) -> Result<TelemetrySample> {
+    pub(crate) async fn telemetry_stage_start(&self, ctx: &mlua::Table) -> Result<TelemetrySample> {
         let lua = self.lua.lock().await;
-        let offset_ms = lua
-            .globals()
-            .get::<mlua::Table>("spyweb_telemetry")
+        let offset_ms = ctx
+            .get::<mlua::Table>("telemetry")
             .and_then(|telemetry| telemetry.get::<f64>("start_time"))
             .map(|start_time| {
                 let now = SystemTime::now()
@@ -91,15 +159,14 @@ impl JobHooks {
 
     pub(crate) async fn record_telemetry_stage(
         &self,
+        ctx: &mlua::Table,
         name: &str,
         sample: TelemetrySample,
         status: &str,
         error: Option<String>,
     ) -> Result<()> {
         let lua = self.lua.lock().await;
-        let Ok(telemetry) = lua.globals().get::<mlua::Table>("spyweb_telemetry") else {
-            return Ok(());
-        };
+        let telemetry: mlua::Table = ctx.get("telemetry")?;
         let map: mlua::Table = telemetry.get("map")?;
         let entry: mlua::Table = map.get(name)?;
         let mem_after = lua.used_memory();
@@ -124,42 +191,34 @@ impl JobHooks {
         Ok(())
     }
 
-    pub(crate) async fn finalize_telemetry(&self, duration: Duration) -> Result<()> {
-        let lua = self.lua.lock().await;
-        if let Ok(telemetry) = lua.globals().get::<mlua::Table>("spyweb_telemetry") {
-            telemetry.set("total_duration_ms", duration.as_secs_f64() * 1000.0)?;
-        }
+    pub(crate) async fn finalize_telemetry(
+        &self,
+        ctx: &mlua::Table,
+        duration: Duration,
+    ) -> Result<()> {
+        let telemetry: mlua::Table = ctx.get("telemetry")?;
+        telemetry.set("total_duration_ms", duration.as_secs_f64() * 1000.0)?;
         Ok(())
     }
 
-    pub(crate) async fn remember_filter_error(&self, error: String) {
-        let lua = self.lua.lock().await;
-        if lua
-            .globals()
-            .get::<Option<String>>("__spyweb_filter_error")
-            .ok()
-            .flatten()
-            .is_none()
-        {
-            let _ = lua.globals().set("__spyweb_filter_error", error);
+    pub(crate) async fn remember_filter_error(&self, ctx: &mlua::Table, error: String) {
+        if let Ok(store) = JobHooks::ctx_store(ctx) {
+            let _ = store.raw_set("filter_error", error.clone());
         }
     }
 
-    pub(crate) async fn take_filter_error(&self) -> Option<String> {
-        let lua = self.lua.lock().await;
-        let error = lua
-            .globals()
-            .get::<Option<String>>("__spyweb_filter_error")
-            .ok()
-            .flatten();
-        let _ = lua.globals().set("__spyweb_filter_error", mlua::Value::Nil);
+    pub(crate) async fn take_filter_error(&self, ctx: &mlua::Table) -> Option<String> {
+        let error = ctx.get::<Option<String>>("filter_error").ok().flatten();
+        if let Ok(store) = JobHooks::ctx_store(ctx) {
+            let _ = store.raw_set("filter_error", mlua::Value::Nil);
+        }
         error
     }
 
-    pub async fn print_telemetry(&self) {
-        let lua = self.lua.lock().await;
-        let Ok(telemetry) = lua.globals().get::<mlua::Table>("spyweb_telemetry") else {
-            return;
+    pub async fn print_telemetry(&self, ctx: &mlua::Table) {
+        let telemetry: mlua::Table = match ctx.get("telemetry") {
+            Ok(table) => table,
+            Err(_) => return,
         };
 
         println!(

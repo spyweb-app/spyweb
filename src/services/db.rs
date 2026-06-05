@@ -415,6 +415,8 @@ mod tests {
             notification: None,
             headers: None,
             hash_fields: None,
+            workers: None,
+            urls: None,
         }
     }
 

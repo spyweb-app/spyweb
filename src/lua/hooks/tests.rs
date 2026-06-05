@@ -1,7 +1,9 @@
 use super::*;
+use crate::scraper::extractor::ExtractedItem;
 use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
 use crate::services::db::Db;
 use indexmap::IndexMap;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -57,12 +59,10 @@ end
     };
 
     let err = smol::block_on(async {
-        hooks.set_last_fetch(&attempt).await.unwrap();
-        let fetch_table = {
-            let lua = hooks.lua.lock().await;
-            lua.globals().get("last_fetch").unwrap()
-        };
-        hooks.try_after_fetch(&attempt, fetch_table).await
+        let ctx = hooks.new_cycle_context().await.unwrap();
+        hooks.set_last_fetch(&ctx, &attempt).await.unwrap();
+        let fetch_table = ctx.get("last_fetch").unwrap();
+        hooks.try_after_fetch(&attempt, fetch_table, &ctx).await
     })
     .unwrap_err();
     let rendered = hooks.format_hook_error("after_fetch", err);
@@ -111,15 +111,15 @@ end
     };
 
     // Test Success
-    let attempt = smol::block_on(hooks.override_fetch(req.clone())).unwrap();
+    let ctx = smol::block_on(hooks.new_cycle_context()).unwrap();
+    let attempt = smol::block_on(hooks.override_fetch(req.clone(), &ctx)).unwrap();
     let res = attempt.result.unwrap();
     assert_eq!(res.status, 200);
     assert_eq!(res.body, "overridden body for https://example.com");
 
     smol::block_on(async {
-        let lua = hooks.lua.lock().await;
         assert!(matches!(
-            lua.globals().get::<mlua::Value>("last_fetch").unwrap(),
+            ctx.get::<mlua::Value>("last_fetch").unwrap(),
             mlua::Value::Table(_)
         ));
     });
@@ -130,7 +130,7 @@ end
         method: "GET".into(),
         headers: Default::default(),
     };
-    let attempt_fail = smol::block_on(hooks.override_fetch(req_fail)).unwrap();
+    let attempt_fail = smol::block_on(hooks.override_fetch(req_fail, &ctx)).unwrap();
     assert_eq!(attempt_fail.result.unwrap_err(), "simulated failure");
 
     let _ = fs::remove_file(dir.join("test.redb"));
@@ -168,7 +168,8 @@ end
         proxy: None,
     };
 
-    let items = smol::block_on(hooks.override_extract(&res)).unwrap();
+    let ctx = smol::block_on(hooks.new_cycle_context()).unwrap();
+    let items = smol::block_on(hooks.override_extract(&res, &ctx)).unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].fields["title"], "Custom Item 1");
     assert_eq!(items[0].fields["body"], "Raw HTML body");
@@ -215,7 +216,8 @@ end
         headers: Default::default(),
     };
 
-    let _ = smol::block_on(hooks.before_fetch(req)).unwrap();
+    let ctx = smol::block_on(hooks.new_cycle_context()).unwrap();
+    let _ = smol::block_on(hooks.before_fetch(req, &ctx)).unwrap();
 
     smol::block_on(async {
         let lua = hooks.lua.lock().await;
@@ -279,9 +281,9 @@ end
 
     let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
     let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
-    assert!(hooks.has_on_success);
-    assert!(hooks.has_on_error);
-    assert!(hooks.has_on_finally);
+    assert!(hooks.hook_mask & HOOK_ON_SUCCESS != 0);
+    assert!(hooks.hook_mask & HOOK_ON_ERROR != 0);
+    assert!(hooks.hook_mask & HOOK_ON_FINALLY != 0);
 
     let req = RequestConfig {
         url: "https://example.com".into(),
@@ -289,10 +291,11 @@ end
         headers: Default::default(),
     };
 
-    let _ = smol::block_on(hooks.before_fetch(req)).unwrap();
+    let ctx = smol::block_on(hooks.new_cycle_context()).unwrap();
+    let _ = smol::block_on(hooks.before_fetch(req, &ctx)).unwrap();
     smol::block_on(async {
-        hooks.run_on_success().await;
-        hooks.run_on_finally().await;
+        hooks.run_on_success(&ctx).await;
+        hooks.run_on_finally(&ctx).await;
 
         let lua = hooks.lua.lock().await;
         let log: Vec<String> = lua
@@ -301,7 +304,15 @@ end
             .unwrap()
             .get("log")
             .unwrap();
-        assert_eq!(log, vec!["hook", "success:https://example.com", "finally"]);
+        assert_eq!(
+            log,
+            vec![
+                "hook",
+                "success:https://example.com",
+                "finally",
+                "deferred-from-finally"
+            ]
+        );
     });
 
     let _ = fs::remove_file(dir.join("test.redb"));
@@ -338,17 +349,15 @@ end
     let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
 
     smol::block_on(async {
-        {
-            let lua = hooks.lua.lock().await;
-            lua.globals().set("last_fetch", "stale").unwrap();
-            lua.globals().set("selector_matches", 3).unwrap();
-            lua.globals()
-                .set("__deferred", lua.create_table().unwrap())
-                .unwrap();
-        }
+        let ctx = hooks.new_cycle_context().await.unwrap();
+        let store = JobHooks::ctx_store(&ctx).unwrap();
+        store.raw_set("last_fetch", "stale").unwrap();
+        store.raw_set("selector_matches", 3).unwrap();
+        let fresh = hooks.lua.lock().await.create_table().unwrap();
+        store.raw_set("__deferred", fresh).unwrap();
 
-        hooks.run_on_error(&anyhow::anyhow!("boom")).await;
-        hooks.run_on_finally().await;
+        hooks.run_on_error(&ctx, &anyhow::anyhow!("boom")).await;
+        hooks.run_on_finally(&ctx).await;
 
         {
             let lua = hooks.lua.lock().await;
@@ -361,21 +370,18 @@ end
             assert_eq!(log, vec!["error:boom", "finally"]);
         }
 
-        hooks.cleanup_cycle_state().await;
+        hooks.cleanup_cycle_state(&ctx).await;
 
-        let lua = hooks.lua.lock().await;
         assert!(matches!(
-            lua.globals().get::<mlua::Value>("last_fetch").unwrap(),
+            ctx.get::<mlua::Value>("last_fetch").unwrap(),
             mlua::Value::Nil
         ));
         assert!(matches!(
-            lua.globals()
-                .get::<mlua::Value>("selector_matches")
-                .unwrap(),
+            ctx.get::<mlua::Value>("selector_matches").unwrap(),
             mlua::Value::Nil
         ));
         assert!(matches!(
-            lua.globals().get::<mlua::Value>("__deferred").unwrap(),
+            ctx.get::<mlua::Value>("__deferred").unwrap(),
             mlua::Value::Nil
         ));
     });
@@ -406,10 +412,11 @@ end
 
     let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
     let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
-    assert!(!hooks.has_on_success);
+    assert!(hooks.hook_mask & HOOK_ON_SUCCESS == 0);
 
     smol::block_on(async {
-        hooks.run_on_success().await;
+        let ctx = hooks.new_cycle_context().await.unwrap();
+        hooks.run_on_success(&ctx).await;
 
         let lua = hooks.lua.lock().await;
         let log: Vec<String> = lua
@@ -437,20 +444,20 @@ fn telemetry_table_records_active_stages_and_cleans_up() {
     let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
 
     smol::block_on(async {
-        hooks.init_telemetry().await.unwrap();
-        let sample = hooks.telemetry_stage_start().await.unwrap();
+        let ctx = hooks.new_cycle_context().await.unwrap();
+        hooks.init_telemetry(&ctx).await.unwrap();
+        let sample = hooks.telemetry_stage_start(&ctx).await.unwrap();
         hooks
-            .record_telemetry_stage("fetch", sample, "success", None)
+            .record_telemetry_stage(&ctx, "fetch", sample, "success", None)
             .await
             .unwrap();
         hooks
-            .finalize_telemetry(Duration::from_millis(42))
+            .finalize_telemetry(&ctx, Duration::from_millis(42))
             .await
             .unwrap();
 
         {
-            let lua = hooks.lua.lock().await;
-            let telemetry: mlua::Table = lua.globals().get("spyweb_telemetry").unwrap();
+            let telemetry: mlua::Table = ctx.get("telemetry").unwrap();
             let stages: mlua::Table = telemetry.get("stages").unwrap();
             let map: mlua::Table = telemetry.get("map").unwrap();
 
@@ -477,14 +484,192 @@ fn telemetry_table_records_active_stages_and_cleans_up() {
             ));
         }
 
-        hooks.cleanup_cycle_state().await;
-        let lua = hooks.lua.lock().await;
+        hooks.cleanup_cycle_state(&ctx).await;
         assert!(matches!(
-            lua.globals()
-                .get::<mlua::Value>("spyweb_telemetry")
-                .unwrap(),
+            ctx.get::<mlua::Value>("telemetry").unwrap(),
             mlua::Value::Nil
         ));
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_lifecycle_hooks_context_and_defer() {
+    let dir = unique_test_dir("lifecycle-context-defer");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    let defer_path = dir.join("defer.lua");
+
+    fs::write(&hook_path, "").unwrap();
+    fs::write(
+        &defer_path,
+        r#"
+function on_success(ctx)
+    -- Verify context is passed as an argument
+    if type(ctx) == "table" then
+        _G.ctx_passed = true
+    end
+    
+    -- Verify defer() works (requires active_ctx in registry)
+    defer(function() 
+        _G.deferred_ran = true 
+    end)
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+    smol::block_on(async {
+        let ctx = hooks.new_cycle_context().await.unwrap();
+
+        // Execute the lifecycle hook
+        hooks.run_on_success(&ctx).await;
+
+        let lua = hooks.lua.lock().await;
+        let globals = lua.globals();
+
+        // 1. Coverage for Context Argument
+        assert!(
+            globals.get::<bool>("ctx_passed").unwrap_or(false),
+            "Lifecycle hook 'on_success' must receive 'ctx' as its first argument"
+        );
+
+        // 2. Coverage for Deferred Tasks in Lifecycle
+        assert!(
+            globals.get::<bool>("deferred_ran").unwrap_or(false),
+            "Deferred tasks registered in 'on_success' must be drained before completion"
+        );
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_file(&defer_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_context_reserved_keys_protection() {
+    let dir = unique_test_dir("context-protection");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(
+        &hook_path,
+        r#"
+function before_fetch(request, ctx)
+    local ok, err = pcall(function()
+        ctx.worker_id = 999
+    end)
+    _G.protect_worker_id = not ok
+    
+    ok, err = pcall(function()
+        ctx.telemetry = "hacked"
+    end)
+    _G.protect_telemetry = not ok
+
+    -- User keys should be allowed
+    ctx.my_custom_key = "safe"
+    return request
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+    smol::block_on(async {
+        let ctx = hooks.new_cycle_context().await.unwrap();
+        let req = RequestConfig {
+            url: "https://example.com".into(),
+            method: "GET".into(),
+            headers: Default::default(),
+        };
+
+        let _ = hooks.before_fetch(req, &ctx).await.unwrap();
+
+        let lua = hooks.lua.lock().await;
+        let globals = lua.globals();
+
+        assert!(
+            globals.get::<bool>("protect_worker_id").unwrap(),
+            "Should protect worker_id"
+        );
+        assert!(
+            globals.get::<bool>("protect_telemetry").unwrap(),
+            "Should protect telemetry"
+        );
+        assert_eq!(
+            ctx.get::<String>("my_custom_key").unwrap(),
+            "safe",
+            "User keys should be allowed"
+        );
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_context_persistence_across_stages() {
+    let dir = unique_test_dir("context-persistence");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(
+        &hook_path,
+        r#"
+function before_fetch(request, ctx)
+    ctx.step = "started"
+    return request
+end
+
+function filter_item(item, ctx)
+    ctx.step = ctx.step .. "->filtering"
+    return item
+end
+
+function before_store(items, ctx)
+    ctx.step = ctx.step .. "->storing"
+    return items
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+    smol::block_on(async {
+        let ctx = hooks.new_cycle_context().await.unwrap();
+        let req = RequestConfig {
+            url: "https://example.com".into(),
+            method: "GET".into(),
+            headers: Default::default(),
+        };
+
+        // 1. Before Fetch
+        let _ = hooks.before_fetch(req, &ctx).await.unwrap();
+
+        // 2. Filter Item
+        let item = ExtractedItem {
+            fields: HashMap::new(),
+            ..Default::default()
+        };
+        let _ = hooks.filter_item(item, &ctx).await.unwrap();
+
+        // 3. Before Store
+        let _ = hooks.before_store(vec![], &ctx).await.unwrap();
+
+        assert_eq!(
+            ctx.get::<String>("step").unwrap(),
+            "started->filtering->storing"
+        );
     });
 
     let _ = fs::remove_file(dir.join("test.redb"));

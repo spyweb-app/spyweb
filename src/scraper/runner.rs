@@ -55,7 +55,6 @@ impl Runner {
         let item_count = items.len();
 
         Ok(JobRunResult {
-            // config: job.clone(),
             url: response.url,
             status: response.status,
             item_count,
@@ -139,9 +138,15 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
 
     println!("Debug run for job: {}", crate::color::c_job(job_name));
 
-    if let Some(h) = job.hooks.as_ref() {
-        h.init_telemetry().await?;
-    }
+    let (ctx, _keep) = match job.hooks.as_ref() {
+        Some(h) => {
+            let ctx = h.new_cycle_context().await?;
+            h.init_telemetry(&ctx).await?;
+            (Some(ctx.clone()), Some(ctx))
+        }
+        None => (None, None),
+    };
+
     let started = std::time::Instant::now();
 
     let result = async {
@@ -150,16 +155,19 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
 
         // 1. before_fetch
         let request = match job.hooks.as_ref() {
-            Some(h) => match h.before_fetch(request).await? {
-                None => {
-                    println!(
-                        "Request aborted by {} hook.",
-                        crate::color::c_warn("before_fetch")
-                    );
-                    return Ok(());
+            Some(h) => {
+                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                match h.before_fetch(request, ctx).await? {
+                    None => {
+                        println!(
+                            "Request aborted by {} hook.",
+                            crate::color::c_warn("before_fetch")
+                        );
+                        return Ok(());
+                    }
+                    Some(r) => r,
                 }
-                Some(r) => r,
-            },
+            }
             None => request,
         };
 
@@ -167,21 +175,24 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
         let fetch_attempt = match job.hooks.as_ref().filter(|h| h.has_override_fetch()) {
             Some(h) => {
                 println!("{}", crate::color::c_info("Using override_fetch hook"));
-                h.override_fetch(request.clone()).await?
+                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                h.override_fetch(request.clone(), ctx).await?
             }
             None => {
                 println!("Fetching URL: {}", crate::color::c_info(&request.url));
-                let sample = match job.hooks.as_ref() {
-                    Some(h) => Some(h.telemetry_stage_start().await?),
-                    None => None,
+                let sample = match (job.hooks.as_ref(), ctx.as_ref()) {
+                    (Some(h), Some(ctx)) => Some(h.telemetry_stage_start(ctx).await?),
+                    _ => None,
                 };
                 let attempt = runner.fetch(&job.config, &request);
-                if let (Some(h), Some(s)) = (job.hooks.as_ref(), sample) {
+                if let (Some(h), Some(s), Some(ctx)) = (job.hooks.as_ref(), sample, ctx.as_ref()) {
                     let (status, error) = match &attempt.result {
                         Ok(_) => ("success", None),
                         Err(err) => ("error", Some(err.clone())),
                     };
-                    let _ = h.record_telemetry_stage("fetch", s, status, error).await;
+                    let _ = h
+                        .record_telemetry_stage(ctx, "fetch", s, status, error)
+                        .await;
                 }
                 attempt
             }
@@ -205,16 +216,19 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
 
         // 3. after_fetch
         let response = match job.hooks.as_ref() {
-            Some(h) => match h.after_fetch(fetch_attempt).await? {
-                None => {
-                    println!(
-                        "Response aborted by {} hook.",
-                        crate::color::c_warn("after_fetch")
-                    );
-                    return Ok(());
+            Some(h) => {
+                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                match h.after_fetch(fetch_attempt, ctx).await? {
+                    None => {
+                        println!(
+                            "Response aborted by {} hook.",
+                            crate::color::c_warn("after_fetch")
+                        );
+                        return Ok(());
+                    }
+                    Some(r) => r,
                 }
-                Some(r) => r,
-            },
+            }
             None => fetch_attempt.result.map_err(anyhow::Error::msg)?,
         };
 
@@ -222,7 +236,8 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
         let extraction = match job.hooks.as_ref().filter(|h| h.has_override_extract()) {
             Some(h) => {
                 println!("{}", crate::color::c_info("Using override_extract hook"));
-                let items = h.override_extract(&response).await?;
+                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                let items = h.override_extract(&response, ctx).await?;
                 let count = items.len();
                 crate::scraper::extractor::ExtractionResult {
                     items,
@@ -230,14 +245,14 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
                 }
             }
             None => {
-                let sample = match job.hooks.as_ref() {
-                    Some(h) => Some(h.telemetry_stage_start().await?),
-                    None => None,
+                let sample = match (job.hooks.as_ref(), ctx.as_ref()) {
+                    (Some(h), Some(ctx)) => Some(h.telemetry_stage_start(ctx).await?),
+                    _ => None,
                 };
                 let result = runner.extract(&job.config, job.dir.as_deref(), &response)?;
-                if let (Some(h), Some(s)) = (job.hooks.as_ref(), sample) {
+                if let (Some(h), Some(s), Some(ctx)) = (job.hooks.as_ref(), sample, ctx.as_ref()) {
                     let _ = h
-                        .record_telemetry_stage("extract", s, "success", None)
+                        .record_telemetry_stage(ctx, "extract", s, "success", None)
                         .await;
                 }
                 result
@@ -250,28 +265,35 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
             crate::color::c_info(&extraction.selector_matches.to_string())
         );
 
-        if let Some(h) = job.hooks.as_ref() {
-            h.set_selector_matches(extraction.selector_matches).await?;
+        if let Some(h) = job.hooks.as_ref()
+            && let Some(ctx) = ctx.as_ref()
+        {
+            h.set_selector_matches(ctx, extraction.selector_matches)
+                .await?;
         }
 
         let items = extraction.items;
 
         // 5. after_extract
         let items = match job.hooks.as_ref() {
-            Some(h) => h.after_extract(items).await?,
+            Some(h) => {
+                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                h.after_extract(items, ctx).await?
+            }
             None => items,
         };
 
         // 6. filter_item / keyword_filter
-        let filter_sample = match job.hooks.as_ref() {
-            Some(h) => Some(h.telemetry_stage_start().await?),
-            None => None,
+        let filter_sample = match (job.hooks.as_ref(), ctx.as_ref()) {
+            (Some(h), Some(ctx)) => Some(h.telemetry_stage_start(ctx).await?),
+            _ => None,
         };
         let items = match job.hooks.as_ref() {
             Some(h) if h.has_filter_item() => {
+                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
                 let mut filtered = Vec::new();
                 for item in items {
-                    if let Some(mut i) = h.filter_item(item).await? {
+                    if let Some(mut i) = h.filter_item(item, ctx).await? {
                         i.matches = crate::scraper::extractor::matching_keywords(
                             &i.fields,
                             job.config.keywords.as_deref(),
@@ -284,24 +306,29 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
             }
             _ => runner.keyword_filter(&job.config, items),
         };
-        if let (Some(h), Some(s)) = (job.hooks.as_ref(), filter_sample) {
-            let error = h.take_filter_error().await;
+        if let (Some(h), Some(s), Some(ctx)) = (job.hooks.as_ref(), filter_sample, ctx.as_ref()) {
+            let error = h.take_filter_error(ctx).await;
             let status = if error.is_some() { "error" } else { "success" };
-            let _ = h.record_telemetry_stage("filter", s, status, error).await;
+            let _ = h
+                .record_telemetry_stage(ctx, "filter", s, status, error)
+                .await;
         }
 
         // 7. before_store
         let items = match job.hooks.as_ref() {
-            Some(h) => match h.before_store(items).await? {
-                None => {
-                    println!(
-                        "Items aborted by {} hook.",
-                        crate::color::c_warn("before_store")
-                    );
-                    return Ok(());
+            Some(h) => {
+                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                match h.before_store(items, ctx).await? {
+                    None => {
+                        println!(
+                            "Items aborted by {} hook.",
+                            crate::color::c_warn("before_store")
+                        );
+                        return Ok(());
+                    }
+                    Some(i) => i,
                 }
-                Some(i) => i,
-            },
+            }
             None => items,
         };
 
@@ -340,16 +367,18 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     }
     .await;
 
-    if let Some(h) = job.hooks.as_ref() {
-        let _ = h.finalize_telemetry(started.elapsed()).await;
-        h.print_telemetry().await;
+    if let Some(h) = job.hooks.as_ref()
+        && let Some(ctx) = ctx
+    {
+        let _ = h.finalize_telemetry(&ctx, started.elapsed()).await;
+        h.print_telemetry(&ctx).await;
 
         match &result {
-            Ok(()) => h.run_on_success().await,
-            Err(e) => h.run_on_error(e).await,
+            Ok(()) => h.run_on_success(&ctx).await,
+            Err(e) => h.run_on_error(&ctx, e).await,
         }
-        h.run_on_finally().await;
-        h.cleanup_cycle_state().await;
+        h.run_on_finally(&ctx).await;
+        h.cleanup_cycle_state(&ctx).await;
     }
 
     result
@@ -388,6 +417,8 @@ mod tests {
             notification: None,
             headers: None,
             hash_fields: None,
+            workers: None,
+            urls: None,
         }
     }
 

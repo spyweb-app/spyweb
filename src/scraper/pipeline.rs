@@ -1,6 +1,6 @@
 use crate::{
-    color, config::types::Job, scraper::request::RequestConfig, scraper::runner::Runner,
-    services::db::Db, services::notifier, services::webhook,
+    color, config::types::Job, lua::hooks::TelemetryHandle, scraper::request::RequestConfig,
+    scraper::runner::Runner, services::db::Db, services::notifier, services::webhook,
 };
 use anyhow::Result;
 use smol::Timer;
@@ -16,61 +16,18 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
 
         let result = run_once(&job, &db, &runner, &base_request).await;
         let pipeline_elapsed = started.elapsed();
-        let cleanup_started = std::time::Instant::now();
-
-        let ran_cycle_cleanup = job.hooks.as_ref().is_some_and(|h| h.has_cycle_cleanup());
-
-        if let Some(h) = job.hooks.as_ref() {
-            match &result {
-                Ok(()) => h.run_on_success().await,
-                Err(e) => h.run_on_error(e).await,
-            }
-            h.run_on_finally().await;
-            h.cleanup_cycle_state().await;
-        }
-
-        let cleanup_elapsed = cleanup_started.elapsed();
 
         if let Err(e) = result {
             crate::t_eprintln!("Job '{}' error: {}", color::c_job(&job.config.name), e);
         }
 
-        let cleanup_msg = if ran_cycle_cleanup {
-            format!(
-                ", cleanup finished in {}",
-                color::c_info(&crate::services::utils::format_duration(cleanup_elapsed))
-            )
-        } else {
-            String::new()
-        };
-
         crate::t_println!(
-            "Job [{}] finished in {}{}, sleeping for {}",
+            "Job [{}] finished in {}, sleeping for {}",
             color::c_job(&job.config.name),
             color::c_info(&crate::services::utils::format_duration(pipeline_elapsed)),
-            cleanup_msg,
             color::c_info(&format!("{}s", job.config.interval))
         );
         Timer::after(interval).await;
-    }
-}
-
-async fn telemetry_stage_start(job: &Job) -> Result<Option<crate::lua::hooks::TelemetrySample>> {
-    match job.hooks.as_ref() {
-        Some(h) => Ok(Some(h.telemetry_stage_start().await?)),
-        None => Ok(None),
-    }
-}
-
-async fn record_telemetry_stage(
-    job: &Job,
-    name: &str,
-    sample: Option<crate::lua::hooks::TelemetrySample>,
-    status: &str,
-    error: Option<String>,
-) {
-    if let (Some(h), Some(sample)) = (job.hooks.as_ref(), sample) {
-        let _ = h.record_telemetry_stage(name, sample, status, error).await;
     }
 }
 
@@ -80,39 +37,53 @@ async fn run_once(
     runner: &Arc<Runner>,
     base_request: &RequestConfig,
 ) -> Result<()> {
+    let ctx = match job.hooks.as_ref() {
+        Some(h) => Some(h.new_cycle_context().await?),
+        None => None,
+    };
+    let tel = TelemetryHandle::new(job.hooks.as_ref(), ctx.as_ref());
     let started = std::time::Instant::now();
+    tel.init().await?;
+    let result = run_once_inner(job, db, runner, base_request, &tel).await;
+    tel.finalize(started.elapsed()).await;
 
-    if let Some(h) = job.hooks.as_ref() {
-        h.init_telemetry().await?;
+    if let (Some(h), Some(ctx)) = (job.hooks.as_ref(), ctx.as_ref()) {
+        match &result {
+            Ok(()) => h.run_on_success(ctx).await,
+            Err(e) => h.run_on_error(ctx, e).await,
+        }
+        h.run_on_finally(ctx).await;
     }
 
-    let result = run_once_inner(job, db, runner, base_request).await;
-
-    if let Some(h) = job.hooks.as_ref() {
-        let _ = h.finalize_telemetry(started.elapsed()).await;
-    }
-
+    tel.cleanup().await;
     result
 }
 
-async fn run_once_inner(
+pub(crate) async fn run_once_inner(
     job: &Job,
     db: &Arc<Db>,
     runner: &Arc<Runner>,
     base_request: &RequestConfig,
+    tel: &TelemetryHandle<'_>,
 ) -> Result<()> {
-    let request = match job.hooks.as_ref() {
-        Some(h) => match h.before_fetch(base_request.clone()).await? {
-            None => return Ok(()),
-            Some(r) => r,
-        },
+    let request = match tel.hooks() {
+        Some(h) => {
+            let Some(ctx) = tel.ctx() else { return Ok(()) };
+            match h.before_fetch(base_request.clone(), ctx).await? {
+                None => return Ok(()),
+                Some(r) => r,
+            }
+        }
         None => base_request.clone(),
     };
 
-    let fetch_attempt = match job.hooks.as_ref().filter(|h| h.has_override_fetch()) {
-        Some(h) => h.override_fetch(request.clone()).await?,
+    let fetch_attempt = match tel.hooks().filter(|h| h.has_override_fetch()) {
+        Some(h) => {
+            let Some(ctx) = tel.ctx() else { return Ok(()) };
+            h.override_fetch(request.clone(), ctx).await?
+        }
         None => {
-            let sample = telemetry_stage_start(job).await?;
+            let token = tel.start().await;
             let attempt = smol::unblock({
                 let runner = Arc::clone(runner);
                 let config = job.config.clone();
@@ -120,25 +91,26 @@ async fn run_once_inner(
                 move || runner.fetch(&config, &request)
             })
             .await;
-            if let Some(sample) = sample {
-                if let Some(h) = job.hooks.as_ref() {
-                    h.set_last_fetch(&attempt).await?;
-                }
-                let (status, error) = match &attempt.result {
-                    Ok(_) => ("success", None),
-                    Err(err) => ("error", Some(err.clone())),
-                };
-                record_telemetry_stage(job, "fetch", Some(sample), status, error).await;
+            if let (Some(h), Some(ctx)) = (tel.hooks(), tel.ctx()) {
+                h.set_last_fetch(ctx, &attempt).await?;
             }
+            let (status, error) = match &attempt.result {
+                Ok(_) => ("success", None),
+                Err(err) => ("error", Some(err.clone())),
+            };
+            tel.record("fetch", token, status, error).await;
             attempt
         }
     };
 
-    let response = match job.hooks.as_ref() {
-        Some(h) => match h.after_fetch(fetch_attempt).await? {
-            None => return Ok(()),
-            Some(r) => r,
-        },
+    let response = match tel.hooks() {
+        Some(h) => {
+            let Some(ctx) = tel.ctx() else { return Ok(()) };
+            match h.after_fetch(fetch_attempt, ctx).await? {
+                None => return Ok(()),
+                Some(r) => r,
+            }
+        }
         None => fetch_attempt.result.map_err(anyhow::Error::msg)?,
     };
 
@@ -152,9 +124,10 @@ async fn run_once_inner(
         );
     }
 
-    let extraction = match job.hooks.as_ref().filter(|h| h.has_override_extract()) {
+    let extraction = match tel.hooks().filter(|h| h.has_override_extract()) {
         Some(h) => {
-            let items = h.override_extract(&response).await?;
+            let Some(ctx) = tel.ctx() else { return Ok(()) };
+            let items = h.override_extract(&response, ctx).await?;
             let count = items.len();
             crate::scraper::extractor::ExtractionResult {
                 items,
@@ -162,51 +135,39 @@ async fn run_once_inner(
             }
         }
         None => {
-            let sample = telemetry_stage_start(job).await?;
-            let result = smol::unblock({
-                let runner = Arc::clone(runner);
-                let config = job.config.clone();
-                let dir = job.dir.clone();
-                move || runner.extract(&config, dir.as_deref(), &response)
-            })
-            .await;
-            if let Some(sample) = sample {
-                match &result {
-                    Ok(_) => {
-                        record_telemetry_stage(job, "extract", Some(sample), "success", None).await;
-                    }
-                    Err(e) => {
-                        record_telemetry_stage(
-                            job,
-                            "extract",
-                            Some(sample),
-                            "error",
-                            Some(e.to_string()),
-                        )
-                        .await;
-                    }
-                }
-            }
-            result?
+            tel.stage(
+                "extract",
+                smol::unblock({
+                    let runner = Arc::clone(runner);
+                    let config = job.config.clone();
+                    let dir = job.dir.clone();
+                    move || runner.extract(&config, dir.as_deref(), &response)
+                }),
+            )
+            .await?
         }
     };
 
-    if let Some(h) = job.hooks.as_ref() {
-        h.set_selector_matches(extraction.selector_matches).await?;
+    if let (Some(h), Some(ctx)) = (tel.hooks(), tel.ctx()) {
+        h.set_selector_matches(ctx, extraction.selector_matches)
+            .await?;
     }
 
-    let items = match job.hooks.as_ref() {
-        Some(h) => h.after_extract(extraction.items).await?,
+    let items = match tel.hooks() {
+        Some(h) => {
+            let Some(ctx) = tel.ctx() else { return Ok(()) };
+            h.after_extract(extraction.items, ctx).await?
+        }
         None => extraction.items,
     };
 
-    let filter_sample = telemetry_stage_start(job).await?;
-    let items = match job.hooks.as_ref() {
+    let token = tel.start().await;
+    let items = match tel.hooks() {
         Some(h) if h.has_filter_item() => {
+            let Some(ctx) = tel.ctx() else { return Ok(()) };
             let mut filtered = Vec::new();
             for item in items {
-                if let Some(mut kept) = h.filter_item(item).await? {
-                    // Even if user filters, we still want the engine to tag them for the DB
+                if let Some(mut kept) = h.filter_item(item, ctx).await? {
                     kept.matches = crate::scraper::extractor::matching_keywords(
                         &kept.fields,
                         job.config.keywords.as_deref(),
@@ -219,14 +180,12 @@ async fn run_once_inner(
         }
         _ => runner.keyword_filter(&job.config, items),
     };
-    if let Some(sample) = filter_sample {
-        let error = match job.hooks.as_ref() {
-            Some(h) => h.take_filter_error().await,
-            None => None,
-        };
-        let status = if error.is_some() { "error" } else { "success" };
-        record_telemetry_stage(job, "filter", Some(sample), status, error).await;
-    }
+    let error = match (tel.hooks(), tel.ctx()) {
+        (Some(h), Some(ctx)) => h.take_filter_error(ctx).await,
+        _ => None,
+    };
+    let status = if error.is_some() { "error" } else { "success" };
+    tel.record("filter", token, status, error).await;
 
     if items.is_empty() {
         if status_code == 200 {
@@ -247,33 +206,27 @@ async fn run_once_inner(
         return Ok(());
     }
 
-    let items = match job.hooks.as_ref() {
-        Some(h) => match h.before_store(items).await? {
-            None => return Ok(()),
-            Some(i) => i,
-        },
+    let items = match tel.hooks() {
+        Some(h) => {
+            let Some(ctx) = tel.ctx() else { return Ok(()) };
+            match h.before_store(items, ctx).await? {
+                None => return Ok(()),
+                Some(i) => i,
+            }
+        }
         None => items,
     };
 
-    let store_sample = telemetry_stage_start(job).await?;
-    let store_result = smol::unblock({
-        let db = Arc::clone(db);
-        let config = job.config.clone();
-        move || db.batch_check_and_insert(&config, items)
-    })
-    .await;
-    if let Some(sample) = store_sample {
-        match &store_result {
-            Ok(_) => {
-                record_telemetry_stage(job, "store", Some(sample), "success", None).await;
-            }
-            Err(e) => {
-                record_telemetry_stage(job, "store", Some(sample), "error", Some(e.to_string()))
-                    .await;
-            }
-        }
-    }
-    let new_items = store_result?;
+    let new_items = tel
+        .stage(
+            "store",
+            smol::unblock({
+                let db = Arc::clone(db);
+                let config = job.config.clone();
+                move || db.batch_check_and_insert(&config, items)
+            }),
+        )
+        .await?;
 
     if new_items.is_empty() {
         if status_code == 200 {
@@ -292,61 +245,40 @@ async fn run_once_inner(
         color::c_job(&job.config.name)
     );
 
-    let notify_items = match job.hooks.as_ref() {
-        Some(h) => h.before_notify(new_items.clone()).await?,
+    let notify_items = match tel.hooks() {
+        Some(h) => {
+            let Some(ctx) = tel.ctx() else { return Ok(()) };
+            h.before_notify(new_items.clone(), ctx).await?
+        }
         None => Some(new_items.clone()),
     };
 
     if let Some(items) = notify_items {
-        let notify_sample = telemetry_stage_start(job).await?;
-        let notify_result = smol::unblock({
-            let config = job.config.clone();
-            let items = items.clone();
-            move || notifier::trigger_notification(&config, &items)
-        })
-        .await;
-        if let Some(sample) = notify_sample {
-            match &notify_result {
-                Ok(true) | Ok(false) => {
-                    record_telemetry_stage(job, "notify", Some(sample), "success", None).await;
-                }
-                Err(e) => {
-                    record_telemetry_stage(
-                        job,
-                        "notify",
-                        Some(sample),
-                        "error",
-                        Some(e.to_string()),
-                    )
-                    .await;
-                }
-            }
-        }
+        tel.stage(
+            "notify",
+            smol::unblock({
+                let config = job.config.clone();
+                let items = items.clone();
+                move || notifier::trigger_notification(&config, &items)
+            }),
+        )
+        .await?;
     }
 
     let payload = webhook::build_default_payload(&job.config.name, &new_items);
-    let payload = match job.hooks.as_ref() {
-        Some(h) => match h.before_webhook(payload).await? {
-            None => return Ok(()),
-            Some(p) => p,
-        },
+    let payload = match tel.hooks() {
+        Some(h) => {
+            let Some(ctx) = tel.ctx() else { return Ok(()) };
+            match h.before_webhook(payload, ctx).await? {
+                None => return Ok(()),
+                Some(p) => p,
+            }
+        }
         None => payload,
     };
 
-    let webhook_sample = telemetry_stage_start(job).await?;
-    let webhook_result = webhook::trigger_webhook(&job.config, payload).await;
-    if let Some(sample) = webhook_sample {
-        match &webhook_result {
-            Ok(true) | Ok(false) => {
-                record_telemetry_stage(job, "webhook", Some(sample), "success", None).await;
-            }
-            Err(e) => {
-                record_telemetry_stage(job, "webhook", Some(sample), "error", Some(e.to_string()))
-                    .await;
-            }
-        }
-    }
-    webhook_result?;
+    tel.stage("webhook", webhook::trigger_webhook(&job.config, payload))
+        .await?;
 
     Ok(())
 }
@@ -410,6 +342,8 @@ end
                 notification: None,
                 headers: None,
                 hash_fields: None,
+                workers: None,
+                urls: None,
             },
             hooks: Some(hooks),
             has_hooks_file: true,
@@ -419,16 +353,26 @@ end
 
         smol::block_on(async {
             let base_request = RequestConfig::from_job(&job.config);
-            run_once(&job, &db, &runner, &base_request).await.unwrap();
+            let ctx = job
+                .hooks
+                .as_ref()
+                .unwrap()
+                .new_cycle_context()
+                .await
+                .unwrap();
+            let tel = TelemetryHandle::new(job.hooks.as_ref(), Some(&ctx));
+            tel.init().await.unwrap();
+            run_once_inner(&job, &db, &runner, &base_request, &tel)
+                .await
+                .unwrap();
+            tel.finalize(std::time::Duration::from_millis(1)).await;
 
-            let hooks = job.hooks.as_ref().unwrap();
-            let lua = hooks.lua.lock().await;
-            let telemetry: mlua::Table = lua.globals().get("spyweb_telemetry").unwrap();
+            let telemetry: mlua::Table = ctx.get("telemetry").unwrap();
             let map: mlua::Table = telemetry.get("map").unwrap();
 
             assert!(telemetry.get::<f64>("total_duration_ms").unwrap() >= 0.0);
             assert!(matches!(
-                lua.globals().get::<mlua::Value>("last_fetch").unwrap(),
+                ctx.get::<mlua::Value>("last_fetch").unwrap(),
                 mlua::Value::Table(_)
             ));
             assert_eq!(
