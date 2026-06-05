@@ -1,14 +1,36 @@
 use crate::lua::engine;
 use crate::services::db::Db;
 use anyhow::Result;
-use mlua::Lua;
+use mlua::{Lua, Table, Value};
 use smol::lock::Mutex;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 pub mod stages;
 pub(crate) mod telemetry;
 
-pub(crate) use telemetry::TelemetrySample;
+pub(crate) use telemetry::TelemetryHandle;
+
+pub(crate) const HOOK_BEFORE_FETCH: u16 = 1 << 0;
+pub(crate) const HOOK_OVERRIDE_FETCH: u16 = 1 << 1;
+pub(crate) const HOOK_AFTER_FETCH: u16 = 1 << 2;
+pub(crate) const HOOK_OVERRIDE_EXTRACT: u16 = 1 << 3;
+pub(crate) const HOOK_AFTER_EXTRACT: u16 = 1 << 4;
+pub(crate) const HOOK_FILTER_ITEM: u16 = 1 << 5;
+pub(crate) const HOOK_BEFORE_STORE: u16 = 1 << 6;
+pub(crate) const HOOK_BEFORE_NOTIFY: u16 = 1 << 7;
+pub(crate) const HOOK_BEFORE_WEBHOOK: u16 = 1 << 8;
+pub(crate) const HOOK_ON_SUCCESS: u16 = 1 << 9;
+pub(crate) const HOOK_ON_ERROR: u16 = 1 << 10;
+pub(crate) const HOOK_ON_FINALLY: u16 = 1 << 11;
+
+pub(crate) const RESERVED_CTX_KEYS: &[&str] = &[
+    "last_fetch",
+    "selector_matches",
+    "telemetry",
+    "__deferred",
+    "filter_error",
+    "worker_id",
+];
 
 pub(crate) fn source_uses_cdp(source: &str) -> bool {
     source.contains("cdp.")
@@ -18,18 +40,7 @@ pub struct JobHooks {
     pub(crate) lua: Mutex<Lua>,
     pub(crate) job_name: String,
     pub(crate) hook_path: PathBuf,
-    pub(crate) has_before_fetch: bool,
-    pub(crate) has_override_fetch: bool,
-    pub(crate) has_after_fetch: bool,
-    pub(crate) has_override_extract: bool,
-    pub(crate) has_after_extract: bool,
-    pub(crate) has_filter_item: bool,
-    pub(crate) has_before_store: bool,
-    pub(crate) has_before_notify: bool,
-    pub(crate) has_before_webhook: bool,
-    pub(crate) has_on_success: bool,
-    pub(crate) has_on_error: bool,
-    pub(crate) has_on_finally: bool,
+    pub(crate) hook_mask: u16,
 }
 
 impl std::fmt::Debug for JobHooks {
@@ -37,18 +48,7 @@ impl std::fmt::Debug for JobHooks {
         f.debug_struct("JobHooks")
             .field("job_name", &self.job_name)
             .field("hook_path", &self.hook_path)
-            .field("has_before_fetch", &self.has_before_fetch)
-            .field("has_override_fetch", &self.has_override_fetch)
-            .field("has_after_fetch", &self.has_after_fetch)
-            .field("has_override_extract", &self.has_override_extract)
-            .field("has_after_extract", &self.has_after_extract)
-            .field("has_filter_item", &self.has_filter_item)
-            .field("has_before_store", &self.has_before_store)
-            .field("has_before_notify", &self.has_before_notify)
-            .field("has_before_webhook", &self.has_before_webhook)
-            .field("has_on_success", &self.has_on_success)
-            .field("has_on_error", &self.has_on_error)
-            .field("has_on_finally", &self.has_on_finally)
+            .field("hook_mask", &format_args!("{:#06x}", self.hook_mask))
             .finish()
     }
 }
@@ -118,35 +118,120 @@ impl JobHooks {
                 .is_some()
         };
 
+        let mut hook_mask = 0u16;
+        if has("before_fetch") {
+            hook_mask |= HOOK_BEFORE_FETCH;
+        }
+        if has("override_fetch") {
+            hook_mask |= HOOK_OVERRIDE_FETCH;
+        }
+        if has("after_fetch") {
+            hook_mask |= HOOK_AFTER_FETCH;
+        }
+        if has("override_extract") {
+            hook_mask |= HOOK_OVERRIDE_EXTRACT;
+        }
+        if has("after_extract") {
+            hook_mask |= HOOK_AFTER_EXTRACT;
+        }
+        if has("filter_item") {
+            hook_mask |= HOOK_FILTER_ITEM;
+        }
+        if has("before_store") {
+            hook_mask |= HOOK_BEFORE_STORE;
+        }
+        if has("before_notify") {
+            hook_mask |= HOOK_BEFORE_NOTIFY;
+        }
+        if has("before_webhook") {
+            hook_mask |= HOOK_BEFORE_WEBHOOK;
+        }
+        if has_defer_lua {
+            if has("on_success") {
+                hook_mask |= HOOK_ON_SUCCESS;
+            }
+            if has("on_error") {
+                hook_mask |= HOOK_ON_ERROR;
+            }
+            if has("on_finally") {
+                hook_mask |= HOOK_ON_FINALLY;
+            }
+        }
+
         Ok(Self {
             job_name: job_name.to_string(),
             hook_path: path.to_path_buf(),
-            has_before_fetch: has("before_fetch"),
-            has_override_fetch: has("override_fetch"),
-            has_after_fetch: has("after_fetch"),
-            has_override_extract: has("override_extract"),
-            has_after_extract: has("after_extract"),
-            has_filter_item: has("filter_item"),
-            has_before_store: has("before_store"),
-            has_before_notify: has("before_notify"),
-            has_before_webhook: has("before_webhook"),
-            has_on_success: has_defer_lua && has("on_success"),
-            has_on_error: has_defer_lua && has("on_error"),
-            has_on_finally: has_defer_lua && has("on_finally"),
+            hook_mask,
             lua: Mutex::new(lua),
         })
     }
 
     pub fn has_filter_item(&self) -> bool {
-        self.has_filter_item
+        self.hook_mask & HOOK_FILTER_ITEM != 0
     }
 
     pub fn has_before_webhook(&self) -> bool {
-        self.has_before_webhook
+        self.hook_mask & HOOK_BEFORE_WEBHOOK != 0
     }
 
     pub fn has_cycle_cleanup(&self) -> bool {
-        self.has_on_success || self.has_on_error || self.has_on_finally
+        self.hook_mask & (HOOK_ON_SUCCESS | HOOK_ON_ERROR | HOOK_ON_FINALLY) != 0
+    }
+
+    pub(crate) async fn new_cycle_context(&self) -> Result<Table> {
+        let lua = self.lua.lock().await;
+        let ctx = lua.create_table()?;
+        let shared = lua.create_table()?;
+        let deferred = lua.create_table()?;
+        let store = lua.create_table()?;
+
+        store.set("worker_id", 0)?;
+        store.set("__deferred", deferred.clone())?;
+        ctx.set("shared", shared)?;
+
+        let guard = lua.create_table()?;
+        guard.set("__store", store.clone())?;
+        guard.set(
+            "__index",
+            lua.create_function(move |_lua, (tbl, key): (Table, mlua::Value)| {
+                if let mlua::Value::String(s) = &key
+                    && let Ok(k) = s.to_str()
+                    && RESERVED_CTX_KEYS.contains(&&*k)
+                {
+                    return store.get::<mlua::Value>(k);
+                }
+                tbl.raw_get(key)
+            })?,
+        )?;
+        guard.set(
+            "__newindex",
+            lua.create_function(
+                move |_lua, (tbl, key, val): (Table, mlua::Value, mlua::Value)| {
+                    if let mlua::Value::String(s) = &key
+                        && let Ok(k) = s.to_str()
+                        && RESERVED_CTX_KEYS.contains(&&*k)
+                    {
+                        return Err(mlua::Error::external(format!(
+                            "cannot overwrite reserved ctx field '{}'",
+                            k
+                        )));
+                    }
+                    tbl.raw_set(key, val)
+                },
+            )?,
+        )?;
+        guard.set("__metatable", false)?;
+        ctx.set_metatable(Some(guard))?;
+
+        Ok(ctx)
+    }
+
+    pub(crate) fn ctx_store(ctx: &Table) -> Result<Table> {
+        let meta = ctx
+            .metatable()
+            .ok_or_else(|| anyhow::anyhow!("ctx has no metatable"))?;
+        let store: Table = meta.raw_get("__store")?;
+        Ok(store)
     }
 
     pub(crate) fn format_hook_error(&self, hook_name: &'static str, err: anyhow::Error) -> String {
@@ -168,26 +253,33 @@ impl JobHooks {
         }
     }
 
-    pub async fn set_selector_matches(&self, count: usize) -> Result<()> {
-        let lua = self.lua.lock().await;
-        lua.globals().set("selector_matches", count)?;
+    pub async fn set_selector_matches(&self, ctx: &mlua::Table, count: usize) -> Result<()> {
+        Self::ctx_store(ctx)?.raw_set("selector_matches", count)?;
         Ok(())
     }
 
-    pub async fn run_on_success(&self) {
-        if !self.has_on_success {
+    pub async fn run_on_success(&self, ctx: &Table) {
+        if self.hook_mask & HOOK_ON_SUCCESS == 0 {
             return;
         }
 
         let lua = self.lua.lock().await;
+        if let Err(e) = lua.set_named_registry_value("active_ctx", ctx.clone()) {
+            crate::t_eprintln!(
+                "defer.lua on_success: failed to set active_ctx for job '{}': {e}",
+                self.job_name
+            );
+            return;
+        }
         match lua.globals().get::<mlua::Function>("on_success") {
             Ok(f) => {
-                if let Err(e) = f.call_async::<()>(()).await {
+                if let Err(e) = f.call_async::<()>((ctx.clone(),)).await {
                     crate::t_eprintln!(
                         "defer.lua on_success error for job '{}': {e}",
                         self.job_name
                     );
                 }
+                stages::run_deferred(&lua, ctx, "on_success");
             }
             Err(e) => {
                 crate::t_eprintln!(
@@ -198,18 +290,26 @@ impl JobHooks {
         }
     }
 
-    pub async fn run_on_error(&self, err: &anyhow::Error) {
-        if !self.has_on_error {
+    pub async fn run_on_error(&self, ctx: &Table, err: &anyhow::Error) {
+        if self.hook_mask & HOOK_ON_ERROR == 0 {
             return;
         }
 
         let lua = self.lua.lock().await;
         let err = err.to_string();
+        if let Err(e) = lua.set_named_registry_value("active_ctx", ctx.clone()) {
+            crate::t_eprintln!(
+                "defer.lua on_error: failed to set active_ctx for job '{}': {e}",
+                self.job_name
+            );
+            return;
+        }
         match lua.globals().get::<mlua::Function>("on_error") {
             Ok(f) => {
-                if let Err(e) = f.call_async::<()>(err).await {
+                if let Err(e) = f.call_async::<()>((err, ctx.clone())).await {
                     crate::t_eprintln!("defer.lua on_error error for job '{}': {e}", self.job_name);
                 }
+                stages::run_deferred(&lua, ctx, "on_error");
             }
             Err(e) => {
                 crate::t_eprintln!(
@@ -220,20 +320,28 @@ impl JobHooks {
         }
     }
 
-    pub async fn run_on_finally(&self) {
-        if !self.has_on_finally {
+    pub async fn run_on_finally(&self, ctx: &Table) {
+        if self.hook_mask & HOOK_ON_FINALLY == 0 {
             return;
         }
 
         let lua = self.lua.lock().await;
+        if let Err(e) = lua.set_named_registry_value("active_ctx", ctx.clone()) {
+            crate::t_eprintln!(
+                "defer.lua on_finally: failed to set active_ctx for job '{}': {e}",
+                self.job_name
+            );
+            return;
+        }
         match lua.globals().get::<mlua::Function>("on_finally") {
             Ok(f) => {
-                if let Err(e) = f.call_async::<()>(()).await {
+                if let Err(e) = f.call_async::<()>((ctx.clone(),)).await {
                     crate::t_eprintln!(
                         "defer.lua on_finally error for job '{}': {e}",
                         self.job_name
                     );
                 }
+                stages::run_deferred(&lua, ctx, "on_finally");
             }
             Err(e) => {
                 crate::t_eprintln!(
@@ -244,14 +352,14 @@ impl JobHooks {
         }
     }
 
-    pub async fn cleanup_cycle_state(&self) {
-        let lua = self.lua.lock().await;
-        let _ = lua.globals().set("last_fetch", mlua::Value::Nil);
-        let _ = lua.globals().set("selector_matches", mlua::Value::Nil);
-        let _ = lua.globals().set("spyweb_telemetry", mlua::Value::Nil);
-        let _ = lua.globals().set("__spyweb_filter_error", mlua::Value::Nil);
-        let _ = lua.globals().set("__deferred", mlua::Value::Nil);
-        let _ = lua.gc_collect();
+    pub async fn cleanup_cycle_state(&self, ctx: &Table) {
+        let store = match Self::ctx_store(ctx) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        for &key in RESERVED_CTX_KEYS {
+            let _ = store.raw_set(key, Value::Nil);
+        }
     }
 }
 
