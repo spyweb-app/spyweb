@@ -71,8 +71,8 @@ end
 
 -- 5. Modify the entire list of extracted items at once.
 -- This runs even if 0 items were found (useful for detecting site changes).
-function after_extract(items)
-    print("[5] after_extract - found " .. #items .. " items (out of " .. selector_matches .. " selector matches)")
+function after_extract(items, ctx)
+    print("[5] after_extract - found " .. #items .. " items (out of " .. ctx.selector_matches .. " selector matches)")
 
     -- Example: Drop items with price more than 50,000
     local filtered = {}

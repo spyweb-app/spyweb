@@ -106,7 +106,7 @@ Demonstrates **Lua-powered pagination** — the URL changes each run by appendin
 **How pagination works:**
 
 ```lua
-function before_fetch(request)
+function before_fetch(request, ctx)
     page = page or 1
     request.url = request.url .. "?page=" .. page
     page = page + 1
@@ -179,29 +179,29 @@ Demonstrates how to bypass SpyWeb's internal database entirely and send extracte
 Every scrape run goes through these stages in order:
 
 ```
-before_fetch(request)         ← modify URL, headers, or return nil to skip
+before_fetch(request, ctx)    ← modify URL, headers, or return nil to skip
     ↓
-override_fetch(request)       ← bypass built-in HTTP client
+override_fetch(request, ctx)  ← bypass built-in HTTP client
     ↓
 [HTTP fetch]                  ← automatic
     ↓
-after_fetch(fetch_result)     ← inspect request/response/error, mutate response.body, or return nil
+after_fetch(fetch_result, ctx) ← inspect request/response/error, mutate response.body, or return nil
     ↓
-override_extract(response)    ← bypass built-in CSS extraction
+override_extract(response, ctx) ← bypass built-in CSS extraction
     ↓
 [CSS extraction]              ← automatic (raw parser → DOM fallback)
     ↓
-after_extract(items)          ← batch filter/modify all items at once
+after_extract(items, ctx)     ← batch filter/modify all items at once
     ↓
-filter_item(item)             ← per-item filter (OR keyword_filter, not both)
+filter_item(item, ctx)        ← per-item filter (OR keyword_filter, not both)
     ↓
-before_store(items)           ← last chance before DB insert
+before_store(items, ctx)      ← last chance before DB insert
     ↓
 [dedup + insert]              ← automatic, atomic
     ↓
-before_notify(items)          ← reshape or silence notifications
+before_notify(items, ctx)     ← reshape or silence notifications
     ↓
-before_webhook(payload)       ← reshape or silence webhook POSTs
+before_webhook(payload, ctx)  ← reshape or silence webhook POSTs
     ↓
 [notify + webhook]            ← automatic
 ```

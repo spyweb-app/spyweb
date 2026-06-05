@@ -117,12 +117,12 @@ end
 -- --------------------------------------------------------------------------
 -- Detect layout changes. If the site is alive (200 OK) but the selector 
 -- returns 0 hits, the CSS selector in config.toml is likely outdated.
-function after_extract(items)
-    if selector_matches == 0 then
+function after_extract(items, ctx)
+    if ctx.selector_matches == 0 then
         log("🚨 [FATAL] CSS Selector matched 0 items. Layout might have changed!")
         
         -- Clone state to log diagnostics without the massive body
-        local debug_info = deep_copy(last_fetch)
+        local debug_info = deep_copy(ctx.last_fetch)
         if debug_info.response then
             debug_info.page_title = debug_info.response.body:match("<title>(.-)</title>")
             debug_info.response.body = "[stripped]"
@@ -158,7 +158,7 @@ function before_notify(items)
 
         if price > 0 and price < last_min then
             send_push("📉 PRICE DROP: " .. item.fields.title, 
-                      "Now $" .. price .. "! (Was $" .. last_min .. ")", 4)
+                "Now $" .. price .. "! (Was $" .. last_min .. ")", 4)
             store_set(storage_key, tostring(price))
         elseif title:find("SALE") or title:find("OFF") then
             send_push("🎁 ON SALE: " .. item.fields.title, "Check it out!", 3)
