@@ -106,7 +106,10 @@ impl CdpTransport {
                         JsonRpcMessage::Response {
                             id, result, error, ..
                         } => {
-                            let sender = pending.lock().unwrap().remove(&id);
+                            let sender = pending
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .remove(&id);
                             if let Some(tx) = sender {
                                 let value = if let Some(err) = error {
                                     Err(anyhow::anyhow!(
@@ -132,7 +135,7 @@ impl CdpTransport {
                             };
 
                             let list = {
-                                let mut guard = listeners.lock().unwrap();
+                                let mut guard = listeners.lock().unwrap_or_else(|e| e.into_inner());
                                 if let Some(list) = guard.get_mut(&session_id) {
                                     // Clean up closed listeners
                                     list.retain(|tx| !tx.is_closed());
@@ -152,7 +155,7 @@ impl CdpTransport {
                 let err =
                     disconnect_error.unwrap_or_else(|| "WebSocket read loop ended".to_string());
                 let pending = {
-                    let mut guard = pending.lock().unwrap();
+                    let mut guard = pending.lock().unwrap_or_else(|e| e.into_inner());
                     std::mem::take(&mut *guard)
                 };
                 for (_, tx) in pending {
@@ -193,7 +196,10 @@ impl CdpTransport {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
 
-        self.pending.lock().unwrap().insert(id, tx);
+        self.pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, tx);
 
         let mut request = serde_json::json!({
             "id": id,
@@ -205,7 +211,10 @@ impl CdpTransport {
         }
 
         if self.ws_tx.send(request.to_string()).await.is_err() {
-            self.pending.lock().unwrap().remove(&id);
+            self.pending
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&id);
             return Err(anyhow::anyhow!("WebSocket write channel closed"));
         }
 
@@ -289,7 +298,7 @@ impl CdpTransport {
         let (tx, rx) = async_channel::unbounded();
         self.listeners
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .entry(session_id)
             .or_default()
             .push(tx);
@@ -303,14 +312,14 @@ impl CdpTransport {
     pub fn unregister_session_listener(&self, session_id: &str) {
         self.listeners
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .remove(&Some(session_id.to_string()));
     }
 
     pub fn close(&self) {
         self.ws_tx.close();
         let pending = {
-            let mut guard = self.pending.lock().unwrap();
+            let mut guard = self.pending.lock().unwrap_or_else(|e| e.into_inner());
             std::mem::take(&mut *guard)
         };
         for (_, tx) in pending {

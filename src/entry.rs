@@ -17,12 +17,13 @@ pub fn start_app() -> Result<()> {
 }
 
 pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
-    ctrlc::set_handler(move || {
+    if let Err(e) = ctrlc::set_handler(move || {
         crate::t_println!("\nShutting down gracefully...");
         crate::services::utils::shutdown_system();
         std::process::exit(0);
-    })
-    .expect("Error setting Ctrl-C handler");
+    }) {
+        crate::t_println!("Warning: Could not set Ctrl-C handler: {}", e);
+    }
 
     let db = Arc::new(Db::open("data")?);
     let jobs = loader::load_all_jobs("jobs.toml", "jobs", Arc::clone(&db))?;

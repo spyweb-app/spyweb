@@ -141,7 +141,9 @@ fn get_or_create_file<'a>(
             OpenOptions::new().create(true).append(true).open(path)?,
         );
     }
-    Ok(files.get_mut(path).unwrap())
+    files
+        .get_mut(path)
+        .ok_or_else(|| anyhow::anyhow!("io mapping corrupted for {}", path.display()))
 }
 
 fn worker_main(rx: Receiver<IoTask>) {

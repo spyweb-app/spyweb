@@ -156,7 +156,9 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
         // 1. before_fetch
         let request = match job.hooks.as_ref() {
             Some(h) => {
-                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                let ctx = ctx
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
                 match h.before_fetch(request, ctx).await? {
                     None => {
                         println!(
@@ -175,7 +177,9 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
         let fetch_attempt = match job.hooks.as_ref().filter(|h| h.has_override_fetch()) {
             Some(h) => {
                 println!("{}", crate::color::c_info("Using override_fetch hook"));
-                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                let ctx = ctx
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
                 h.override_fetch(request.clone(), ctx).await?
             }
             None => {
@@ -217,7 +221,9 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
         // 3. after_fetch
         let response = match job.hooks.as_ref() {
             Some(h) => {
-                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                let ctx = ctx
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
                 match h.after_fetch(fetch_attempt, ctx).await? {
                     None => {
                         println!(
@@ -236,7 +242,9 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
         let extraction = match job.hooks.as_ref().filter(|h| h.has_override_extract()) {
             Some(h) => {
                 println!("{}", crate::color::c_info("Using override_extract hook"));
-                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                let ctx = ctx
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
                 let items = h.override_extract(&response, ctx).await?;
                 let count = items.len();
                 crate::scraper::extractor::ExtractionResult {
@@ -277,7 +285,9 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
         // 5. after_extract
         let items = match job.hooks.as_ref() {
             Some(h) => {
-                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                let ctx = ctx
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
                 h.after_extract(items, ctx).await?
             }
             None => items,
@@ -290,7 +300,9 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
         };
         let items = match job.hooks.as_ref() {
             Some(h) if h.has_filter_item() => {
-                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                let ctx = ctx
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
                 let mut filtered = Vec::new();
                 for item in items {
                     if let Some(mut i) = h.filter_item(item, ctx).await? {
@@ -317,7 +329,9 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
         // 7. before_store
         let items = match job.hooks.as_ref() {
             Some(h) => {
-                let ctx = ctx.as_ref().ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
+                let ctx = ctx
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
                 match h.before_store(items, ctx).await? {
                     None => {
                         println!(

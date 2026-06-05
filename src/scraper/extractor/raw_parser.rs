@@ -169,7 +169,7 @@ fn extract_raw_value(
     attr: &str,
     base_url: &str,
 ) -> String {
-    let node = &document.nodes[index];
+    let node = document.node(index);
 
     if attr.eq_ignore_ascii_case("text") {
         return normalize_whitespace(&decode_html_entities(&collect_raw_text(document, index)));
@@ -183,12 +183,12 @@ fn extract_raw_value(
 }
 
 fn collect_raw_text(document: &RawDocument<'_>, index: usize) -> String {
-    let node = &document.nodes[index];
+    let node = document.node(index);
     let mut text = String::new();
     let mut cursor = node.open_end;
 
     for &child_index in &node.children {
-        let child = &document.nodes[child_index];
+        let child = document.node(child_index);
         if cursor < child.start {
             text.push_str(&document.html[cursor..child.start]);
             text.push(' ');
@@ -387,7 +387,7 @@ impl<'a> RawDocument<'a> {
             });
 
             if let Some(parent_index) = parent {
-                document.nodes[parent_index].children.push(index);
+                document.node_mut(parent_index).children.push(index);
             } else {
                 document.roots.push(index);
             }
@@ -401,8 +401,8 @@ impl<'a> RawDocument<'a> {
 
         for index in stack {
             let len = html.len();
-            document.nodes[index].close_start = len;
-            document.nodes[index].end = len;
+            document.node_mut(index).close_start = len;
+            document.node_mut(index).end = len;
         }
 
         document
@@ -419,13 +419,13 @@ impl<'a> RawDocument<'a> {
             for index in matches {
                 match combinator {
                     Combinator::Descendant => {
-                        for &child in &self.nodes[index].children {
+                        for &child in &self.node(index).children {
                             self.collect_matches(child, step, true, &mut next);
                         }
                     }
                     Combinator::Child => {
-                        for &child in &self.nodes[index].children {
-                            if step.matches(&self.nodes[child]) {
+                        for &child in &self.node(index).children {
+                            if step.matches(self.node(child)) {
                                 next.push(child);
                             }
                         }
@@ -443,13 +443,12 @@ impl<'a> RawDocument<'a> {
 
         let (first_combinator, first_step) = &selector.steps[0];
 
-        if matches!(first_combinator, Combinator::Descendant)
-            && first_step.matches(&self.nodes[root])
+        if matches!(first_combinator, Combinator::Descendant) && first_step.matches(self.node(root))
         {
             current.push(root);
         }
 
-        for &child in &self.nodes[root].children {
+        for &child in &self.node(root).children {
             self.collect_matches(child, &selector.steps[0].1, true, &mut current);
         }
 
@@ -458,13 +457,13 @@ impl<'a> RawDocument<'a> {
             for index in current {
                 match combinator {
                     Combinator::Descendant => {
-                        for &child in &self.nodes[index].children {
+                        for &child in &self.node(index).children {
                             self.collect_matches(child, step, true, &mut next);
                         }
                     }
                     Combinator::Child => {
-                        for &child in &self.nodes[index].children {
-                            if step.matches(&self.nodes[child]) {
+                        for &child in &self.node(index).children {
+                            if step.matches(self.node(child)) {
                                 next.push(child);
                             }
                         }
@@ -484,19 +483,35 @@ impl<'a> RawDocument<'a> {
         recurse: bool,
         matches: &mut Vec<usize>,
     ) {
-        if selector.matches(&self.nodes[index]) {
+        if selector.matches(self.node(index)) {
             matches.push(index);
         }
 
         if recurse {
-            for &child in &self.nodes[index].children {
+            for &child in &self.node(index).children {
                 self.collect_matches(child, selector, true, matches);
             }
         }
     }
 
+    fn node(&self, index: usize) -> &RawNode {
+        self.nodes.get(index).unwrap_or_else(|| {
+            panic!(
+                "node index {index} out of bounds (len {})",
+                self.nodes.len()
+            )
+        })
+    }
+
+    fn node_mut(&mut self, index: usize) -> &mut RawNode {
+        let len = self.nodes.len();
+        self.nodes
+            .get_mut(index)
+            .unwrap_or_else(|| panic!("node index {index} out of bounds (len {len})"))
+    }
+
     fn node_html(&self, index: usize) -> &'a str {
-        let node = &self.nodes[index];
+        let node = self.node(index);
         &self.html[node.start..node.end]
     }
 }
@@ -625,7 +640,7 @@ fn close_until_match(
 ) {
     let Some(position) = stack
         .iter()
-        .rposition(|&index| nodes[index].tag_name == tag_name)
+        .rposition(|&index| nodes.get(index).is_some_and(|n| n.tag_name == tag_name))
     else {
         return;
     };
@@ -634,8 +649,10 @@ fn close_until_match(
         let Some(index) = stack.pop() else {
             break;
         };
-        nodes[index].close_start = close_start;
-        nodes[index].end = close_end;
+        if let Some(node) = nodes.get_mut(index) {
+            node.close_start = close_start;
+            node.end = close_end;
+        }
     }
 }
 

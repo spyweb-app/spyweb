@@ -489,7 +489,12 @@ impl mlua::UserData for Browser {
                                 && t["url"].as_str() == Some("about:blank")
                         })
                     }) {
-                        let target_id = existing["targetId"].as_str().unwrap().to_string();
+                        let target_id = existing["targetId"]
+                            .as_str()
+                            .ok_or_else(|| {
+                                mlua::Error::external("Missing targetId in CDP response")
+                            })?
+                            .to_string();
                         return create_page_for_browser(&lua, &this, target_id, browser_url).await;
                     }
                 }

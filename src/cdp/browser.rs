@@ -14,7 +14,7 @@ static REGISTRY: BrowserRegistry = OnceLock::new();
 
 fn register_process(child: Arc<Mutex<Option<Child>>>) {
     let registry = REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
-    let mut guard = registry.lock().unwrap();
+    let mut guard = registry.lock().unwrap_or_else(|e| e.into_inner());
     guard.retain(|arc| arc.lock().map(|inner| inner.is_some()).unwrap_or(false));
     guard.push(child);
 }
@@ -24,14 +24,14 @@ pub fn active_count() -> usize {
         return 0;
     };
 
-    let mut guard = registry.lock().unwrap();
+    let mut guard = registry.lock().unwrap_or_else(|e| e.into_inner());
     guard.retain(|arc| arc.lock().map(|inner| inner.is_some()).unwrap_or(false));
     guard.len()
 }
 
 pub fn shutdown_all() {
     if let Some(registry) = REGISTRY.get() {
-        let mut guard = registry.lock().unwrap();
+        let mut guard = registry.lock().unwrap_or_else(|e| e.into_inner());
         for arc in guard.drain(..) {
             if let Ok(mut child_guard) = arc.lock()
                 && let Some(mut child) = child_guard.take()

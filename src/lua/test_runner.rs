@@ -21,7 +21,7 @@ async fn run_tests_async(
     pattern_filter: Option<String>,
 ) -> Result<()> {
     let temp_db_file = NamedTempFile::new()?;
-    let dummy_db = Arc::new(Db::open(temp_db_file.path().to_str().unwrap())?); // Needed for loader
+    let dummy_db = Arc::new(Db::open(&temp_db_file.path().to_string_lossy())?); // Needed for loader
     let jobs = Jobs {
         list: loader::load_dir_jobs("jobs", dummy_db.clone())?,
     };
@@ -133,7 +133,7 @@ fn discover_tests(job_dir: &Path, job_name: &str) -> Result<Vec<String>> {
     // We need a temporary VM just to discover tests
     // Using a fake DB for discovery
     let temp_db_file = NamedTempFile::new()?;
-    let db = Arc::new(Db::open(temp_db_file.path().to_str().unwrap())?);
+    let db = Arc::new(Db::open(&temp_db_file.path().to_string_lossy())?);
     let uses_cdp = job_source_uses_cdp(job_dir)?;
     let lua = engine::create_engine(Some(job_dir.to_path_buf()), db, job_name, uses_cdp)?;
 

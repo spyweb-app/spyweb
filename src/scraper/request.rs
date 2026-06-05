@@ -105,7 +105,7 @@ fn format_error_chain(err: &anyhow::Error) -> String {
 pub struct RequestHandler {
     next_proxy_index: AtomicUsize,
     timeout: Duration,
-    default_agent: OnceLock<Agent>,
+    default_agent: OnceLock<Result<Agent>>,
 }
 
 impl Default for RequestHandler {
@@ -134,10 +134,10 @@ impl RequestHandler {
     fn get_agent(&self, proxy_url: Option<&str>) -> Result<Agent> {
         match proxy_url {
             Some(url) => self.build_agent(Some(url)),
-            None => Ok(self
-                .default_agent
-                .get_or_init(|| self.build_agent(None).expect("default agent init"))
-                .clone()),
+            None => match self.default_agent.get_or_init(|| self.build_agent(None)) {
+                Ok(agent) => Ok(agent.clone()),
+                Err(err) => Err(anyhow::anyhow!("{}", err)),
+            },
         }
     }
 
