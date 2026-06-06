@@ -22,6 +22,7 @@ pub(crate) const HOOK_BEFORE_WEBHOOK: u16 = 1 << 8;
 pub(crate) const HOOK_ON_SUCCESS: u16 = 1 << 9;
 pub(crate) const HOOK_ON_ERROR: u16 = 1 << 10;
 pub(crate) const HOOK_ON_FINALLY: u16 = 1 << 11;
+pub(crate) const HOOK_ON_FINISHED: u16 = 1 << 12;
 
 pub(crate) const RESERVED_CTX_KEYS: &[&str] = &[
     "last_fetch",
@@ -157,6 +158,9 @@ impl JobHooks {
                 hook_mask |= HOOK_ON_FINALLY;
             }
         }
+        if has("on_finished") {
+            hook_mask |= HOOK_ON_FINISHED;
+        }
 
         Ok(Self {
             job_name: job_name.to_string(),
@@ -178,14 +182,14 @@ impl JobHooks {
         self.hook_mask & (HOOK_ON_SUCCESS | HOOK_ON_ERROR | HOOK_ON_FINALLY) != 0
     }
 
-    pub(crate) async fn new_cycle_context(&self) -> Result<Table> {
+    pub(crate) async fn new_cycle_context(&self, worker_id: usize) -> Result<Table> {
         let lua = self.lua.lock().await;
         let ctx = lua.create_table()?;
         let shared = lua.create_table()?;
         let deferred = lua.create_table()?;
         let store = lua.create_table()?;
 
-        store.set("worker_id", 0)?;
+        store.set("worker_id", worker_id)?;
         store.set("__deferred", deferred.clone())?;
         ctx.set("shared", shared)?;
 
@@ -348,6 +352,24 @@ impl JobHooks {
                     "defer.lua: on_finally not callable for job '{}': {e}",
                     self.job_name
                 );
+            }
+        }
+    }
+
+    pub async fn run_on_finished(&self) {
+        if self.hook_mask & HOOK_ON_FINISHED == 0 {
+            return;
+        }
+
+        let lua = self.lua.lock().await;
+        match lua.globals().get::<mlua::Function>("on_finished") {
+            Ok(f) => {
+                if let Err(e) = f.call_async::<()>(()).await {
+                    crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
+                }
+            }
+            Err(e) => {
+                crate::t_eprintln!("on_finished not callable for job '{}': {e}", self.job_name);
             }
         }
     }

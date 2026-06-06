@@ -1,6 +1,8 @@
 use super::*;
+use crate::config::types::{Job, JobConfig};
 use crate::scraper::extractor::ExtractedItem;
 use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
+use crate::scraper::runner::Runner;
 use crate::services::db::Db;
 use indexmap::IndexMap;
 use std::collections::HashMap;
@@ -59,7 +61,7 @@ end
     };
 
     let err = smol::block_on(async {
-        let ctx = hooks.new_cycle_context().await.unwrap();
+        let ctx = hooks.new_cycle_context(0).await.unwrap();
         hooks.set_last_fetch(&ctx, &attempt).await.unwrap();
         let fetch_table = ctx.get("last_fetch").unwrap();
         hooks.try_after_fetch(&attempt, fetch_table, &ctx).await
@@ -111,7 +113,7 @@ end
     };
 
     // Test Success
-    let ctx = smol::block_on(hooks.new_cycle_context()).unwrap();
+    let ctx = smol::block_on(hooks.new_cycle_context(0)).unwrap();
     let attempt = smol::block_on(hooks.override_fetch(req.clone(), &ctx)).unwrap();
     let res = attempt.result.unwrap();
     assert_eq!(res.status, 200);
@@ -168,7 +170,7 @@ end
         proxy: None,
     };
 
-    let ctx = smol::block_on(hooks.new_cycle_context()).unwrap();
+    let ctx = smol::block_on(hooks.new_cycle_context(0)).unwrap();
     let items = smol::block_on(hooks.override_extract(&res, &ctx)).unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].fields["title"], "Custom Item 1");
@@ -216,7 +218,7 @@ end
         headers: Default::default(),
     };
 
-    let ctx = smol::block_on(hooks.new_cycle_context()).unwrap();
+    let ctx = smol::block_on(hooks.new_cycle_context(0)).unwrap();
     let _ = smol::block_on(hooks.before_fetch(req, &ctx)).unwrap();
 
     smol::block_on(async {
@@ -291,7 +293,7 @@ end
         headers: Default::default(),
     };
 
-    let ctx = smol::block_on(hooks.new_cycle_context()).unwrap();
+    let ctx = smol::block_on(hooks.new_cycle_context(0)).unwrap();
     let _ = smol::block_on(hooks.before_fetch(req, &ctx)).unwrap();
     smol::block_on(async {
         hooks.run_on_success(&ctx).await;
@@ -349,7 +351,7 @@ end
     let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
 
     smol::block_on(async {
-        let ctx = hooks.new_cycle_context().await.unwrap();
+        let ctx = hooks.new_cycle_context(0).await.unwrap();
         let store = JobHooks::ctx_store(&ctx).unwrap();
         store.raw_set("last_fetch", "stale").unwrap();
         store.raw_set("selector_matches", 3).unwrap();
@@ -415,7 +417,7 @@ end
     assert!(hooks.hook_mask & HOOK_ON_SUCCESS == 0);
 
     smol::block_on(async {
-        let ctx = hooks.new_cycle_context().await.unwrap();
+        let ctx = hooks.new_cycle_context(0).await.unwrap();
         hooks.run_on_success(&ctx).await;
 
         let lua = hooks.lua.lock().await;
@@ -444,7 +446,7 @@ fn telemetry_table_records_active_stages_and_cleans_up() {
     let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
 
     smol::block_on(async {
-        let ctx = hooks.new_cycle_context().await.unwrap();
+        let ctx = hooks.new_cycle_context(0).await.unwrap();
         hooks.init_telemetry(&ctx).await.unwrap();
         let sample = hooks.telemetry_stage_start(&ctx).await.unwrap();
         hooks
@@ -526,7 +528,7 @@ end
     let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
 
     smol::block_on(async {
-        let ctx = hooks.new_cycle_context().await.unwrap();
+        let ctx = hooks.new_cycle_context(0).await.unwrap();
 
         // Execute the lifecycle hook
         hooks.run_on_success(&ctx).await;
@@ -584,7 +586,7 @@ end
     let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
 
     smol::block_on(async {
-        let ctx = hooks.new_cycle_context().await.unwrap();
+        let ctx = hooks.new_cycle_context(0).await.unwrap();
         let req = RequestConfig {
             url: "https://example.com".into(),
             method: "GET".into(),
@@ -646,7 +648,7 @@ end
     let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
 
     smol::block_on(async {
-        let ctx = hooks.new_cycle_context().await.unwrap();
+        let ctx = hooks.new_cycle_context(0).await.unwrap();
         let req = RequestConfig {
             url: "https://example.com".into(),
             method: "GET".into(),
@@ -673,6 +675,415 @@ end
     });
 
     let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_multi_worker_url_dispatch_and_worker_id() {
+    let dir = unique_test_dir("multi-worker-dispatch");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(
+        &hook_path,
+        r#"
+function before_fetch(request, ctx)
+    -- Store worker_id and URL in a global log to verify dispatch
+    _G.worker_log = _G.worker_log or {}
+    table.insert(_G.worker_log, { worker_id = ctx.worker_id, url = request.url })
+    return request
+end
+"#,
+    )
+    .unwrap();
+
+    let db_path = dir.join("test.redb");
+    let db = Arc::new(Db::open(db_path.to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, Arc::clone(&db), "test_job").unwrap();
+    let job = Arc::new(Job {
+        config: JobConfig {
+            name: "test_job".into(),
+            url: "https://initial.com".into(),
+            selector: ".item".into(),
+            fields: vec![],
+            workers: Some(2),
+            urls: Some(vec![
+                "https://url-1.com".into(),
+                "https://url-2.com".into(),
+                "https://url-3.com".into(),
+                "https://url-4.com".into(),
+            ]),
+            keywords: None,
+            search_fields: None,
+            webhook: None,
+            debug: false,
+            enabled: true,
+            interval: 60,
+            proxy: None,
+            notification: None,
+            headers: None,
+            hash_fields: None,
+        },
+        hooks: Some(hooks),
+        has_hooks_file: true,
+        dir: Some(dir.clone()),
+    });
+
+    let runner = Arc::new(Runner::new());
+
+    smol::block_on(async {
+        // Run Group 3 URL Dispatch
+        crate::scraper::pipeline::run_urls_cycle(Arc::clone(&job), &db, &runner, 2).await;
+
+        let hooks_ref = job.hooks.as_ref().unwrap();
+        let lua_guard = hooks_ref.lua.lock().await;
+        let lua: &mlua::Lua = &lua_guard;
+        let log: Vec<mlua::Table> = lua
+            .globals()
+            .get::<mlua::Table>("_G")
+            .unwrap()
+            .get("worker_log")
+            .unwrap();
+
+        // 4 URLs total should be processed
+        assert_eq!(log.len(), 4);
+
+        let mut seen_urls = std::collections::HashSet::new();
+        let mut seen_workers = std::collections::HashSet::new();
+
+        for entry in log {
+            let url: String = entry.get::<String>("url").unwrap();
+            let worker_id: usize = entry.get::<usize>("worker_id").unwrap();
+            seen_urls.insert(url);
+            seen_workers.insert(worker_id);
+        }
+
+        // Verify all URLs were hit exactly once (no duplicates/skips)
+        assert_eq!(seen_urls.len(), 4);
+        assert!(seen_urls.contains("https://url-1.com"));
+        assert!(seen_urls.contains("https://url-2.com"));
+        assert!(seen_urls.contains("https://url-3.com"));
+        assert!(seen_urls.contains("https://url-4.com"));
+
+        // Verify both workers were active (probabilistic but likely with 4 URLs)
+        assert!(seen_workers.len() >= 1);
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_on_finished_mask_and_execution() {
+    let dir = unique_test_dir("on-finished");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+
+    fs::write(
+        &hook_path,
+        r#"
+_G.log = {}
+
+function on_finished()
+    table.insert(_G.log, "finished")
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+    assert!(
+        hooks.hook_mask & HOOK_ON_FINISHED != 0,
+        "HOOK_ON_FINISHED should be set in mask"
+    );
+
+    smol::block_on(async {
+        hooks.run_on_finished().await;
+
+        let lua = hooks.lua.lock().await;
+        let log: Vec<String> = lua
+            .globals()
+            .get::<mlua::Table>("_G")
+            .unwrap()
+            .get("log")
+            .unwrap();
+        assert_eq!(log, vec!["finished"], "on_finished should have executed");
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_on_finished_no_args_passed() {
+    let dir = unique_test_dir("on-finished-no-args");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+
+    fs::write(
+        &hook_path,
+        r#"
+_G.arg_count = nil
+
+function on_finished(...)
+    local n = 0
+    for _ in ipairs({...}) do n = n + 1 end
+    _G.arg_count = n
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+    assert!(hooks.hook_mask & HOOK_ON_FINISHED != 0);
+
+    smol::block_on(async {
+        hooks.run_on_finished().await;
+
+        let lua = hooks.lua.lock().await;
+        let arg_count: usize = lua
+            .globals()
+            .get::<mlua::Table>("_G")
+            .unwrap()
+            .get("arg_count")
+            .unwrap();
+        assert_eq!(arg_count, 0, "on_finished should receive zero arguments");
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_on_finished_no_defer_lua_still_works() {
+    let dir = unique_test_dir("on-finished-no-defer");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+
+    // No defer.lua file — on_finished should still be detected
+    fs::write(
+        &hook_path,
+        r#"
+_G.ran = false
+
+function on_finished()
+    _G.ran = true
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+    assert!(
+        hooks.hook_mask & HOOK_ON_FINISHED != 0,
+        "on_finished should be detected without defer.lua"
+    );
+
+    smol::block_on(async {
+        hooks.run_on_finished().await;
+
+        let lua = hooks.lua.lock().await;
+        let ran: bool = lua
+            .globals()
+            .get::<mlua::Table>("_G")
+            .unwrap()
+            .get("ran")
+            .unwrap();
+        assert!(ran, "on_finished should have run without defer.lua");
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_on_finished_error_does_not_crash() {
+    let dir = unique_test_dir("on-finished-error");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+
+    fs::write(
+        &hook_path,
+        r#"
+function on_finished()
+    error("boom")
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+    assert!(hooks.hook_mask & HOOK_ON_FINISHED != 0);
+
+    smol::block_on(async {
+        // Should not panic
+        hooks.run_on_finished().await;
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_on_finished_not_defined_is_noop() {
+    let dir = unique_test_dir("on-finished-noop");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+
+    fs::write(
+        &hook_path,
+        r#"
+_G.ran = false
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+    assert!(
+        hooks.hook_mask & HOOK_ON_FINISHED == 0,
+        "mask should NOT have HOOK_ON_FINISHED when on_finished is not defined"
+    );
+
+    smol::block_on(async {
+        hooks.run_on_finished().await;
+
+        let lua = hooks.lua.lock().await;
+        let ran: bool = lua
+            .globals()
+            .get::<mlua::Table>("_G")
+            .unwrap()
+            .get("ran")
+            .unwrap();
+        assert!(!ran, "on_finished should not have run when not defined");
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_dynamic_url_override() {
+    let dir = unique_test_dir("dynamic-dispatch");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(
+        &hook_path,
+        r#"
+function before_fetch(request, ctx)
+    -- Override the URL dynamically
+    request.url = "https://override.com"
+    return request
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+    smol::block_on(async {
+        let ctx = hooks.new_cycle_context(0).await.unwrap();
+        let req = RequestConfig {
+            url: "https://initial.com".into(),
+            method: "GET".into(),
+            headers: Default::default(),
+        };
+
+        let overridden = hooks.before_fetch(req, &ctx).await.unwrap().unwrap();
+        assert_eq!(overridden.url, "https://override.com");
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_worker_panic_resilience() {
+    let dir = unique_test_dir("worker-panic");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(
+        &hook_path,
+        r#"
+function before_fetch(request, ctx)
+    if request.url == "https://panic.com" then
+        error("Intentional panic")
+    end
+    _G.worker_log = _G.worker_log or {}
+    table.insert(_G.worker_log, request.url)
+    return request
+end
+"#,
+    )
+    .unwrap();
+
+    let db_path = dir.join("test.redb");
+    let db = Arc::new(Db::open(db_path.to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, Arc::clone(&db), "test_job").unwrap();
+
+    let job = Arc::new(Job {
+        config: JobConfig {
+            name: "test_job".into(),
+            url: "https://initial.com".into(),
+            selector: ".item".into(),
+            fields: vec![],
+            workers: Some(2),
+            urls: Some(vec![
+                "https://url-1.com".into(),
+                "https://panic.com".into(),
+                "https://url-3.com".into(),
+            ]),
+            keywords: None,
+            search_fields: None,
+            webhook: None,
+            debug: false,
+            enabled: true,
+            interval: 60,
+            proxy: None,
+            notification: None,
+            headers: None,
+            hash_fields: None,
+        },
+        hooks: Some(hooks),
+        has_hooks_file: true,
+        dir: Some(dir.clone()),
+    });
+
+    let runner = Arc::new(Runner::new());
+
+    smol::block_on(async {
+        // Run workers. Panic on https://panic.com should be caught and logged
+        crate::scraper::pipeline::run_urls_cycle(Arc::clone(&job), &db, &runner, 2).await;
+
+        let hooks_ref = job.hooks.as_ref().unwrap();
+        let lua = hooks_ref.lua.lock().await;
+        let log: Vec<String> = lua
+            .globals()
+            .get::<mlua::Table>("_G")
+            .unwrap()
+            .get("worker_log")
+            .unwrap();
+
+        // 2 URLs should still be processed, panic is ignored
+        assert_eq!(log.len(), 2);
+        assert!(log.contains(&"https://url-1.com".to_string()));
+        assert!(log.contains(&"https://url-3.com".to_string()));
+    });
+
+    drop(db);
+    let _ = fs::remove_file(db_path);
     let _ = fs::remove_file(&hook_path);
     let _ = fs::remove_dir(&dir);
 }

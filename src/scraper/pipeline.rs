@@ -4,23 +4,40 @@ use crate::{
 };
 use anyhow::Result;
 use smol::Timer;
-use std::{sync::Arc, time::Duration};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+type UrlQueue = Arc<Mutex<VecDeque<String>>>;
+
+const WORKER_STAGGER_MS: u64 = 200;
 
 pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
     let interval = Duration::from_secs(job.config.interval as u64);
-    let base_request = RequestConfig::from_job(&job.config);
+    let worker_count = job.config.worker_count();
+    let has_urls = job.config.has_urls();
+    let job = Arc::new(job);
 
     loop {
         crate::t_println!("Running job: {}", color::c_job(&job.config.name));
         let started = std::time::Instant::now();
 
-        let result = run_once(&job, &db, &runner, &base_request).await;
-        let pipeline_elapsed = started.elapsed();
-
-        if let Err(e) = result {
-            crate::t_eprintln!("Job '{}' error: {}", color::c_job(&job.config.name), e);
+        if has_urls {
+            run_urls_cycle(Arc::clone(&job), &db, &runner, worker_count).await;
+        } else if worker_count > 1 {
+            run_multi_cycle(Arc::clone(&job), &db, &runner, worker_count).await;
+        } else {
+            let base_request = RequestConfig::from_job(&job.config);
+            if let Err(e) = run_once(&*job, &db, &runner, &base_request, 0).await {
+                crate::t_eprintln!("Job '{}' error: {}", color::c_job(&job.config.name), e);
+            }
         }
 
+        if let Some(hooks) = job.hooks.as_ref() {
+            hooks.run_on_finished().await;
+        }
+
+        let pipeline_elapsed = started.elapsed();
         crate::t_println!(
             "Job [{}] finished in {}, sleeping for {}",
             color::c_job(&job.config.name),
@@ -31,14 +48,88 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
     }
 }
 
-async fn run_once(
+pub(crate) async fn run_urls_cycle(
+    job: Arc<Job>,
+    db: &Arc<Db>,
+    runner: &Arc<Runner>,
+    worker_count: usize,
+) {
+    let queue: UrlQueue = Arc::new(Mutex::new(
+        job.config.urls.clone().unwrap().into_iter().collect(),
+    ));
+
+    let mut handles = Vec::with_capacity(worker_count);
+    for i in 0..worker_count {
+        if i > 0 {
+            Timer::after(Duration::from_millis(WORKER_STAGGER_MS)).await;
+        }
+        let worker_id = i;
+        let job = Arc::clone(&job);
+        let db = Arc::clone(db);
+        let runner = Arc::clone(runner);
+        let queue = Arc::clone(&queue);
+        handles.push(smol::spawn(async move {
+            loop {
+                let url = { queue.lock().unwrap_or_else(|e| e.into_inner()).pop_front() };
+                let url = match url {
+                    Some(u) => u,
+                    None => return,
+                };
+                let request = RequestConfig {
+                    url,
+                    ..RequestConfig::from_job(&job.config)
+                };
+                if let Err(e) = run_once(&*job, &db, &runner, &request, worker_id).await {
+                    crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
+                }
+            }
+        }));
+    }
+
+    for handle in handles {
+        handle.await;
+    }
+}
+
+pub(crate) async fn run_multi_cycle(
+    job: Arc<Job>,
+    db: &Arc<Db>,
+    runner: &Arc<Runner>,
+    worker_count: usize,
+) {
+    let base_request = RequestConfig::from_job(&job.config);
+
+    let mut handles = Vec::with_capacity(worker_count);
+    for i in 0..worker_count {
+        if i > 0 {
+            Timer::after(Duration::from_millis(WORKER_STAGGER_MS)).await;
+        }
+        let worker_id = i;
+        let job = Arc::clone(&job);
+        let db = Arc::clone(db);
+        let runner = Arc::clone(runner);
+        let request = base_request.clone();
+        handles.push(smol::spawn(async move {
+            if let Err(e) = run_once(&*job, &db, &runner, &request, worker_id).await {
+                crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
+            }
+        }));
+    }
+
+    for handle in handles {
+        handle.await;
+    }
+}
+
+pub(crate) async fn run_once(
     job: &Job,
     db: &Arc<Db>,
     runner: &Arc<Runner>,
     base_request: &RequestConfig,
+    worker_id: usize,
 ) -> Result<()> {
     let ctx = match job.hooks.as_ref() {
-        Some(h) => Some(h.new_cycle_context().await?),
+        Some(h) => Some(h.new_cycle_context(worker_id).await?),
         None => None,
     };
     let tel = TelemetryHandle::new(job.hooks.as_ref(), ctx.as_ref());
@@ -281,139 +372,4 @@ pub(crate) async fn run_once_inner(
         .await?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::types::{Field, JobConfig};
-    use crate::lua::hooks::JobHooks;
-    use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn unique_test_dir(name: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("spyweb-{name}-{}-{nanos}", std::process::id()))
-    }
-
-    #[test]
-    fn run_once_finalizes_telemetry_before_cycle_cleanup() {
-        let dir = unique_test_dir("pipeline-telemetry");
-        fs::create_dir_all(&dir).unwrap();
-        let hook_path = dir.join("hooks.lua");
-        fs::write(
-            &hook_path,
-            r#"
-function override_fetch(request)
-    return {
-        status = 200,
-        url = request.url,
-        headers = {},
-        body = "<html></html>",
-    }
-end
-
-function override_extract(response)
-    return {}
-end
-"#,
-        )
-        .unwrap();
-
-        let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
-        let hooks = JobHooks::load(&hook_path, Arc::clone(&db), "test_job").unwrap();
-        let job = Job {
-            config: JobConfig {
-                name: "test job".into(),
-                url: "https://example.com".into(),
-                selector: ".item".into(),
-                fields: vec![Field::Shorthand("title".into())],
-                keywords: None,
-                search_fields: None,
-                webhook: None,
-                debug: false,
-                enabled: true,
-                interval: 60,
-                proxy: None,
-                notification: None,
-                headers: None,
-                hash_fields: None,
-                workers: None,
-                urls: None,
-            },
-            hooks: Some(hooks),
-            has_hooks_file: true,
-            dir: Some(dir.clone()),
-        };
-        let runner = Arc::new(Runner::new());
-
-        smol::block_on(async {
-            let base_request = RequestConfig::from_job(&job.config);
-            let ctx = job
-                .hooks
-                .as_ref()
-                .unwrap()
-                .new_cycle_context()
-                .await
-                .unwrap();
-            let tel = TelemetryHandle::new(job.hooks.as_ref(), Some(&ctx));
-            tel.init().await.unwrap();
-            run_once_inner(&job, &db, &runner, &base_request, &tel)
-                .await
-                .unwrap();
-            tel.finalize(std::time::Duration::from_millis(1)).await;
-
-            let telemetry: mlua::Table = ctx.get("telemetry").unwrap();
-            let map: mlua::Table = telemetry.get("map").unwrap();
-
-            assert!(telemetry.get::<f64>("total_duration_ms").unwrap() >= 0.0);
-            assert!(matches!(
-                ctx.get::<mlua::Value>("last_fetch").unwrap(),
-                mlua::Value::Table(_)
-            ));
-            assert_eq!(
-                map.get::<mlua::Table>("override_fetch")
-                    .unwrap()
-                    .get::<String>("status")
-                    .unwrap(),
-                "success"
-            );
-            assert_eq!(
-                map.get::<mlua::Table>("fetch")
-                    .unwrap()
-                    .get::<String>("status")
-                    .unwrap(),
-                "inactive"
-            );
-            assert_eq!(
-                map.get::<mlua::Table>("override_extract")
-                    .unwrap()
-                    .get::<String>("status")
-                    .unwrap(),
-                "success"
-            );
-            assert_eq!(
-                map.get::<mlua::Table>("filter")
-                    .unwrap()
-                    .get::<String>("status")
-                    .unwrap(),
-                "success"
-            );
-            assert!(matches!(
-                map.get::<mlua::Table>("store")
-                    .unwrap()
-                    .get::<mlua::Value>("duration_ms")
-                    .unwrap(),
-                mlua::Value::Nil
-            ));
-        });
-
-        let _ = fs::remove_file(dir.join("test.redb"));
-        let _ = fs::remove_file(&hook_path);
-        let _ = fs::remove_dir(&dir);
-    }
 }

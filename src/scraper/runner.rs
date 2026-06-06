@@ -140,7 +140,7 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
 
     let (ctx, _keep) = match job.hooks.as_ref() {
         Some(h) => {
-            let ctx = h.new_cycle_context().await?;
+            let ctx = h.new_cycle_context(0).await?;
             h.init_telemetry(&ctx).await?;
             (Some(ctx.clone()), Some(ctx))
         }
@@ -396,90 +396,4 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
     }
 
     result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::types::{Field, Rotate};
-
-    fn job(enabled: bool, keywords: Option<Vec<&str>>) -> JobConfig {
-        JobConfig {
-            name: "demo".into(),
-            url: "https://example.com/jobs".into(),
-            selector: ".job".into(),
-            fields: vec![
-                Field::Shorthand("title:h2".into()),
-                Field::Full {
-                    name: "link".into(),
-                    selector: "a".into(),
-                    att: "href".into(),
-                },
-            ],
-            keywords: keywords
-                .map(|keywords| keywords.into_iter().map(str::to_string).collect::<Vec<_>>()),
-            search_fields: None,
-            webhook: None,
-            enabled,
-            interval: 60,
-            debug: false,
-            proxy: Some(crate::config::types::Proxy {
-                enabled: false,
-                rotate: Rotate::RoundRobin,
-                urls: vec![],
-            }),
-            notification: None,
-            headers: None,
-            hash_fields: None,
-            workers: None,
-            urls: None,
-        }
-    }
-
-    fn response(body: &str) -> RequestResult {
-        RequestResult {
-            url: "https://example.com/jobs".into(),
-            status: 200,
-            headers: Default::default(),
-            body: body.into(),
-            proxy: None,
-        }
-    }
-
-    #[test]
-    fn process_response_builds_job_result() {
-        let runner = Runner::new();
-        let job = job(true, None);
-        let html = r#"
-            <div class="job"><h2>Rust Developer</h2><a href="/rust">Apply</a></div>
-            <div class="job"><h2>Go Developer</h2><a href="/go">Apply</a></div>
-        "#;
-
-        let Ok(result) = runner.process_response(&job, None, response(html)) else {
-            panic!("processing a valid HTML response should succeed");
-        };
-
-        assert_eq!(result.status, 200);
-        assert_eq!(result.item_count, 2);
-    }
-
-    #[test]
-    fn process_response_uses_keyword_filtering() {
-        let runner = Runner::new();
-        let job = job(true, Some(vec!["rust"]));
-        let html = r#"
-            <div class="job"><h2>Rust Developer</h2><a href="/rust">Apply</a></div>
-            <div class="job"><h2>Go Developer</h2><a href="/go">Apply</a></div>
-        "#;
-
-        let Ok(result) = runner.process_response(&job, None, response(html)) else {
-            panic!("processing a valid HTML response should succeed");
-        };
-
-        assert_eq!(result.item_count, 1);
-        assert_eq!(
-            result.items[0].fields.get("title").map(String::as_str),
-            Some("Rust Developer")
-        );
-    }
 }

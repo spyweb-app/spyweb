@@ -4,11 +4,12 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use mlua::Function;
+use smol::lock::Mutex;
 use tempfile::NamedTempFile;
 
 use crate::config::loader;
 use crate::config::types::{Job, Jobs};
-use crate::lua::{engine, hooks::source_uses_cdp};
+use crate::lua::{JobHooks, engine, hooks::source_uses_cdp};
 use crate::services::db::Db;
 use crate::services::profiles;
 
@@ -165,14 +166,33 @@ async fn run_single_test(job_dir: &Path, job_name: &str, test_name: &str) -> Res
 
     load_test_sources(&lua, job_dir)?;
 
-    let test_fn: Function = lua
-        .globals()
-        .get(test_name)
-        .with_context(|| format!("Test function {} not found", crate::color::c_err(test_name)))?;
+    let hooks = JobHooks {
+        lua: Mutex::new(lua),
+        job_name: job_name.to_string(),
+        hook_path: job_dir.join("hooks.lua"),
+        hook_mask: 0,
+    };
+
+    let ctx = hooks.new_cycle_context(0).await?;
+    {
+        let lua = hooks.lua.lock().await;
+        lua.set_named_registry_value("active_ctx", ctx)?;
+    }
+
+    let test_fn: Function = {
+        let lua = hooks.lua.lock().await;
+        lua.globals().get(test_name)?
+    };
+
     test_fn
         .call_async::<()>(())
         .await
         .with_context(|| format!("Test {} failed", crate::color::c_err(test_name)))?;
+
+    {
+        let lua = hooks.lua.lock().await;
+        let _ = lua.set_named_registry_value("active_ctx", mlua::Value::Nil);
+    }
 
     Ok(())
 }

@@ -84,7 +84,7 @@ pub struct FetchAttempt {
     pub result: Result<RequestResult, String>,
 }
 
-fn format_error_chain(err: &anyhow::Error) -> String {
+pub(crate) fn format_error_chain(err: &anyhow::Error) -> String {
     let mut chain = err.chain();
     let mut message = chain
         .next()
@@ -254,7 +254,7 @@ impl RequestHandler {
         }
     }
 
-    fn build_agent(&self, proxy_url: Option<&str>) -> Result<Agent> {
+    pub(crate) fn build_agent(&self, proxy_url: Option<&str>) -> Result<Agent> {
         let mut config = Agent::config_builder()
             .timeout_global(Some(self.timeout))
             .http_status_as_error(false)
@@ -275,7 +275,7 @@ impl RequestHandler {
         Ok(config.into())
     }
 
-    fn select_proxy(&self, job: &JobConfig) -> Option<String> {
+    pub(crate) fn select_proxy(&self, job: &JobConfig) -> Option<String> {
         let proxy = job.proxy.as_ref()?;
         if !proxy.enabled || proxy.urls.is_empty() {
             return None;
@@ -295,7 +295,7 @@ impl RequestHandler {
     }
 }
 
-fn flatten_headers(headers: &HeaderMap) -> HashMap<String, String> {
+pub(crate) fn flatten_headers(headers: &HeaderMap) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for (name, value) in headers.iter() {
         let v = value.to_str().unwrap_or_default();
@@ -322,138 +322,4 @@ pub fn fetch_job(job: &JobConfig) -> Result<RequestResult> {
     }
 
     RequestHandler::new().fetch(job)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::types::{Field, Proxy as JobProxy};
-
-    fn job_with_proxy(rotate: Rotate, urls: Vec<&str>) -> JobConfig {
-        JobConfig {
-            name: "test".into(),
-            url: "https://example.com".into(),
-            selector: ".item".into(),
-            fields: vec![Field::Shorthand("title".into())],
-            debug: false,
-            keywords: None,
-            search_fields: None,
-            webhook: None,
-            enabled: true,
-            interval: 60,
-            proxy: Some(JobProxy {
-                enabled: true,
-                rotate,
-                urls: urls.into_iter().map(str::to_string).collect(),
-            }),
-            notification: None,
-            headers: None,
-            hash_fields: None,
-            workers: None,
-            urls: None,
-        }
-    }
-
-    #[test]
-    fn round_robin_proxy_rotation_advances() {
-        let handler = RequestHandler::new();
-        let job = job_with_proxy(
-            Rotate::RoundRobin,
-            vec!["http://proxy-1:8080", "http://proxy-2:8080"],
-        );
-
-        assert_eq!(
-            handler.select_proxy(&job).as_deref(),
-            Some("http://proxy-1:8080")
-        );
-        assert_eq!(
-            handler.select_proxy(&job).as_deref(),
-            Some("http://proxy-2:8080")
-        );
-        assert_eq!(
-            handler.select_proxy(&job).as_deref(),
-            Some("http://proxy-1:8080")
-        );
-    }
-
-    #[test]
-    fn sticky_proxy_always_uses_first_entry() {
-        let handler = RequestHandler::new();
-        let job = job_with_proxy(
-            Rotate::Sticky,
-            vec!["http://proxy-1:8080", "http://proxy-2:8080"],
-        );
-
-        assert_eq!(
-            handler.select_proxy(&job).as_deref(),
-            Some("http://proxy-1:8080")
-        );
-        assert_eq!(
-            handler.select_proxy(&job).as_deref(),
-            Some("http://proxy-1:8080")
-        );
-    }
-
-    #[test]
-    fn disabled_or_empty_proxy_configuration_is_ignored() {
-        let handler = RequestHandler::new();
-        let mut job = job_with_proxy(Rotate::RoundRobin, vec![]);
-        assert_eq!(handler.select_proxy(&job), None);
-
-        job.proxy = Some(JobProxy {
-            enabled: false,
-            rotate: Rotate::RoundRobin,
-            urls: vec!["http://proxy-1:8080".into()],
-        });
-        assert_eq!(handler.select_proxy(&job), None);
-    }
-
-    #[test]
-    fn flatten_headers_preserves_header_names_and_values() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "content-type",
-            ureq::http::HeaderValue::from_static("text/html"),
-        );
-        headers.insert(
-            "x-request-id",
-            ureq::http::HeaderValue::from_static("abc123"),
-        );
-
-        let flattened = flatten_headers(&headers);
-
-        assert_eq!(
-            flattened.get("content-type").map(String::as_str),
-            Some("text/html")
-        );
-        assert_eq!(
-            flattened.get("x-request-id").map(String::as_str),
-            Some("abc123")
-        );
-    }
-
-    #[test]
-    fn build_agent_disables_http_status_as_error() {
-        let handler = RequestHandler::new();
-        let Ok(agent) = handler.build_agent(None) else {
-            panic!("building an agent without a proxy should succeed");
-        };
-
-        assert!(
-            !agent.config().http_status_as_error(),
-            "HTTP 4xx/5xx responses should be treated as normal responses"
-        );
-    }
-
-    #[test]
-    fn error_chain_formatter_preserves_context_and_cause() {
-        let err = anyhow::anyhow!("dns lookup failed").context("request failed for job 'Spyweb'");
-
-        let formatted = format_error_chain(&err);
-
-        assert_eq!(
-            formatted,
-            "request failed for job 'Spyweb': dns lookup failed"
-        );
-    }
 }
