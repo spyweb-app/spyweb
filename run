@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 BIN_NAME="spyweb"
 
 show_help() {
-    echo "Usage: ./run [option] [flags] [feature]"
+    echo "Usage: ./run [option] [backend]"
     echo ""
     echo "Full options:"
     echo "  win-debug       Build (debug) for Windows and run the .exe"
@@ -26,9 +26,11 @@ show_help() {
     echo "  watch           Use cargo-watch (auto-runs on save)"
     echo ""
     echo "Flags:"
-    echo "  -n              Compile only, do not run (use with wd/win-debug)"
+    echo "  -n              Compile only, do not run"
     echo ""
-
+    echo "Backend (optional):"
+    echo "  sql             Use the SQLite backend instead of default redb"
+    echo ""
     echo "Short aliases (for the lazy):"
     echo "  wd  = win-debug"
     echo "  wr  = win-release"
@@ -44,12 +46,20 @@ show_help() {
 
 NO_RUN=0
 CMD=""
+BACKEND=""
 
 # Parse arguments
 for arg in "$@"; do
     case "$arg" in
         -n)
             NO_RUN=1
+            ;;
+        sql)
+            if [ -z "$CMD" ]; then
+                echo "[!] Place backend after the command, e.g. ./run ld sql"
+                exit 1
+            fi
+            BACKEND="sql"
             ;;
         tray)
             echo "[!] Use the tray-specific commands (e.g. 'ltd', 'wtd') instead."
@@ -68,6 +78,13 @@ for arg in "$@"; do
     esac
 done
 
+# Resolve backend features
+if [ "$BACKEND" = "sql" ]; then
+    CARGO_FEATURES="--no-default-features --features luau,sqlite"
+else
+    CARGO_FEATURES=""
+fi
+
 # Normalize short aliases
 case "$CMD" in
     wd)  CMD="win-debug" ;;
@@ -84,7 +101,7 @@ esac
 case "$CMD" in
     win-debug)
         echo "[*] Compiling (debug) for Windows [default/headless]..."
-        cargo build --target x86_64-pc-windows-gnu
+        cargo build $CARGO_FEATURES --target x86_64-pc-windows-gnu
         if [ "$NO_RUN" -eq 0 ]; then
             EXE_PATH="./target/x86_64-pc-windows-gnu/debug/${BIN_NAME}.exe"
             if [ -f "$EXE_PATH" ]; then
@@ -99,23 +116,23 @@ case "$CMD" in
 
     win-release)
         echo "[*] Compiling (release) for Windows [default/headless]..."
-        cargo build --release --target x86_64-pc-windows-gnu
+        cargo build $CARGO_FEATURES --release --target x86_64-pc-windows-gnu
         ;;
 
     win-release-all)
         echo "[*] Compiling both binaries for Windows (release)..."
-        cargo build --release --target x86_64-pc-windows-gnu
-        cargo build --release --target x86_64-pc-windows-gnu --bin spyweb-tray --features tray
+        cargo build $CARGO_FEATURES --release --target x86_64-pc-windows-gnu
+        cargo build $CARGO_FEATURES --release --target x86_64-pc-windows-gnu --bin spyweb-tray --features tray
         ;;
 
     linux-debug)
         echo "[*] Compiling & Running (debug) for Linux..."
-        cargo run -- start
+        cargo run $CARGO_FEATURES -- start
         ;;
         
     linux-release)
         echo "[*] Compiling (release) for Linux..."
-        cargo build --release
+        cargo build $CARGO_FEATURES --release
         ;;
 
     watch)
@@ -124,7 +141,11 @@ case "$CMD" in
             exit 1
         fi
         echo "[*] Watching for changes..."
-        cargo watch -c -w src -x "run -- start"
+        if [ "$BACKEND" = "sql" ]; then
+            cargo watch -c -w src -x "run --no-default-features --features luau,sqlite -- start"
+        else
+            cargo watch -c -w src -x "run -- start"
+        fi
         ;;
 
     win-tray-debug)
