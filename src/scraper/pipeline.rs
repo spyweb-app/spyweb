@@ -28,7 +28,7 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
             run_multi_cycle(Arc::clone(&job), &db, &runner, worker_count).await;
         } else {
             let base_request = RequestConfig::from_job(&job.config);
-            if let Err(e) = run_once(&*job, &db, &runner, &base_request, 0).await {
+            if let Err(e) = run_once(&job, &db, &runner, &base_request, 0).await {
                 crate::t_eprintln!("Job '{}' error: {}", color::c_job(&job.config.name), e);
             }
         }
@@ -79,7 +79,7 @@ pub(crate) async fn run_urls_cycle(
                     url,
                     ..RequestConfig::from_job(&job.config)
                 };
-                if let Err(e) = run_once(&*job, &db, &runner, &request, worker_id).await {
+                if let Err(e) = run_once(&job, &db, &runner, &request, worker_id).await {
                     crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
                 }
             }
@@ -110,7 +110,7 @@ pub(crate) async fn run_multi_cycle(
         let runner = Arc::clone(runner);
         let request = base_request.clone();
         handles.push(smol::spawn(async move {
-            if let Err(e) = run_once(&*job, &db, &runner, &request, worker_id).await {
+            if let Err(e) = run_once(&job, &db, &runner, &request, worker_id).await {
                 crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
             }
         }));

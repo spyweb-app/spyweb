@@ -2,21 +2,23 @@ use super::*;
 use crate::services::db::Db;
 use mlua::Lua;
 use std::io::Read;
-use std::{fs, sync::Arc};
+use std::sync::Arc;
 
 struct TestDb {
-    path: String,
+    _dir: tempfile::TempDir,
     db: Option<Arc<Db>>,
 }
 
 impl TestDb {
     fn new(name: &str) -> Self {
-        let path = format!("{}.redb", name);
-        if fs::metadata(&path).is_ok() {
-            fs::remove_file(&path).unwrap();
+        let dir = tempfile::TempDir::with_prefix(name).unwrap();
+        let path = dir.path().join("db.sqlite");
+        let path_str = path.to_str().unwrap().to_string();
+        let db = Arc::new(Db::open(&path_str).unwrap());
+        Self {
+            _dir: dir,
+            db: Some(db),
         }
-        let db = Arc::new(Db::open(&path).unwrap());
-        Self { path, db: Some(db) }
     }
 
     fn db(&self) -> Arc<Db> {
@@ -27,7 +29,6 @@ impl TestDb {
 impl Drop for TestDb {
     fn drop(&mut self) {
         self.db = None;
-        let _ = fs::remove_file(&self.path);
     }
 }
 
@@ -732,6 +733,167 @@ fn test_cdp_page_helpers_log_and_continue_on_page_failures() {
     )
     .exec()
     .unwrap();
+}
+
+#[cfg(feature = "sqlite")]
+#[test]
+fn test_db_query_from_lua() {
+    let tdb = TestDb::new("lua_sql_query");
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register(&lua, tdb.db(), "test").unwrap();
+
+        lua.load(
+            r#"
+            global_store_set("name", "spyweb")
+            global_store_set("version", "1.0")
+        "#,
+        )
+        .exec_async()
+        .await
+        .unwrap();
+
+        let rows: mlua::Table = lua
+            .load(
+                r#"
+                return db_query("SELECT key, value FROM lua_user ORDER BY key")
+            "#,
+            )
+            .eval_async()
+            .await
+            .unwrap();
+
+        assert_eq!(rows.raw_len(), 2);
+        let row1: mlua::Table = rows.get(1).unwrap();
+        assert_eq!(row1.get::<String>("key").unwrap(), "name");
+        assert_eq!(row1.get::<String>("value").unwrap(), "spyweb");
+
+        let row2: mlua::Table = rows.get(2).unwrap();
+        assert_eq!(row2.get::<String>("key").unwrap(), "version");
+    });
+}
+
+#[cfg(feature = "sqlite")]
+#[test]
+fn test_db_query_with_params_from_lua() {
+    let tdb = TestDb::new("lua_sql_query_params");
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register(&lua, tdb.db(), "test").unwrap();
+        lua.load(r#"global_store_set("lang", "luau")"#)
+            .exec_async()
+            .await
+            .unwrap();
+
+        let rows: mlua::Table = lua
+            .load(
+                r#"
+                return db_query("SELECT value FROM lua_user WHERE key = ?", { "lang" })
+            "#,
+            )
+            .eval_async()
+            .await
+            .unwrap();
+
+        assert_eq!(rows.raw_len(), 1);
+        let row: mlua::Table = rows.get(1).unwrap();
+        assert_eq!(row.get::<String>("value").unwrap(), "luau");
+    });
+}
+
+#[cfg(feature = "sqlite")]
+#[test]
+fn test_db_query_bad_sql_from_lua() {
+    let tdb = TestDb::new("lua_sql_query_bad");
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register(&lua, tdb.db(), "test").unwrap();
+
+        let result: mlua::Result<mlua::Table> = lua
+            .load(r#"return db_query("not valid sql", {})"#)
+            .eval_async()
+            .await;
+        assert!(result.is_err());
+    });
+}
+
+#[cfg(feature = "sqlite")]
+#[test]
+fn test_db_exec_insert_from_lua() {
+    let tdb = TestDb::new("lua_sql_exec_insert");
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register(&lua, tdb.db(), "test").unwrap();
+
+        lua.load(
+            r#"
+            local affected = db_exec("INSERT INTO lua_user (key, value) VALUES (?, ?)", { "role", "admin" })
+            assert(affected == 1, "expected 1 row affected")
+        "#,
+        )
+        .exec_async()
+        .await
+        .unwrap();
+
+        let val: Option<String> = lua
+            .load(r#"return global_store_get("role")"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(val.as_deref(), Some("admin"));
+    });
+}
+
+#[cfg(feature = "sqlite")]
+#[test]
+fn test_db_exec_create_table_from_lua() {
+    let tdb = TestDb::new("lua_sql_exec_create");
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register(&lua, tdb.db(), "test").unwrap();
+
+        lua.load(
+            r#"
+            db_exec("CREATE TABLE IF NOT EXISTS markers (id TEXT PRIMARY KEY, val INTEGER)")
+            local affected = db_exec("INSERT OR REPLACE INTO markers (id, val) VALUES (?, ?)", { "page", 5 })
+            assert(affected == 1, "expected 1 row affected")
+        "#,
+        )
+        .exec_async()
+        .await
+        .unwrap();
+
+        let rows: mlua::Table = lua
+            .load(r#"return db_query("SELECT val FROM markers WHERE id = ?", { "page" })"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(rows.raw_len(), 1);
+        let row: mlua::Table = rows.get(1).unwrap();
+        assert_eq!(row.get::<i64>("val").unwrap(), 5);
+    });
+}
+
+#[cfg(feature = "sqlite")]
+#[test]
+fn test_db_exec_bad_sql_from_lua() {
+    let tdb = TestDb::new("lua_sql_exec_bad");
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register(&lua, tdb.db(), "test").unwrap();
+
+        let result: mlua::Result<u64> = lua
+            .load(r#"return db_exec("not sql", {})"#)
+            .eval_async()
+            .await;
+        assert!(result.is_err());
+    });
 }
 
 #[test]

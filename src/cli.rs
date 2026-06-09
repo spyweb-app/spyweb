@@ -270,11 +270,17 @@ pub fn listen_command() -> anyhow::Result<()> {
             } else {
                 "Lua 5.4"
             };
+            let db = if cfg!(feature = "sqlite") {
+                "SQLite"
+            } else {
+                "redb"
+            };
             println!(
-                "{} {} (Engine: {})",
+                "{} {} (Engine: {}, DB: {})",
                 crate::color::c_bold("SpyWeb"),
                 crate::color::c_ok(&format!("v{}", env!("CARGO_PKG_VERSION"))),
-                crate::color::c_info(engine)
+                crate::color::c_info(engine),
+                crate::color::c_info(db),
             );
             std::process::exit(0);
         }

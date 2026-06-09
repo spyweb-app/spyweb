@@ -766,7 +766,7 @@ end
         assert!(seen_urls.contains("https://url-4.com"));
 
         // Verify both workers were active (probabilistic but likely with 4 URLs)
-        assert!(seen_workers.len() >= 1);
+        assert!(!seen_workers.is_empty());
     });
 
     let _ = fs::remove_file(dir.join("test.redb"));
