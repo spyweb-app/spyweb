@@ -3,6 +3,30 @@ use indexmap::IndexMap;
 use smol::channel::{Receiver, Sender, bounded};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+
+pub(crate) const ALLOWED_WRITE_EXT: &[&str] = &["csv", "json", "jsonl", "txt", "log"];
+pub(crate) const ALLOWED_READ_EXT: &[&str] = &["csv", "json", "jsonl", "txt", "log"];
+pub(crate) const ALLOWED_BINARY_EXT: &[&str] = &[
+    "csv", "json", "jsonl", "txt", "log", "png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico",
+    "woff", "woff2", "ttf", "otf", "pdf", "zip",
+];
+
+pub(crate) fn check_extension(path: &Path, allowed: &[&str], context: &str) -> Result<()> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    if !allowed.contains(&ext.as_str()) {
+        return Err(anyhow::anyhow!(
+            "{}: file extension '.{}' not allowed. Supported: {:?}",
+            context,
+            ext,
+            allowed
+        ));
+    }
+    Ok(())
+}
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 use std::thread::JoinHandle;
@@ -179,6 +203,8 @@ fn worker_main(rx: Receiver<IoTask>) {
 
 fn handle_task(files: &mut IndexMap<PathBuf, File>, task: IoTask) -> Result<()> {
     validate_path(&task.path)?;
+    check_extension(&task.path, ALLOWED_WRITE_EXT, "write")?;
+
     match task.op {
         IoOp::Append => append_to_file(files, &task.path, &task.content, task.add_timestamp),
         IoOp::Overwrite => overwrite_file(files, &task.path, &task.content),
@@ -290,21 +316,6 @@ fn prune_rotations(parent: &Path, stem: &str, extension: &str) -> Result<()> {
 }
 
 pub(crate) fn validate_path(path: &Path) -> Result<()> {
-    let allowed_extensions = ["csv", "json", "jsonl", "txt", "log"];
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or_default()
-        .to_lowercase();
-
-    if !allowed_extensions.contains(&ext.as_str()) {
-        return Err(anyhow::anyhow!(
-            "File extension '.{}' is not allowed. Supported: {:?}",
-            ext,
-            allowed_extensions
-        ));
-    }
-
     if path
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
@@ -334,22 +345,6 @@ pub(crate) fn validate_path(path: &Path) -> Result<()> {
         }
     }
 
-    #[cfg(not(test))]
-    {
-        let allowed_subdirs = ["jobs", "data", "logs"];
-        let is_safe = allowed_subdirs.iter().any(|subdir| {
-            let safe_root = current_dir.join(subdir);
-            abs_path.starts_with(safe_root)
-        });
-
-        if !is_safe {
-            return Err(anyhow::anyhow!(
-                "Access denied: Path must be within 'jobs/', 'data/', or 'logs/': {:?}",
-                path
-            ));
-        }
-    }
-
     Ok(())
 }
 
@@ -362,14 +357,11 @@ mod tests {
         assert!(validate_path(Path::new("data.csv")).is_ok());
         assert!(validate_path(Path::new("logs/hook.log")).is_ok());
         assert!(validate_path(Path::new("jobs/myjob/output.json")).is_ok());
+        assert!(validate_path(Path::new("random.ext")).is_ok());
 
         assert!(validate_path(Path::new("../secret.txt")).is_err());
         assert!(validate_path(Path::new("data/../../etc/passwd")).is_err());
         assert!(validate_path(Path::new("/etc/passwd")).is_err());
-
-        assert!(validate_path(Path::new("data.exe")).is_err());
-        assert!(validate_path(Path::new("data.sh")).is_err());
-        assert!(validate_path(Path::new("data")).is_err());
     }
 
     #[test]
