@@ -1,9 +1,29 @@
 use crate::services::notifier;
 use mlua::{Lua, LuaSerdeExt, Result as LuaResult};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
+pub(crate) const SHARED_DIR: &str = "shared";
+
+fn resolve_path_read(path_str: &str, job_dir: &Path) -> PathBuf {
+    if path_str.starts_with(&format!("{}/", SHARED_DIR)) {
+        return Path::new(path_str).to_path_buf();
+    }
+    let job_path = job_dir.join(path_str);
+    if job_path.exists() {
+        return job_path;
+    }
+    Path::new(SHARED_DIR).join(path_str)
+}
+
+fn resolve_path_write(path_str: &str, job_dir: &Path) -> PathBuf {
+    if path_str.starts_with(&format!("{}/", SHARED_DIR)) {
+        return Path::new(path_str).to_path_buf();
+    }
+    job_dir.join(path_str)
+}
+
+pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResult<()> {
     lua.load("math.randomseed(os.time())").exec()?;
 
     // helpers.lua
@@ -35,10 +55,11 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
 
     if let Some(dir) = job_dir {
         let log_dir = dir.clone();
+        let is_server = job_name == "__server";
         lua.globals().set(
             "log",
             lua.create_async_function(move |_, msg: String| {
-                let path = log_dir.join("hooks.log");
+                let path = log_dir.join(if is_server { "server.log" } else { "hooks.log" });
                 async move {
                     let task = crate::services::io::IoTask {
                         path,
@@ -63,7 +84,7 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
                     if std::path::Path::new(&path_str).is_absolute() {
                         return Err(mlua::Error::runtime("Absolute paths are not allowed"));
                     }
-                    let path = fs_dir.join(path_str);
+                    let path = resolve_path_write(&path_str, &fs_dir);
                     let task = crate::services::io::IoTask {
                         path,
                         content: content.into_bytes(),
@@ -87,7 +108,7 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
                     if std::path::Path::new(&path_str).is_absolute() {
                         return Err(mlua::Error::runtime("Absolute paths are not allowed"));
                     }
-                    let path = fs_overwrite_dir.join(path_str);
+                    let path = resolve_path_write(&path_str, &fs_overwrite_dir);
                     let task = crate::services::io::IoTask {
                         path,
                         content: content.into_bytes(),
@@ -111,9 +132,15 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
                     if std::path::Path::new(&path_str).is_absolute() {
                         return Err(mlua::Error::runtime("Absolute paths are not allowed"));
                     }
-                    let path = read_dir.join(&path_str);
+                    let path = resolve_path_read(&path_str, &read_dir);
                     crate::services::io::validate_path(&path)
                         .map_err(|e| mlua::Error::runtime(format!("fs_read rejected: {e}")))?;
+                    crate::services::io::check_extension(
+                        &path,
+                        crate::services::io::ALLOWED_READ_EXT,
+                        "fs_read",
+                    )
+                    .map_err(mlua::Error::runtime)?;
                     let result = smol::unblock(move || std::fs::read_to_string(&path)).await;
                     match result {
                         Ok(content) => Ok(Some(content)),
@@ -133,10 +160,16 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
                     if std::path::Path::new(&path_str).is_absolute() {
                         return Err(mlua::Error::runtime("Absolute paths are not allowed"));
                     }
-                    let path = read_binary_dir.join(&path_str);
+                    let path = resolve_path_read(&path_str, &read_binary_dir);
                     crate::services::io::validate_path(&path).map_err(|e| {
                         mlua::Error::runtime(format!("fs_read_binary rejected: {e}"))
                     })?;
+                    crate::services::io::check_extension(
+                        &path,
+                        crate::services::io::ALLOWED_BINARY_EXT,
+                        "fs_read_binary",
+                    )
+                    .map_err(mlua::Error::runtime)?;
                     let result = smol::unblock(move || std::fs::read(&path)).await;
                     match result {
                         Ok(content) => Ok(Some(content)),
@@ -167,22 +200,41 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>) -> LuaResult<()> {
                 }
 
                 let rel_path = name.replace('.', "/");
-                let local_path = require_dir.join(format!("{}.lua", rel_path));
-                let shared_path = std::path::Path::new("shared").join(format!("{}.lua", rel_path));
+                let candidates = [
+                    require_dir.join(format!("{}.lua", rel_path)),
+                    std::path::Path::new(".").join(format!("{}.lua", rel_path)),
+                ];
 
-                let source = if local_path.exists() {
-                    std::fs::read_to_string(&local_path)
-                } else if shared_path.exists() {
-                    std::fs::read_to_string(&shared_path)
-                } else {
-                    return Err(mlua::Error::runtime(format!(
-                        "module '{}' not found in job folder ({:?}) or shared folder ({:?})",
-                        name, local_path, shared_path
-                    )));
+                let mut last_err = String::new();
+                let mut source = None;
+                for path in &candidates {
+                    if !path.exists() {
+                        continue;
+                    }
+                    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                        last_err = format!("module '{}' rejected: directory traversal", name);
+                        continue;
+                    }
+                    match std::fs::read_to_string(path) {
+                        Ok(s) => {
+                            source = Some(s);
+                            break;
+                        }
+                        Err(e) => {
+                            last_err = format!("failed to read module '{}': {}", name, e);
+                        }
+                    }
                 }
-                .map_err(|e| {
-                    mlua::Error::runtime(format!("failed to read module '{}': {}", name, e))
-                })?;
+
+                let source = match source {
+                    Some(s) => s,
+                    None => {
+                        return Err(mlua::Error::runtime(format!(
+                            "module '{}' not found in job folder, shared folder, or project root ({})",
+                            name, last_err
+                        )));
+                    }
+                };
 
                 let result: mlua::Value = lua.load(&source).set_name(&name).call(())?;
                 loaded.set(name, result.clone())?;

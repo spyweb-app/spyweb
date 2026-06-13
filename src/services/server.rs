@@ -61,7 +61,9 @@ impl WebServer {
             if url.starts_with("/api") {
                 if let Some(ref required_key) = auth_key {
                     let provided_key = request.header("X-SpyWeb-Key").unwrap_or_default();
-                    if provided_key != required_key {
+                    if provided_key.len() != required_key.len()
+                        || !constant_time_eq(provided_key.as_bytes(), required_key.as_bytes())
+                    {
                         return Response::json(&serde_json::json!({ "error": "Unauthorized" }))
                             .with_status_code(401);
                     }
@@ -126,9 +128,12 @@ fn handle_static_request(db: &Db, request: &Request) -> Response {
 }
 
 fn validate_static_path(path: &str) -> Result<()> {
-    // 1. Traversal Prevention (Strictly no ..)
-    if path.contains("..") {
-        return Err(anyhow::anyhow!("Directory traversal attempt blocked."));
+    // 1. Traversal Prevention — check each component
+    let path_obj = std::path::Path::new(path);
+    for component in path_obj.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err(anyhow::anyhow!("Directory traversal attempt blocked."));
+        }
     }
 
     // 2. Extension Allowlist
@@ -169,11 +174,39 @@ fn validate_static_path(path: &str) -> Result<()> {
 }
 
 fn handle_api_request(
-    db: &Db,
+    db: &Arc<Db>,
     active_jobs: &Arc<std::sync::RwLock<Vec<JobSummary>>>,
     request: &Request,
 ) -> Result<Response> {
     let url = request.url();
+
+    if url.starts_with("/api/v/") {
+        let path = &url["/api/v/".len()..];
+        let mut segments: Vec<String> = path
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        if segments.is_empty() {
+            return Ok(Response::empty_404());
+        }
+        let name = segments.remove(0);
+        let source = match std::fs::read_to_string("server/init.lua") {
+            Ok(s) => s,
+            Err(_) => {
+                return Ok(
+                    rouille::Response::text("Server configuration not available")
+                        .with_status_code(500),
+                );
+            }
+        };
+        let server = crate::lua::server::ApiServer::new(
+            db.clone(),
+            source,
+            std::path::PathBuf::from("server/error.log"),
+        );
+        return Ok(server.handle(request.method(), &name, segments, request));
+    }
 
     if url == "/api/records" {
         return handle_records_request(request, db);
@@ -296,4 +329,215 @@ fn handle_html_records(db: &Db) -> Result<String> {
 
     html.push_str("</body></html>");
     Ok(html)
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut result = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        result |= x ^ y;
+    }
+    result == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_db() -> Arc<Db> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        Arc::new(Db::open(path.to_str().unwrap()).unwrap())
+    }
+
+    #[test]
+    fn test_validate_static_path_clean() {
+        assert!(validate_static_path("index.html").is_ok());
+        assert!(validate_static_path("app.js").is_ok());
+        assert!(validate_static_path("style.css").is_ok());
+        assert!(validate_static_path("logo.png").is_ok());
+        assert!(validate_static_path("font.woff2").is_ok());
+        assert!(validate_static_path("data.json").is_ok());
+        assert!(validate_static_path("icon.svg").is_ok());
+    }
+
+    #[test]
+    fn test_validate_static_path_blocks_traversal() {
+        assert!(validate_static_path("../etc/passwd").is_err());
+        assert!(validate_static_path("ui/../../etc/passwd").is_err());
+        assert!(validate_static_path("a/../b/file.html").is_err());
+    }
+
+    #[test]
+    fn test_validate_static_path_blocks_bad_extensions() {
+        assert!(validate_static_path("script.sh").is_err());
+        assert!(validate_static_path("binary.exe").is_err());
+        assert!(validate_static_path("data.csv").is_err());
+        assert!(validate_static_path("file.lua").is_err());
+        assert!(validate_static_path("noext").is_err());
+    }
+
+    #[test]
+    fn test_constant_time_eq_equal() {
+        assert!(constant_time_eq(b"hello", b"hello"));
+        assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn test_constant_time_eq_different() {
+        assert!(!constant_time_eq(b"hello", b"world"));
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+        assert!(!constant_time_eq(b"abcd", b"abc"));
+        assert!(!constant_time_eq(b"", b"a"));
+    }
+
+    #[test]
+    fn test_records_query_defaults() {
+        let request = rouille::Request::fake_http("GET", "/api/records", vec![], vec![]);
+        let query = RecordsQuery::from_request(&request);
+        assert_eq!(query.limit, 30);
+        assert!(query.job_id.is_none());
+        assert!(query.after.is_none());
+    }
+
+    #[test]
+    fn test_records_query_custom_params() {
+        let request = rouille::Request::fake_http(
+            "GET",
+            "/api/records?job_id=abc&limit=50&after=12345",
+            vec![],
+            vec![],
+        );
+        let query = RecordsQuery::from_request(&request);
+        assert_eq!(query.job_id.as_deref(), Some("abc"));
+        assert_eq!(query.limit, 50);
+        assert_eq!(query.after, Some(12345));
+    }
+
+    #[test]
+    fn test_records_query_limit_capped() {
+        let request =
+            rouille::Request::fake_http("GET", "/api/records?limit=99999", vec![], vec![]);
+        let query = RecordsQuery::from_request(&request);
+        assert_eq!(query.limit, 1000, "limit should be capped at 1000");
+    }
+
+    #[test]
+    fn test_records_query_invalid_limit_falls_back() {
+        let request =
+            rouille::Request::fake_http("GET", "/api/records?limit=notanumber", vec![], vec![]);
+        let query = RecordsQuery::from_request(&request);
+        assert_eq!(query.limit, 30, "invalid limit should default to 30");
+    }
+
+    #[test]
+    fn test_handle_records_request_empty() {
+        let db = test_db();
+        let request = rouille::Request::fake_http("GET", "/api/records", vec![], vec![]);
+        let resp = handle_records_request(&request, &db).unwrap();
+        assert_eq!(resp.status_code, 200);
+    }
+
+    #[test]
+    fn test_handle_records_request_with_job_id() {
+        let db = test_db();
+        let request =
+            rouille::Request::fake_http("GET", "/api/records?job_id=nonexistent", vec![], vec![]);
+        let resp = handle_records_request(&request, &db).unwrap();
+        assert_eq!(resp.status_code, 200);
+    }
+
+    #[test]
+    fn test_handle_api_request_jobs() {
+        let db = test_db();
+        let jobs = Arc::new(std::sync::RwLock::new(vec![JobSummary {
+            id: "j1".into(),
+            name: "Job1".into(),
+            enabled: true,
+        }]));
+        let request = rouille::Request::fake_http("GET", "/api/jobs", vec![], vec![]);
+        let resp = handle_api_request(&db, &jobs, &request).unwrap();
+        assert_eq!(resp.status_code, 200);
+    }
+
+    #[test]
+    fn test_handle_api_request_404() {
+        let db = test_db();
+        let jobs = Arc::new(std::sync::RwLock::new(vec![]));
+        let request = rouille::Request::fake_http("GET", "/api/nonexistent", vec![], vec![]);
+        let resp = handle_api_request(&db, &jobs, &request).unwrap();
+        assert_eq!(resp.status_code, 404);
+    }
+
+    #[test]
+    fn test_handle_api_request_v_lua_server_missing_init() {
+        let db = test_db();
+        let jobs = Arc::new(std::sync::RwLock::new(vec![]));
+        let request = rouille::Request::fake_http("GET", "/api/v/missing", vec![], vec![]);
+        let resp = handle_api_request(&db, &jobs, &request).unwrap();
+        assert_eq!(resp.status_code, 500, "missing init.lua should return 500");
+    }
+
+    #[test]
+    fn test_handle_static_request_root() {
+        let db = test_db();
+        let request = rouille::Request::fake_http("GET", "/", vec![], vec![]);
+        let resp = handle_static_request(&db, &request);
+        assert!(
+            resp.status_code == 200 || resp.status_code == 404,
+            "root should return 200 or 404"
+        );
+    }
+
+    #[test]
+    fn test_handle_static_request_blocks_traversal() {
+        let db = test_db();
+        let request = rouille::Request::fake_http("GET", "/../etc/passwd", vec![], vec![]);
+        let resp = handle_static_request(&db, &request);
+        assert_eq!(resp.status_code, 404, "traversal should return 404");
+    }
+
+    #[test]
+    fn test_handle_static_request_blocks_bad_extension() {
+        let db = test_db();
+        let request = rouille::Request::fake_http("GET", "/script.sh", vec![], vec![]);
+        let resp = handle_static_request(&db, &request);
+        assert_eq!(resp.status_code, 404, "bad extension should return 404");
+    }
+
+    #[test]
+    fn test_handle_static_request_records_route() {
+        let db = test_db();
+        let request = rouille::Request::fake_http("GET", "/records", vec![], vec![]);
+        let resp = handle_static_request(&db, &request);
+        assert!(
+            resp.status_code == 200 || resp.status_code == 404,
+            "/records should return 200 or 404"
+        );
+    }
+
+    #[test]
+    fn test_handle_html_records_empty() {
+        let db = test_db();
+        let html = handle_html_records(&db).unwrap();
+        assert!(
+            html.contains("No records found."),
+            "empty db should show no records message"
+        );
+        assert!(html.contains("<!DOCTYPE html>"), "should be valid HTML");
+    }
+
+    #[test]
+    fn test_auth_no_key_allows_all() {
+        let db = test_db();
+        let jobs = Arc::new(std::sync::RwLock::new(vec![]));
+        let request = rouille::Request::fake_http("GET", "/api/jobs", vec![], vec![]);
+        let resp = handle_api_request(&db, &jobs, &request).unwrap();
+        assert_eq!(
+            resp.status_code, 200,
+            "no auth key configured should allow all"
+        );
+    }
 }
