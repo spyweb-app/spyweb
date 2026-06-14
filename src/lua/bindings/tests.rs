@@ -82,7 +82,7 @@ fn test_http_bindings() {
 
     smol::block_on(async {
         let lua = Lua::new();
-        register_http_and_fs(&lua, None).unwrap();
+        register_http_and_fs(&lua, None, "test").unwrap();
 
         let code_get = format!(r#"http_get("http://127.0.0.1:{}/")"#, port);
         let res: mlua::Table = lua.load(&code_get).eval_async().await.unwrap();
@@ -312,7 +312,7 @@ fn test_global_store_incr() {
 #[test]
 fn test_env_get_binding() {
     let lua = Lua::new();
-    register_http_and_fs(&lua, None).unwrap();
+    register_http_and_fs(&lua, None, "test").unwrap();
 
     unsafe {
         std::env::set_var("SPYWEB_TEST_SECRET", "12345");
@@ -341,7 +341,7 @@ fn test_env_get_binding() {
 #[test]
 fn test_dump_binding_formats_nested_tables_and_cycles() {
     let lua = Lua::new();
-    register_http_and_fs(&lua, None).unwrap();
+    register_http_and_fs(&lua, None, "test").unwrap();
 
     let dumped: String = lua
         .load(
@@ -370,7 +370,7 @@ fn test_dump_binding_formats_nested_tables_and_cycles() {
 #[test]
 fn test_copy_and_deep_copy_helpers() {
     let lua = Lua::new();
-    register_http_and_fs(&lua, None).unwrap();
+    register_http_and_fs(&lua, None, "test").unwrap();
 
     lua.load(
         r#"
@@ -406,7 +406,7 @@ fn test_copy_and_deep_copy_helpers() {
 #[test]
 fn test_cdp_bindings_exposed() {
     let lua = Lua::new();
-    register_http_and_fs(&lua, None).unwrap();
+    register_http_and_fs(&lua, None, "test").unwrap();
     register_cdp(&lua, None).unwrap();
 
     let cdp: mlua::Table = lua.globals().get("cdp").unwrap();
@@ -428,7 +428,7 @@ fn test_cdp_bindings_exposed() {
 #[test]
 fn test_cdp_inject_page_methods() {
     let lua = Lua::new();
-    register_http_and_fs(&lua, None).unwrap();
+    register_http_and_fs(&lua, None, "test").unwrap();
     register_cdp(&lua, None).unwrap();
 
     lua.load(
@@ -533,7 +533,7 @@ fn test_cdp_inject_page_methods() {
 #[test]
 fn test_cdp_page_network_and_screenshot_helpers() {
     let lua = Lua::new();
-    register_http_and_fs(&lua, None).unwrap();
+    register_http_and_fs(&lua, None, "test").unwrap();
     register_cdp(&lua, None).unwrap();
 
     lua.load(
@@ -607,7 +607,7 @@ fn test_cdp_page_network_and_screenshot_helpers() {
 #[test]
 fn test_cdp_page_wait_scroll_and_real_input_helpers() {
     let lua = Lua::new();
-    register_http_and_fs(&lua, None).unwrap();
+    register_http_and_fs(&lua, None, "test").unwrap();
     register_cdp(&lua, None).unwrap();
 
     lua.load(
@@ -684,7 +684,7 @@ fn test_cdp_page_wait_scroll_and_real_input_helpers() {
 #[test]
 fn test_cdp_page_helpers_log_and_continue_on_page_failures() {
     let lua = Lua::new();
-    register_http_and_fs(&lua, None).unwrap();
+    register_http_and_fs(&lua, None, "test").unwrap();
     register_cdp(&lua, None).unwrap();
 
     lua.load(
@@ -905,7 +905,7 @@ fn test_fs_read_binding() {
 
     let result = smol::block_on(async {
         let lua = Lua::new();
-        register_http_and_fs(&lua, Some(job_dir.clone())).unwrap();
+        register_http_and_fs(&lua, Some(job_dir.clone()), "test").unwrap();
 
         lua.load("fs_overwrite(\"test.json\", \"hello world\")")
             .exec_async()
@@ -931,6 +931,356 @@ fn test_fs_read_binding() {
             .eval_async()
             .await;
         assert!(err.is_err(), "absolute paths should be rejected");
+
+        Ok::<_, String>(())
+    });
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+    result.unwrap();
+}
+
+#[test]
+fn test_require_deep_path() {
+    let test_dir = tempfile::tempdir().unwrap();
+    let job_dir = test_dir.path().join("jobs/test_job");
+    let deep_dir = job_dir.join("mylua/deep/child");
+    std::fs::create_dir_all(&deep_dir).unwrap();
+
+    // Create module at a deep nested path
+    let module_path = deep_dir.join("shared-across-everything.lua");
+    std::fs::write(&module_path, "return { val = 99 }").unwrap();
+
+    smol::block_on(async {
+        let lua = mlua::Lua::new();
+        super::system::register(&lua, Some(job_dir), "test_job").unwrap();
+
+        // require with dotted path should resolve the deep structure
+        let result: mlua::Table = lua
+            .load(r#"return require("mylua.deep.child.shared-across-everything")"#)
+            .eval_async()
+            .await
+            .expect("require should resolve deep dotted path");
+
+        let val: i32 = result.get("val").unwrap();
+        assert_eq!(val, 99);
+    });
+}
+
+#[test]
+fn test_json_encode_decode_roundtrip() {
+    let lua = Lua::new();
+    register_http_and_fs(&lua, None, "test").unwrap();
+
+    let result: String = lua
+        .load(r#"return json_encode({ name = "spy", count = 3, ok = true })"#)
+        .eval()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(parsed["name"], "spy");
+    assert_eq!(parsed["count"], 3);
+    assert_eq!(parsed["ok"], true);
+
+    let back: mlua::Table = lua
+        .load(r#"return json_decode('{"x": 10, "y": "hello"}')"#)
+        .eval()
+        .unwrap();
+    assert_eq!(back.get::<i32>("x").unwrap(), 10);
+    assert_eq!(back.get::<String>("y").unwrap(), "hello");
+
+    let nested: mlua::Table = lua
+        .load(r#"return json_decode('[1, "two", true]')"#)
+        .eval()
+        .unwrap();
+    assert_eq!(nested.get::<i32>(1).unwrap(), 1);
+    assert_eq!(nested.get::<String>(2).unwrap(), "two");
+    assert_eq!(nested.get::<bool>(3).unwrap(), true);
+
+    let err = lua
+        .load(r#"return json_decode("not json")"#)
+        .eval::<mlua::Value>();
+    assert!(err.is_err(), "invalid JSON should error");
+}
+
+#[test]
+fn test_sleep_basic() {
+    let lua = Lua::new();
+    register_http_and_fs(&lua, None, "test").unwrap();
+
+    smol::block_on(async {
+        let start = std::time::Instant::now();
+        lua.load("sleep(10)").exec_async().await.unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_millis() >= 8,
+            "sleep(10) should take at least ~10ms, took {:?}",
+            elapsed
+        );
+    });
+}
+
+#[test]
+fn test_fs_append() {
+    let current_dir = std::env::current_dir().unwrap();
+    let test_dir = current_dir.join("target").join("test_fs_append");
+    let job_dir = test_dir.join("myjob");
+    std::fs::create_dir_all(&job_dir).unwrap();
+
+    let result = smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, Some(job_dir.clone()), "test").unwrap();
+
+        lua.load(r#"fs_append("data.txt", "line1")"#)
+            .exec_async()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        lua.load(r#"fs_append("data.txt", "line2")"#)
+            .exec_async()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let content =
+            std::fs::read_to_string(job_dir.join("data.txt")).map_err(|e| e.to_string())?;
+        assert_eq!(content, "line1line2", "fs_append should concatenate");
+
+        let err: mlua::Result<()> = lua
+            .load(r#"fs_append("/etc/passwd", "nope")"#)
+            .exec_async()
+            .await;
+        assert!(err.is_err(), "absolute paths should be rejected");
+
+        Ok::<_, String>(())
+    });
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+    result.unwrap();
+}
+
+#[test]
+fn test_fs_read_binary() {
+    let current_dir = std::env::current_dir().unwrap();
+    let test_dir = current_dir.join("target").join("test_fs_read_binary");
+    let job_dir = test_dir.join("myjob");
+    std::fs::create_dir_all(&job_dir).unwrap();
+
+    let result = smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, Some(job_dir.clone()), "test").unwrap();
+
+        let bin_data = vec![0x00, 0xFF, 0x41, 0x42, 0x43, 0x01];
+        std::fs::write(job_dir.join("data.json"), &bin_data).unwrap();
+
+        let content: mlua::Table = lua
+            .load(r#"return fs_read_binary("data.json")"#)
+            .eval_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut bytes = Vec::new();
+        for pair in content.pairs::<usize, u8>() {
+            bytes.push(pair.map_err(|e| e.to_string())?.1);
+        }
+        assert_eq!(bytes, bin_data, "binary content should roundtrip");
+
+        let missing: mlua::Value = lua
+            .load(r#"return fs_read_binary("nope.json")"#)
+            .eval_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        assert!(missing.is_nil(), "missing file should return nil");
+
+        let err: mlua::Result<()> = lua
+            .load(r#"fs_read_binary("/etc/passwd")"#)
+            .exec_async()
+            .await;
+        assert!(err.is_err(), "absolute paths should be rejected");
+
+        let png_data = vec![0x89, 0x50, 0x4E, 0x47];
+        std::fs::write(job_dir.join("image.png"), &png_data).unwrap();
+        let content: mlua::Table = lua
+            .load(r#"return fs_read_binary("image.png")"#)
+            .eval_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut bytes = Vec::new();
+        for pair in content.pairs::<usize, u8>() {
+            bytes.push(pair.map_err(|e| e.to_string())?.1);
+        }
+        assert_eq!(bytes, png_data, "png should be readable");
+
+        Ok::<_, String>(())
+    });
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+    result.unwrap();
+}
+
+#[test]
+fn test_fs_overwrite_dedicated() {
+    let current_dir = std::env::current_dir().unwrap();
+    let test_dir = current_dir
+        .join("target")
+        .join("test_fs_overwrite_dedicated");
+    let job_dir = test_dir.join("myjob");
+    std::fs::create_dir_all(&job_dir).unwrap();
+
+    let result = smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, Some(job_dir.clone()), "test").unwrap();
+
+        lua.load(r#"fs_overwrite("state.json", "first")"#)
+            .exec_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        assert_eq!(
+            std::fs::read_to_string(job_dir.join("state.json")).unwrap(),
+            "first"
+        );
+
+        lua.load(r#"fs_overwrite("state.json", "second")"#)
+            .exec_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        assert_eq!(
+            std::fs::read_to_string(job_dir.join("state.json")).unwrap(),
+            "second"
+        );
+
+        let err: mlua::Result<()> = lua
+            .load(r#"fs_overwrite("/etc/evil", "nope")"#)
+            .exec_async()
+            .await;
+        assert!(err.is_err(), "absolute paths should be rejected");
+
+        Ok::<_, String>(())
+    });
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+    result.unwrap();
+}
+
+#[test]
+fn test_log_binding() {
+    let current_dir = std::env::current_dir().unwrap();
+    let test_dir = current_dir.join("target").join("test_log_binding");
+    let job_dir = test_dir.join("myjob");
+    std::fs::create_dir_all(&job_dir).unwrap();
+
+    let result = smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, Some(job_dir.clone()), "test_job").unwrap();
+
+        lua.load(r#"log("hello from test")"#)
+            .exec_async()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // log writes via the IO service which runs async — give it a moment
+        smol::Timer::after(std::time::Duration::from_millis(200)).await;
+
+        let log_path = job_dir.join("hooks.log");
+        assert!(log_path.exists(), "hooks.log should be created");
+        let content = std::fs::read_to_string(&log_path).map_err(|e| e.to_string())?;
+        assert!(
+            content.contains("hello from test"),
+            "log file should contain the message, got: {}",
+            content
+        );
+
+        Ok::<_, String>(())
+    });
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+    result.unwrap();
+}
+
+#[test]
+fn test_fs_shared_read_write() {
+    let current_dir = std::env::current_dir().unwrap();
+    let shared_dir = current_dir.join("shared");
+    let test_dir = current_dir.join("target").join("test_fs_shared");
+    let job_dir = test_dir.join("myjob");
+    std::fs::create_dir_all(&job_dir).unwrap();
+    std::fs::create_dir_all(&shared_dir).unwrap();
+
+    let shared_prefix = format!("{}/", super::system::SHARED_DIR);
+
+    let result = smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, Some(job_dir.clone()), "test").unwrap();
+
+        // Write to job_dir (default)
+        lua.load(r#"fs_overwrite("local.txt", "local data")"#)
+            .exec_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        assert!(job_dir.join("local.txt").exists());
+
+        // Write to shared/ explicitly
+        let write_path = format!("{}shared.txt", shared_prefix);
+        lua.load(format!(r#"fs_overwrite("{}", "shared data")"#, write_path))
+            .exec_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        assert!(shared_dir.join("shared.txt").exists());
+
+        // Read finds local file first
+        let content: Option<String> = lua
+            .load(r#"return fs_read("local.txt")"#)
+            .eval_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        assert_eq!(content.as_deref(), Some("local data"));
+
+        // Read finds shared file
+        let read_path = format!("{}shared.txt", shared_prefix);
+        let content: Option<String> = lua
+            .load(format!(r#"return fs_read("{}")"#, read_path))
+            .eval_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        assert_eq!(content.as_deref(), Some("shared data"));
+
+        // Append to shared/
+        let append_path = format!("{}shared.txt", shared_prefix);
+        lua.load(format!(r#"fs_append("{}", " more")"#, append_path))
+            .exec_async()
+            .await
+            .map_err(|e| e.to_string())?;
+        let content = std::fs::read_to_string(shared_dir.join("shared.txt")).unwrap();
+        assert_eq!(content, "shared data more");
+
+        Ok::<_, String>(())
+    });
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+    let _ = std::fs::remove_dir_all(&shared_dir);
+    result.unwrap();
+}
+
+#[test]
+fn test_fs_rejected_path() {
+    let current_dir = std::env::current_dir().unwrap();
+    let test_dir = current_dir.join("target").join("test_fs_rejected");
+    let job_dir = test_dir.join("myjob");
+    std::fs::create_dir_all(&job_dir).unwrap();
+
+    let result = smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, Some(job_dir.clone()), "test").unwrap();
+
+        // Traversal should be blocked
+        let err: mlua::Result<()> = lua.load(r#"fs_read("../etc/passwd")"#).exec_async().await;
+        assert!(err.is_err(), "traversal should be rejected");
+
+        let err: mlua::Result<()> = lua
+            .load(r#"fs_overwrite("../evil.txt", "nope")"#)
+            .exec_async()
+            .await;
+        assert!(err.is_err(), "traversal write should be rejected");
+
+        // Absolute paths should be blocked
+        let err: mlua::Result<()> = lua.load(r#"fs_read("/etc/passwd")"#).exec_async().await;
+        assert!(err.is_err(), "absolute path should be rejected");
 
         Ok::<_, String>(())
     });

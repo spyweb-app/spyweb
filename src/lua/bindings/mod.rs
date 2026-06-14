@@ -57,9 +57,13 @@ fn register_sql_stubs(lua: &Lua) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn register_http_and_fs(lua: &Lua, job_dir: Option<PathBuf>) -> mlua::Result<()> {
+pub fn register_http_and_fs(
+    lua: &Lua,
+    job_dir: Option<PathBuf>,
+    job_name: &str,
+) -> mlua::Result<()> {
     network::register(lua)?;
-    system::register(lua, job_dir.clone())?;
+    system::register(lua, job_dir.clone(), job_name)?;
     Ok(())
 }
 
