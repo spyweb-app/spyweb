@@ -128,7 +128,7 @@ fn print_failure_block(test_name: &str, err: &anyhow::Error) {
     println!("{:?}", err);
 }
 
-fn discover_tests(job_dir: &Path, job_name: &str) -> Result<Vec<String>> {
+pub fn discover_tests(job_dir: &Path, job_name: &str) -> Result<Vec<String>> {
     let mut tests = Vec::new();
 
     // We need a temporary VM just to discover tests
@@ -154,7 +154,7 @@ fn discover_tests(job_dir: &Path, job_name: &str) -> Result<Vec<String>> {
     Ok(tests)
 }
 
-async fn run_single_test(job_dir: &Path, job_name: &str, test_name: &str) -> Result<()> {
+pub async fn run_single_test(job_dir: &Path, job_name: &str, test_name: &str) -> Result<()> {
     let temp_db_file = NamedTempFile::new()?;
     let temp_db = temp_db_file
         .path()
@@ -236,7 +236,7 @@ fn load_lua_file(lua: &mlua::Lua, file: &Path) -> Result<()> {
     Ok(())
 }
 
-fn filter_tests_by_pattern(tests: Vec<String>, pattern: Option<&str>) -> Vec<String> {
+pub fn filter_tests_by_pattern(tests: Vec<String>, pattern: Option<&str>) -> Vec<String> {
     match pattern {
         Some(pattern) => tests
             .into_iter()

@@ -182,7 +182,7 @@ impl JobHooks {
         self.hook_mask & (HOOK_ON_SUCCESS | HOOK_ON_ERROR | HOOK_ON_FINALLY) != 0
     }
 
-    pub(crate) async fn new_cycle_context(&self, worker_id: usize) -> Result<Table> {
+    pub async fn new_cycle_context(&self, worker_id: usize) -> Result<Table> {
         let lua = self.lua.lock().await;
         let ctx = lua.create_table()?;
         let shared = lua.create_table()?;
@@ -382,6 +382,16 @@ impl JobHooks {
         for &key in RESERVED_CTX_KEYS {
             let _ = store.raw_set(key, Value::Nil);
         }
+    }
+
+    /// Run a closure with access to the locked Lua VM.
+    /// Only available for tests and internal use.
+    pub async fn with_lua<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(&Lua) -> T,
+    {
+        let lua = self.lua.lock().await;
+        f(&lua)
     }
 }
 

@@ -121,7 +121,7 @@ pub(crate) async fn run_multi_cycle(
     }
 }
 
-pub(crate) async fn run_once(
+pub async fn run_once(
     job: &Job,
     db: &Arc<Db>,
     runner: &Arc<Runner>,
