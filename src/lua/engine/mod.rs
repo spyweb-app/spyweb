@@ -27,7 +27,7 @@ pub fn create_engine(
 
     let lua = Lua::new_with(libs, mlua::LuaOptions::default())?;
 
-    bindings::register_http_and_fs(&lua, job_dir.clone())?;
+    bindings::register_http_and_fs(&lua, job_dir.clone(), job_name)?;
     if uses_cdp {
         bindings::register_cdp(&lua, job_dir)?;
     }
