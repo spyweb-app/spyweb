@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -285,6 +285,8 @@ async fn create_page_table(
                     if let Some(base64_data) = result.get("data").and_then(|v| v.as_str()) {
                         let base64_data = base64_data.to_string();
                         let saved_path = path.clone();
+                        crate::services::io::validate_path(Path::new(&path))
+                            .map_err(|e| mlua::Error::runtime(format!("call_save rejected: {e}")))?;
                         smol::unblock(move || {
                             let bytes = decode_base64(&base64_data)?;
                             std::fs::write(path, bytes).map_err(mlua::Error::external)
@@ -730,6 +732,8 @@ pub fn register(lua: &mlua::Lua, job_dir: Option<PathBuf>) -> mlua::Result<()> {
     cdp_table.set(
         "_write_base64",
         lua.create_async_function(|_, (path, data): (String, String)| async move {
+            crate::services::io::validate_path(Path::new(&path))
+                .map_err(|e| mlua::Error::runtime(format!("_write_base64 rejected: {e}")))?;
             smol::unblock(move || {
                 let bytes = decode_base64(&data)?;
                 std::fs::write(path, bytes).map_err(mlua::Error::external)
