@@ -252,6 +252,32 @@ pub(crate) async fn run_once_inner(
         None => extraction.items,
     };
 
+    if items.is_empty() {
+        if status_code == 200 {
+            if extraction.selector_matches == 0 {
+                if tel.hooks().map_or(false, |h| h.has_override_extract()) {
+                    crate::t_println!(
+                        "Job [{}]: override_extract returned 0 items",
+                        color::c_job(&job.config.name),
+                    );
+                } else {
+                    crate::t_warnln!(
+                        "Job [{}]: Selector '{}' matched 0 elements. The site may have changed or you have wrong selector",
+                        color::c_job(&job.config.name),
+                        job.config.selector
+                    );
+                }
+            } else {
+                crate::t_println!(
+                    "Job [{}]: {} items found by selector, but none matched your keywords",
+                    color::c_job(&job.config.name),
+                    extraction.selector_matches
+                );
+            }
+        }
+        return Ok(());
+    }
+
     let token = tel.start().await;
     let items = match tel.hooks() {
         Some(h) if h.has_filter_item() => {
@@ -277,25 +303,6 @@ pub(crate) async fn run_once_inner(
     };
     let status = if error.is_some() { "error" } else { "success" };
     tel.record("filter", token, status, error).await;
-
-    if items.is_empty() {
-        if status_code == 200 {
-            if extraction.selector_matches == 0 {
-                crate::t_warnln!(
-                    "Job [{}]: Selector '{}' matched 0 elements. The site may have changed or you have wrong selector",
-                    color::c_job(&job.config.name),
-                    job.config.selector
-                );
-            } else {
-                crate::t_println!(
-                    "Job [{}]: {} items found by selector, but none matched your keywords",
-                    color::c_job(&job.config.name),
-                    extraction.selector_matches
-                );
-            }
-        }
-        return Ok(());
-    }
 
     let items = match tel.hooks() {
         Some(h) => {
