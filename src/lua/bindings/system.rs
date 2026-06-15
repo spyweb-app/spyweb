@@ -255,6 +255,9 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
     lua.globals().set(
         "json_decode",
         lua.create_function(|lua, s: String| {
+            if s.len() > 10_000_000 {
+                return Err(mlua::Error::runtime("json_decode input exceeds 10MB limit"));
+            }
             let val: serde_json::Value = serde_json::from_str(&s).map_err(mlua::Error::external)?;
             let lua_val = lua.to_value(&val).map_err(mlua::Error::external)?;
             Ok(lua_val)

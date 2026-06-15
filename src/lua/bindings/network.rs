@@ -1,5 +1,8 @@
 use mlua::{Lua, Result as LuaResult};
 use std::collections::HashMap;
+use std::io::Read;
+
+const MAX_RESPONSE_BODY: u64 = 10 * 1024 * 1024;
 
 struct RawResponse {
     status: u16,
@@ -30,6 +33,15 @@ impl RawResponse {
     }
 }
 
+enum MultipartField {
+    Text(String),
+    File {
+        content: Vec<u8>,
+        filename: Option<String>,
+        mime_type: Option<String>,
+    },
+}
+
 fn collect_headers(headers: &ureq::http::HeaderMap) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for (name, value) in headers.iter() {
@@ -42,6 +54,18 @@ fn collect_headers(headers: &ureq::http::HeaderMap) -> HashMap<String, String> {
             .or_insert_with(|| v.to_owned());
     }
     map
+}
+
+fn read_response_body(body: &mut ureq::Body) -> Result<String, String> {
+    let mut buf = Vec::new();
+    body.as_reader()
+        .take(MAX_RESPONSE_BODY + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("read response body failed: {e}"))?;
+    if buf.len() as u64 > MAX_RESPONSE_BODY {
+        return Err("response body exceeds 10MB limit".to_string());
+    }
+    String::from_utf8(buf).map_err(|e| format!("response body is not valid UTF-8: {e}"))
 }
 
 fn do_http(
@@ -86,10 +110,7 @@ fn do_http(
             .map_err(|e| format!("http_{} failed: {e}", method.to_lowercase()))?;
         let status = response.status().as_u16();
         let headers = collect_headers(response.headers());
-        let body = response
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| format!("http_{} read failed: {e}", method.to_lowercase()))?;
+        let body = read_response_body(response.body_mut())?;
         Ok(RawResponse {
             status,
             headers,
@@ -114,25 +135,13 @@ fn do_http(
             .map_err(|e| format!("http_{} failed: {e}", method.to_lowercase()))?;
         let status = response.status().as_u16();
         let headers = collect_headers(response.headers());
-        let body = response
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| format!("http_{} read failed: {e}", method.to_lowercase()))?;
+        let body = read_response_body(response.body_mut())?;
         Ok(RawResponse {
             status,
             headers,
             body,
         })
     }
-}
-
-enum MultipartField {
-    Text(String),
-    File {
-        content: Vec<u8>,
-        filename: Option<String>,
-        mime_type: Option<String>,
-    },
 }
 
 pub fn register(lua: &Lua) -> LuaResult<()> {
@@ -256,10 +265,7 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
                     .map_err(|e| format!("http_multipart failed: {e}"))?;
                 let status = response.status().as_u16();
                 let headers = collect_headers(response.headers());
-                let body = response
-                    .body_mut()
-                    .read_to_string()
-                    .map_err(|e| format!("http_multipart read failed: {e}"))?;
+                let body = read_response_body(response.body_mut())?;
                 let raw = RawResponse { status, headers, body };
                 raw.into_lua_table(&lua)
             })
