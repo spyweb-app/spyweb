@@ -16,6 +16,13 @@ pub struct WebServer {
     auth_key: Option<String>,
 }
 
+#[derive(serde::Serialize)]
+struct ApiRecord {
+    #[serde(flatten)]
+    record: Record,
+    date_time: String,
+}
+
 #[derive(Debug)]
 struct RecordsQuery {
     job_id: Option<String>,
@@ -61,9 +68,7 @@ impl WebServer {
             if url.starts_with("/api") {
                 if let Some(ref required_key) = auth_key {
                     let provided_key = request.header("X-SpyWeb-Key").unwrap_or_default();
-                    if provided_key.len() != required_key.len()
-                        || !constant_time_eq(provided_key.as_bytes(), required_key.as_bytes())
-                    {
+                    if !constant_time_eq(provided_key.as_bytes(), required_key.as_bytes()) {
                         return Response::json(&serde_json::json!({ "error": "Unauthorized" }))
                             .with_status_code(401);
                     }
@@ -244,13 +249,6 @@ fn handle_records_request(request: &Request, db: &Db) -> Result<Response> {
     }
 }
 
-#[derive(serde::Serialize)]
-struct ApiRecord {
-    #[serde(flatten)]
-    record: Record,
-    date_time: String,
-}
-
 fn add_datetime_to_records(records: Vec<Record>) -> Vec<ApiRecord> {
     records
         .into_iter()
@@ -332,12 +330,10 @@ fn handle_html_records(db: &Db) -> Result<String> {
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
+    let max_len = std::cmp::max(a.len(), b.len());
     let mut result = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        result |= x ^ y;
+    for i in 0..max_len {
+        result |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
     }
     result == 0
 }
