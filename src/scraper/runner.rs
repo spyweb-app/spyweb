@@ -140,7 +140,7 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
 
     let (ctx, _keep) = match job.hooks.as_ref() {
         Some(h) => {
-            let ctx = h.new_cycle_context(0).await?;
+            let ctx = h.new_cycle_context(1).await?;
             h.init_telemetry(&ctx).await?;
             (Some(ctx.clone()), Some(ctx))
         }

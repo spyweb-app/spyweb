@@ -211,7 +211,10 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
                     if !path.exists() {
                         continue;
                     }
-                    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                    if path
+                        .components()
+                        .any(|c| matches!(c, std::path::Component::ParentDir))
+                    {
                         last_err = format!("module '{}' rejected: directory traversal", name);
                         continue;
                     }
@@ -230,7 +233,7 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
                     Some(s) => s,
                     None => {
                         return Err(mlua::Error::runtime(format!(
-                            "module '{}' not found in job folder, shared folder, or project root ({})",
+                            "module '{}' not found in job folder, or project root ({})",
                             name, last_err
                         )));
                     }

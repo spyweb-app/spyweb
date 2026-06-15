@@ -28,7 +28,7 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
             run_multi_cycle(Arc::clone(&job), &db, &runner, worker_count).await;
         } else {
             let base_request = RequestConfig::from_job(&job.config);
-            if let Err(e) = run_once(&job, &db, &runner, &base_request, 0).await {
+            if let Err(e) = run_once(&job, &db, &runner, &base_request, 1).await {
                 crate::t_eprintln!("Job '{}' error: {}", color::c_job(&job.config.name), e);
             }
         }
@@ -59,8 +59,8 @@ pub(crate) async fn run_urls_cycle(
     ));
 
     let mut handles = Vec::with_capacity(worker_count);
-    for i in 0..worker_count {
-        if i > 0 {
+    for i in 1..=worker_count {
+        if i > 1 {
             Timer::after(Duration::from_millis(WORKER_STAGGER_MS)).await;
         }
         let worker_id = i;
@@ -100,8 +100,8 @@ pub(crate) async fn run_multi_cycle(
     let base_request = RequestConfig::from_job(&job.config);
 
     let mut handles = Vec::with_capacity(worker_count);
-    for i in 0..worker_count {
-        if i > 0 {
+    for i in 1..=worker_count {
+        if i > 1 {
             Timer::after(Duration::from_millis(WORKER_STAGGER_MS)).await;
         }
         let worker_id = i;
