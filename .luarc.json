@@ -1,0 +1,8 @@
+{
+  "workspace": {
+    "library": ["spyweb-types.lua"]
+  },
+  "diagnostics": {
+    "disable": ["lowercase-global"]
+  }
+}

@@ -112,6 +112,7 @@ enum Commands {
     },
     #[command(aliases = ["v"])]
     Version,
+    Types,
 }
 
 pub fn listen_command() -> anyhow::Result<()> {
@@ -159,5 +160,22 @@ pub fn listen_command() -> anyhow::Result<()> {
             );
             std::process::exit(0);
         }
+        Commands::Types => write_types(),
     }
+}
+
+fn write_types() -> anyhow::Result<()> {
+    let dir = std::env::current_dir()?;
+    std::fs::write(
+        dir.join("spyweb-types.lua"),
+        include_str!("../../spyweb-types.lua"),
+    )?;
+    std::fs::write(dir.join(".luarc.json"), include_str!("../../.luarc.json"))?;
+    println!(
+        "wrote {} and {} to {}",
+        crate::color::c_info("spyweb-types.lua"),
+        crate::color::c_info(".luarc.json"),
+        crate::color::c_ok(&dir.display().to_string())
+    );
+    Ok(())
 }

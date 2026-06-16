@@ -7,4 +7,5 @@ test-*
 *.zip
 /*.html
 *.json
+!.luarc.json
 /docs/test*
