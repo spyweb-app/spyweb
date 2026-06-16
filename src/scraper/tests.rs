@@ -125,7 +125,7 @@ end
                 .unwrap()
                 .get::<String>("status")
                 .unwrap(),
-            "success"
+            "inactive"
         );
         assert!(matches!(
             map.get::<mlua::Table>("store")

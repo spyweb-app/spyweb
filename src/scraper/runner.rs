@@ -190,6 +190,7 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
                 };
                 let attempt = runner.fetch(&job.config, &request);
                 if let (Some(h), Some(s), Some(ctx)) = (job.hooks.as_ref(), sample, ctx.as_ref()) {
+                    h.set_last_fetch(ctx, &attempt).await?;
                     let (status, error) = match &attempt.result {
                         Ok(_) => ("success", None),
                         Err(err) => ("error", Some(err.clone())),
@@ -292,6 +293,10 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
             }
             None => items,
         };
+
+        if items.is_empty() {
+            return Ok(());
+        }
 
         // 6. filter_item / keyword_filter
         let filter_sample = match (job.hooks.as_ref(), ctx.as_ref()) {
