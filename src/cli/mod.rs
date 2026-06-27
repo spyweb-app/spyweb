@@ -1,3 +1,4 @@
+pub mod check;
 pub mod profile;
 
 use clap::{Parser, Subcommand};
@@ -94,7 +95,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Check,
+    Check {
+        #[command(subcommand)]
+        command: Option<check::CheckSub>,
+    },
     Start {
         #[arg(long)]
         port: Option<u16>,
@@ -121,7 +125,7 @@ pub fn listen_command() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Check => crate::config::config_check(),
+        Commands::Check { command } => check::run_check(command),
         Commands::Start { port } => {
             if let Err(e) = crate::entry::start_app_with_port(port) {
                 crate::t_eprintln!("Application error: {}", e);
@@ -141,23 +145,7 @@ pub fn listen_command() -> anyhow::Result<()> {
         }
         Commands::Profile { command } => profile::handle_profile_command(command),
         Commands::Version => {
-            let engine = if cfg!(feature = "luau") {
-                "Luau"
-            } else {
-                "Lua 5.4"
-            };
-            let db = if cfg!(feature = "sqlite") {
-                "SQLite"
-            } else {
-                "redb"
-            };
-            println!(
-                "{} {} (Engine: {}, DB: {})",
-                crate::color::c_bold("SpyWeb"),
-                crate::color::c_ok(&format!("v{}", env!("CARGO_PKG_VERSION"))),
-                crate::color::c_info(engine),
-                crate::color::c_info(db),
-            );
+            check::print_version();
             std::process::exit(0);
         }
         Commands::Types => write_types(),
