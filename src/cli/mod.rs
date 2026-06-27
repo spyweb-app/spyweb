@@ -1,5 +1,6 @@
 pub mod check;
 pub mod profile;
+pub mod update;
 
 use clap::{Parser, Subcommand};
 
@@ -117,6 +118,16 @@ enum Commands {
     #[command(aliases = ["v"])]
     Version,
     Types,
+    Update {
+        #[arg(short = 'c', long)]
+        check: bool,
+        #[arg(short = 'f', long)]
+        force: bool,
+        #[arg(short = 'k', long)]
+        keep: Option<Option<String>>,
+        #[arg(short = 'o', long)]
+        overwrite: bool,
+    },
 }
 
 pub fn listen_command() -> anyhow::Result<()> {
@@ -149,6 +160,12 @@ pub fn listen_command() -> anyhow::Result<()> {
             std::process::exit(0);
         }
         Commands::Types => write_types(),
+        Commands::Update {
+            check,
+            force,
+            keep,
+            overwrite,
+        } => update::run_update(check, force, keep, overwrite),
     }
 }
 
