@@ -193,11 +193,29 @@ impl RequestHandler {
         };
 
         let result = match req.method.to_uppercase().as_str() {
-            "HEAD" | "DELETE" => {
-                let mut request = match req.method.to_uppercase().as_str() {
-                    "HEAD" => agent.head(&req.url),
-                    _ => agent.delete(&req.url),
-                };
+            "HEAD" => {
+                let request = agent.head(&req.url);
+                let request = req
+                    .headers
+                    .iter()
+                    .fold(request, |r, (name, value)| r.header(name, value));
+                request
+                    .call()
+                    .with_context(|| format!("request failed for job '{}'", job.name))
+                    .map(|response| {
+                        let status = response.status().as_u16();
+                        let headers = flatten_headers(response.headers());
+                        RequestResult {
+                            url: req.url.clone(),
+                            status,
+                            headers,
+                            body: String::new(),
+                            proxy: selected_proxy.clone(),
+                        }
+                    })
+            }
+            "DELETE" => {
+                let mut request = agent.delete(&req.url);
                 for (name, value) in req.headers.iter() {
                     request = request.header(name, value);
                 }
