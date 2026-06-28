@@ -251,6 +251,7 @@ mod tests {
     use super::{discover_tests, filter_tests_by_pattern, run_single_test};
     use crate::config::types::{Field, Job, JobConfig};
     use crate::services::profiles;
+    use crate::services::server::types;
     use std::fs;
     use tempfile::tempdir;
 
@@ -292,24 +293,19 @@ end
 
     #[test]
     fn runs_async_lua_tests_with_production_bindings() {
-        let server = rouille::Server::new("127.0.0.1:0", |request| {
-            if request.method() == "GET" {
-                rouille::Response::text("runner-get-ok")
-            } else if request.method() == "POST" {
-                let mut body = String::new();
-                if let Some(mut reader) = request.data() {
-                    use std::io::Read;
-                    reader.read_to_string(&mut body).unwrap();
-                }
-                assert_eq!(body, "runner-post-body");
-                rouille::Response::text("runner-post-ok")
+        let server = types::MockServer::start(|request| {
+            if request.method == "GET" {
+                types::Response::text("runner-get-ok")
+            } else if request.method == "POST" {
+                let body = request.body_bytes().unwrap_or_default();
+                let body_str = String::from_utf8_lossy(body);
+                assert_eq!(body_str, "runner-post-body");
+                types::Response::text("runner-post-ok")
             } else {
-                rouille::Response::empty_404()
+                types::Response::empty_404()
             }
-        })
-        .unwrap();
-        let port = server.server_addr().port();
-        std::thread::spawn(move || server.run());
+        });
+        let port = server.port();
 
         let tempdir = tempdir().unwrap();
         let hooks_source = format!(

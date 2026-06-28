@@ -1,6 +1,6 @@
 use super::*;
 use crate::services::db::Db;
-use std::io::Read;
+use crate::services::server::types;
 use std::sync::Arc;
 use std::{
     fs,
@@ -24,29 +24,6 @@ fn setup_db(dir: &PathBuf) -> Arc<Db> {
     Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap())
 }
 
-fn req(method: &str, url: &str) -> rouille::Request {
-    rouille::Request::fake_http(method, url, vec![], vec![])
-}
-
-fn req_with(
-    method: &str,
-    url: &str,
-    headers: Vec<(String, String)>,
-    body: Vec<u8>,
-) -> rouille::Request {
-    rouille::Request::fake_http(method, url, headers, body)
-}
-
-fn read_body(resp: rouille::Response) -> String {
-    let mut body = String::new();
-    resp.data
-        .into_reader_and_size()
-        .0
-        .read_to_string(&mut body)
-        .unwrap();
-    body
-}
-
 #[test]
 fn test_basic_route_returns_response() {
     let dir = unique_test_dir("basic-route");
@@ -60,9 +37,14 @@ fn test_basic_route_returns_response() {
         "#,
     );
 
-    let resp = server.handle("GET", "hello", vec![], &req("GET", "/hello"));
-    assert_eq!(resp.status_code, 200);
-    assert_eq!(read_body(resp), "Hello from Lua!");
+    let resp = server.handle(
+        "GET",
+        "hello",
+        vec![],
+        &types::Request::fake("GET", "/hello"),
+    );
+    assert_eq!(resp.status, 200);
+    assert_eq!(resp.body_string(), "Hello from Lua!");
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
@@ -81,9 +63,14 @@ fn test_routing_fallback_to_all() {
         "#,
     );
 
-    let resp = server.handle("POST", "fallback", vec![], &req("POST", "/fallback"));
-    assert_eq!(resp.status_code, 200);
-    assert_eq!(read_body(resp), "Fallback hit: POST");
+    let resp = server.handle(
+        "POST",
+        "fallback",
+        vec![],
+        &types::Request::fake("POST", "/fallback"),
+    );
+    assert_eq!(resp.status, 200);
+    assert_eq!(resp.body_string(), "Fallback hit: POST");
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
@@ -102,9 +89,14 @@ fn test_404_for_missing_route() {
         "#,
     );
 
-    let resp = server.handle("GET", "nonexistent", vec![], &req("GET", "/nonexistent"));
-    assert_eq!(resp.status_code, 404);
-    assert_eq!(read_body(resp), "Not Found");
+    let resp = server.handle(
+        "GET",
+        "nonexistent",
+        vec![],
+        &types::Request::fake("GET", "/nonexistent"),
+    );
+    assert_eq!(resp.status, 404);
+    assert_eq!(resp.body_string(), "Not Found");
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
@@ -127,10 +119,10 @@ fn test_path_args_passthrough() {
         "GET",
         "check",
         vec!["42".into(), "abc".into()],
-        &req("GET", "/check/42/abc"),
+        &types::Request::fake("GET", "/check/42/abc"),
     );
-    assert_eq!(resp.status_code, 200);
-    assert_eq!(read_body(resp), "42-abc");
+    assert_eq!(resp.status, 200);
+    assert_eq!(resp.body_string(), "42-abc");
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
@@ -149,15 +141,71 @@ fn test_self_context_fields() {
         "#,
     );
 
-    let request = req_with(
+    let request = types::Request::fake_with(
         "GET",
         "/ctx?foo=bar",
         vec![("X-Custom".into(), "val1".into())],
         vec![],
     );
     let resp = server.handle("GET", "ctx", vec![], &request);
-    assert_eq!(resp.status_code, 200);
-    assert_eq!(read_body(resp), "GET:bar:val1");
+    assert_eq!(resp.status, 200);
+    assert_eq!(resp.body_string(), "GET:bar:val1");
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_body_field_is_empty_string_on_get() {
+    let dir = unique_test_dir("body-on-get");
+    let db = setup_db(&dir);
+    let server = ApiServer::for_test(
+        db,
+        r#"
+            get.check_body = function(self)
+                return tostring(self.body)
+            end
+        "#,
+    );
+
+    let resp = server.handle(
+        "GET",
+        "check_body",
+        vec![],
+        &types::Request::fake("GET", "/check_body"),
+    );
+    assert_eq!(resp.status, 200);
+    assert_eq!(
+        resp.body_string(),
+        "",
+        "self.body should be empty string for GET request, not nil"
+    );
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_path_does_not_include_query_string() {
+    let dir = unique_test_dir("path-no-query");
+    let db = setup_db(&dir);
+    let server = ApiServer::for_test(
+        db,
+        r#"
+            get.check_path = function(self)
+                return self.path
+            end
+        "#,
+    );
+
+    let request = types::Request::fake_with("GET", "/check_path?foo=bar&baz=qux", vec![], vec![]);
+    let resp = server.handle("GET", "check_path", vec![], &request);
+    assert_eq!(resp.status, 200);
+    assert_eq!(
+        resp.body_string(),
+        "/check_path",
+        "self.path should not include query string"
+    );
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
@@ -184,8 +232,13 @@ fn test_lua_error_returns_500() {
         error_log.clone(),
     );
 
-    let resp = server.handle("GET", "crash", vec![], &req("GET", "/crash"));
-    assert_eq!(resp.status_code, 500);
+    let resp = server.handle(
+        "GET",
+        "crash",
+        vec![],
+        &types::Request::fake("GET", "/crash"),
+    );
+    assert_eq!(resp.status, 500);
 
     assert!(error_log.exists(), "error.log should exist after Lua error");
 
@@ -202,22 +255,22 @@ fn test_lua_error_returns_500() {
 
 #[test]
 fn test_url_decode_plus_and_percent() {
-    assert_eq!(url_decode("hello+world"), "hello world");
-    assert_eq!(url_decode("a%20b"), "a b");
-    assert_eq!(url_decode("a%2Fb"), "a/b");
-    assert_eq!(url_decode("%3C%3E"), "<>");
-    assert_eq!(url_decode("no%encoding"), "no%encoding");
-    assert_eq!(url_decode("trailing%"), "trailing%");
-    assert_eq!(url_decode("%2"), "%2");
-    assert_eq!(url_decode(""), "");
-    assert_eq!(url_decode("plain"), "plain");
-    assert_eq!(url_decode("a+b%20c"), "a b c");
+    assert_eq!(types::url_decode("hello+world"), "hello world");
+    assert_eq!(types::url_decode("a%20b"), "a b");
+    assert_eq!(types::url_decode("a%2Fb"), "a/b");
+    assert_eq!(types::url_decode("%3C%3E"), "<>");
+    assert_eq!(types::url_decode("no%encoding"), "no%encoding");
+    assert_eq!(types::url_decode("trailing%"), "trailing%");
+    assert_eq!(types::url_decode("%2"), "%2");
+    assert_eq!(types::url_decode(""), "");
+    assert_eq!(types::url_decode("plain"), "plain");
+    assert_eq!(types::url_decode("a+b%20c"), "a b c");
 }
 
 #[test]
 fn test_extract_body_truncation() {
     let large_body = vec![b'x'; MAX_BODY_SIZE + 100];
-    let request = req_with("POST", "/data", vec![], large_body);
+    let request = types::Request::fake_with("POST", "/data", vec![], large_body);
     let body = extract_body(&request).unwrap();
     assert_eq!(
         body.len(),
@@ -248,8 +301,13 @@ fn test_format_table_response_header_injection() {
         "#,
     );
 
-    let resp = server.handle("GET", "inject", vec![], &req("GET", "/inject"));
-    assert_eq!(resp.status_code, 200);
+    let resp = server.handle(
+        "GET",
+        "inject",
+        vec![],
+        &types::Request::fake("GET", "/inject"),
+    );
+    assert_eq!(resp.status, 200);
 
     let header_names: Vec<&str> = resp.headers.iter().map(|(k, _)| k.as_ref()).collect();
     assert!(header_names.contains(&"X-Good"), "good header should pass");
@@ -286,16 +344,26 @@ fn test_format_response_nil_and_string() {
         "#,
     );
 
-    let resp = server.handle("GET", "nothing", vec![], &req("GET", "/nothing"));
-    assert_eq!(resp.status_code, 200);
-    assert_eq!(read_body(resp), "");
+    let resp = server.handle(
+        "GET",
+        "nothing",
+        vec![],
+        &types::Request::fake("GET", "/nothing"),
+    );
+    assert_eq!(resp.status, 200);
+    assert_eq!(resp.body_string(), "");
 
-    let resp = server.handle("GET", "str", vec![], &req("GET", "/str"));
-    assert_eq!(resp.status_code, 200);
-    assert_eq!(read_body(resp), "just a string");
+    let resp = server.handle("GET", "str", vec![], &types::Request::fake("GET", "/str"));
+    assert_eq!(resp.status, 200);
+    assert_eq!(resp.body_string(), "just a string");
 
-    let resp = server.handle("GET", "invalid", vec![], &req("GET", "/invalid"));
-    assert_eq!(resp.status_code, 500);
+    let resp = server.handle(
+        "GET",
+        "invalid",
+        vec![],
+        &types::Request::fake("GET", "/invalid"),
+    );
+    assert_eq!(resp.status, 500);
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
@@ -314,14 +382,14 @@ fn test_format_table_response_json_body() {
         "#,
     );
 
-    let resp = server.handle("GET", "json", vec![], &req("GET", "/json"));
-    assert_eq!(resp.status_code, 201);
+    let resp = server.handle("GET", "json", vec![], &types::Request::fake("GET", "/json"));
+    assert_eq!(resp.status, 201);
 
     let ct = resp.headers.iter().find(|(k, _)| k == "Content-Type");
     assert!(ct.is_some(), "JSON body should set Content-Type");
     assert!(ct.unwrap().1.contains("application/json"));
 
-    let body = read_body(resp);
+    let body = resp.body_string();
     let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(parsed["key"], "value");
     assert_eq!(parsed["num"], 42);
@@ -349,17 +417,19 @@ fn test_format_table_response_clamps_status() {
         "#,
     );
 
-    let resp = server.handle("GET", "low", vec![], &req("GET", "/low"));
-    assert!(resp.status_code >= 100, "status 50 should be clamped up");
+    let resp = server.handle("GET", "low", vec![], &types::Request::fake("GET", "/low"));
+    assert!(resp.status >= 100, "status 50 should be clamped up");
 
-    let resp = server.handle("GET", "high", vec![], &req("GET", "/high"));
-    assert!(resp.status_code <= 599, "status 999 should be clamped down");
+    let resp = server.handle("GET", "high", vec![], &types::Request::fake("GET", "/high"));
+    assert!(resp.status <= 599, "status 999 should be clamped down");
 
-    let resp = server.handle("GET", "negative", vec![], &req("GET", "/negative"));
-    assert!(
-        resp.status_code >= 100,
-        "negative status should be clamped up"
+    let resp = server.handle(
+        "GET",
+        "negative",
+        vec![],
+        &types::Request::fake("GET", "/negative"),
     );
+    assert!(resp.status >= 100, "negative status should be clamped up");
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
@@ -381,26 +451,61 @@ fn test_all_method_registration() {
         "#,
     );
 
-    let resp = server.handle("GET", "handle", vec![], &req("GET", "/handle"));
-    assert_eq!(read_body(resp), "GET");
+    let resp = server.handle(
+        "GET",
+        "handle",
+        vec![],
+        &types::Request::fake("GET", "/handle"),
+    );
+    assert_eq!(resp.body_string(), "GET");
 
-    let resp = server.handle("POST", "handle", vec![], &req("POST", "/handle"));
-    assert_eq!(read_body(resp), "POST");
+    let resp = server.handle(
+        "POST",
+        "handle",
+        vec![],
+        &types::Request::fake("POST", "/handle"),
+    );
+    assert_eq!(resp.body_string(), "POST");
 
-    let resp = server.handle("PUT", "handle", vec![], &req("PUT", "/handle"));
-    assert_eq!(read_body(resp), "PUT");
+    let resp = server.handle(
+        "PUT",
+        "handle",
+        vec![],
+        &types::Request::fake("PUT", "/handle"),
+    );
+    assert_eq!(resp.body_string(), "PUT");
 
-    let resp = server.handle("PATCH", "handle", vec![], &req("PATCH", "/handle"));
-    assert_eq!(read_body(resp), "PATCH");
+    let resp = server.handle(
+        "PATCH",
+        "handle",
+        vec![],
+        &types::Request::fake("PATCH", "/handle"),
+    );
+    assert_eq!(resp.body_string(), "PATCH");
 
-    let resp = server.handle("DELETE", "handle", vec![], &req("DELETE", "/handle"));
-    assert_eq!(read_body(resp), "DELETE");
+    let resp = server.handle(
+        "DELETE",
+        "handle",
+        vec![],
+        &types::Request::fake("DELETE", "/handle"),
+    );
+    assert_eq!(resp.body_string(), "DELETE");
 
-    let resp = server.handle("GET", "anything", vec![], &req("GET", "/anything"));
-    assert_eq!(read_body(resp), "ALL:GET");
+    let resp = server.handle(
+        "GET",
+        "anything",
+        vec![],
+        &types::Request::fake("GET", "/anything"),
+    );
+    assert_eq!(resp.body_string(), "ALL:GET");
 
-    let resp = server.handle("POST", "anything", vec![], &req("POST", "/anything"));
-    assert_eq!(read_body(resp), "ALL:POST");
+    let resp = server.handle(
+        "POST",
+        "anything",
+        vec![],
+        &types::Request::fake("POST", "/anything"),
+    );
+    assert_eq!(resp.body_string(), "ALL:POST");
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
@@ -427,8 +532,13 @@ fn test_run_deferred_executes_in_reverse_order() {
         "#,
     );
 
-    let resp = server.handle("GET", "deferred", vec![], &req("GET", "/deferred"));
-    assert_eq!(resp.status_code, 200);
+    let resp = server.handle(
+        "GET",
+        "deferred",
+        vec![],
+        &types::Request::fake("GET", "/deferred"),
+    );
+    assert_eq!(resp.status, 200);
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
@@ -452,20 +562,35 @@ fn test_extract_query_edge_cases() {
         "#,
     );
 
-    let resp = server.handle("GET", "q", vec![], &req("GET", "/q?foo=bar&baz=qux"));
-    let body = read_body(resp);
+    let resp = server.handle(
+        "GET",
+        "q",
+        vec![],
+        &types::Request::fake("GET", "/q?foo=bar&baz=qux"),
+    );
+    let body = resp.body_string();
     assert!(body.contains("foo=bar"), "query params should be parsed");
     assert!(body.contains("baz=qux"), "multiple params should work");
 
-    let resp = server.handle("GET", "q", vec![], &req("GET", "/q?key=with+space"));
-    let body = read_body(resp);
+    let resp = server.handle(
+        "GET",
+        "q",
+        vec![],
+        &types::Request::fake("GET", "/q?key=with+space"),
+    );
+    let body = resp.body_string();
     assert!(body.contains("key=with space"), "+ should decode to space");
 
-    let resp = server.handle("GET", "q", vec![], &req("GET", "/q?empty="));
-    assert_eq!(resp.status_code, 200);
+    let resp = server.handle(
+        "GET",
+        "q",
+        vec![],
+        &types::Request::fake("GET", "/q?empty="),
+    );
+    assert_eq!(resp.status, 200);
 
-    let resp = server.handle("GET", "q", vec![], &req("GET", "/q?noeq"));
-    assert_eq!(resp.status_code, 200);
+    let resp = server.handle("GET", "q", vec![], &types::Request::fake("GET", "/q?noeq"));
+    assert_eq!(resp.status, 200);
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);

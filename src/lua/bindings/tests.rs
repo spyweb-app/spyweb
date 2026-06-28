@@ -1,7 +1,7 @@
 use super::*;
 use crate::services::db::Db;
+use crate::services::server::types;
 use mlua::Lua;
-use std::io::Read;
 use std::sync::Arc;
 
 struct TestDb {
@@ -34,84 +34,81 @@ impl Drop for TestDb {
 
 #[test]
 fn test_http_bindings() {
-    let server = rouille::Server::new("127.0.0.1:0", |request| {
-        if request.method() == "GET" {
+    let server = types::MockServer::start(|request| {
+        if request.method == "GET" {
             if request.header("X-Custom-Auth") == Some("secret-123") {
-                rouille::Response::text("GET-OK-AUTH!")
+                types::Response::text("GET-OK-AUTH!")
             } else {
-                rouille::Response::text("GET-OK!")
+                types::Response::text("GET-OK!")
             }
-        } else if request.method() == "HEAD" {
-            rouille::Response::text("HEAD-OK!").with_unique_header("X-Test", "head-check")
-        } else if request.method() == "POST"
+        } else if request.method == "HEAD" {
+            types::Response::text("HEAD-OK!").with_header("X-Test", "head-check")
+        } else if request.method == "POST"
             && request
                 .header("Content-Type")
                 .is_some_and(|ct| ct.starts_with("multipart/form-data"))
         {
-            let mut body = Vec::new();
-            if let Some(mut reader) = request.data() {
-                let _ = reader.read_to_end(&mut body);
-            }
+            let body = request.body_bytes().unwrap_or_default().to_vec();
             let body_str = String::from_utf8_lossy(&body);
             if body_str.contains("my-file-content") && body_str.contains("my-caption") {
-                rouille::Response::text("MULTIPART-OK!")
+                types::Response::text("MULTIPART-OK!")
             } else {
-                rouille::Response::text("MULTIPART-RECEIVED")
+                types::Response::text("MULTIPART-RECEIVED")
             }
-        } else if request.method() == "POST" {
-            let mut body = Vec::new();
-            if let Some(mut reader) = request.data() {
-                let _ = reader.read_to_end(&mut body);
-            }
+        } else if request.method == "POST" {
+            let body = request.body_bytes().unwrap_or_default().to_vec();
             if request.header("Content-Type") == Some("application/json") {
-                rouille::Response::text("POST-OK-JSON!")
+                types::Response::text("POST-OK-JSON!")
             } else if body == b"my-body" {
-                rouille::Response::text("POST-OK!")
+                types::Response::text("POST-OK!")
             } else if body == b"binary-data\x00\xff" {
-                rouille::Response::text("BINARY-OK!")
+                types::Response::text("BINARY-OK!")
             } else {
-                rouille::Response::text("POST-UNKNOWN!")
+                types::Response::text("POST-UNKNOWN!")
             }
         } else {
-            rouille::Response::empty_404()
+            types::Response::empty_404()
         }
-    })
-    .unwrap();
-    let port = server.server_addr().port();
-    std::thread::spawn(move || server.run());
+    });
 
     smol::block_on(async {
         let lua = Lua::new();
         register_http_and_fs(&lua, None, "test").unwrap();
 
-        let code_get = format!(r#"http_get("http://127.0.0.1:{}/")"#, port);
+        let code_get = format!(r#"http_get("http://127.0.0.1:{}/")"#, server.port());
         let res: mlua::Table = lua.load(&code_get).eval_async().await.unwrap();
         assert_eq!(res.get::<String>("body").unwrap(), "GET-OK!");
         assert_eq!(res.get::<u16>("status").unwrap(), 200);
 
         let code_get_headers = format!(
             r#"http_get("http://127.0.0.1:{}/", {{ ["X-Custom-Auth"] = "secret-123" }})"#,
-            port
+            server.port()
         );
         let res: mlua::Table = lua.load(&code_get_headers).eval_async().await.unwrap();
         assert_eq!(res.get::<String>("body").unwrap(), "GET-OK-AUTH!");
         assert_eq!(res.get::<u16>("status").unwrap(), 200);
 
-        let code_post = format!(r#"http_post("http://127.0.0.1:{}/", "my-body")"#, port);
+        let code_post = format!(
+            r#"http_post("http://127.0.0.1:{}/", "my-body")"#,
+            server.port()
+        );
         let res: mlua::Table = lua.load(&code_post).eval_async().await.unwrap();
         assert_eq!(res.get::<String>("body").unwrap(), "POST-OK!");
         assert_eq!(res.get::<u16>("status").unwrap(), 200);
 
         let code_post_headers = format!(
             r#"http_post("http://127.0.0.1:{}/", "my-body", {{ ["Content-Type"] = "application/json" }})"#,
-            port
+            server.port()
         );
         let res: mlua::Table = lua.load(&code_post_headers).eval_async().await.unwrap();
         assert_eq!(res.get::<String>("body").unwrap(), "POST-OK-JSON!");
         assert_eq!(res.get::<u16>("status").unwrap(), 200);
 
         // Test http_request with GET
-        let code_req_get = format!(r#"http_request({{ url = "http://127.0.0.1:{}/" }})"#, port);
+        let code_req_get = format!(
+            r#"http_request({{ url = "http://127.0.0.1:{}/" }})"#,
+            server.port()
+        );
         let res: mlua::Table = lua.load(&code_req_get).eval_async().await.unwrap();
         assert_eq!(res.get::<String>("body").unwrap(), "GET-OK!");
         assert_eq!(res.get::<u16>("status").unwrap(), 200);
@@ -119,7 +116,7 @@ fn test_http_bindings() {
         // Test http_request with POST
         let code_req_post = format!(
             r#"http_request({{ method = "POST", url = "http://127.0.0.1:{}/", body = "my-body" }})"#,
-            port
+            server.port()
         );
         let res: mlua::Table = lua.load(&code_req_post).eval_async().await.unwrap();
         assert_eq!(res.get::<String>("body").unwrap(), "POST-OK!");
@@ -128,7 +125,7 @@ fn test_http_bindings() {
         // Test http_request with HEAD
         let code_req_head = format!(
             r#"http_request({{ method = "HEAD", url = "http://127.0.0.1:{}/" }})"#,
-            port
+            server.port()
         );
         let res: mlua::Table = lua.load(&code_req_head).eval_async().await.unwrap();
         assert_eq!(res.get::<u16>("status").unwrap(), 200);
@@ -137,7 +134,7 @@ fn test_http_bindings() {
         // Test http_request with binary body
         let code_binary = format!(
             r#"http_request({{ method = "POST", url = "http://127.0.0.1:{}/", body = "binary-data\x00\xff" }})"#,
-            port
+            server.port()
         );
         let res: mlua::Table = lua.load(&code_binary).eval_async().await.unwrap();
         assert_eq!(res.get::<String>("body").unwrap(), "BINARY-OK!");
@@ -146,7 +143,7 @@ fn test_http_bindings() {
         // Test http_multipart with text fields
         let code_multi_text = format!(
             r#"http_multipart("http://127.0.0.1:{}/", {{ caption = "my-caption", desc = "hello" }})"#,
-            port
+            server.port()
         );
         let res: mlua::Table = lua.load(&code_multi_text).eval_async().await.unwrap();
         // Just verify it reached the server and got a response
@@ -162,7 +159,7 @@ fn test_http_bindings() {
             assert(res.status == 200)
             assert(res.body == "MULTIPART-OK!")
             "#,
-            port
+            server.port()
         );
         lua.load(&code_multi_file).exec_async().await.unwrap();
     });

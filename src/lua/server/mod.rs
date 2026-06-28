@@ -1,5 +1,5 @@
 use crate::services::db::Db;
-use std::io::Read;
+use crate::services::server::types;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,13 +35,13 @@ impl ApiServer {
         method: &str,
         name: &str,
         path_args: Vec<String>,
-        req: &rouille::Request,
-    ) -> rouille::Response {
+        req: &types::Request,
+    ) -> types::Response {
         let body = extract_body(req);
         let headers = extract_headers(req);
         let query = extract_query(req);
-        let path = req.url().to_string();
-        let client_ip = req.remote_addr().to_string();
+        let path = req.url.clone();
+        let client_ip = req.client_ip.clone().unwrap_or_default();
         let method = method.to_string();
         let name = name.to_string();
         let init_source = self.init_source.clone();
@@ -57,8 +57,7 @@ impl ApiServer {
             ) {
                 Ok(l) => l,
                 Err(e) => {
-                    return rouille::Response::text(format!("Engine error: {}", e))
-                        .with_status_code(500);
+                    return types::Response::text(format!("Engine error: {}", e)).with_status(500);
                 }
             };
 
@@ -88,10 +87,9 @@ impl ApiServer {
     }
 }
 
-fn extract_body(req: &rouille::Request) -> Option<String> {
-    let mut reader = req.data()?;
-    let mut s = String::new();
-    let _ = reader.read_to_string(&mut s);
+fn extract_body(req: &types::Request) -> Option<String> {
+    let bytes = req.body_bytes().unwrap_or_default();
+    let mut s = String::from_utf8_lossy(bytes).to_string();
     if s.len() > MAX_BODY_SIZE {
         crate::t_eprintln!(
             "Request body truncated from {} to {} bytes",
@@ -103,24 +101,15 @@ fn extract_body(req: &rouille::Request) -> Option<String> {
     Some(s)
 }
 
-fn extract_headers(req: &rouille::Request) -> std::collections::HashMap<String, String> {
-    req.headers()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+fn extract_headers(req: &types::Request) -> std::collections::HashMap<String, String> {
+    req.headers
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
         .collect()
 }
 
-fn extract_query(req: &rouille::Request) -> std::collections::HashMap<String, String> {
-    let mut query = std::collections::HashMap::new();
-    for pair in req.raw_query_string().split('&') {
-        if pair.is_empty() {
-            continue;
-        }
-        let mut parts = pair.splitn(2, '=');
-        let k = parts.next().unwrap_or("");
-        let v = parts.next().unwrap_or("");
-        query.insert(url_decode(k), url_decode(v));
-    }
-    query
+fn extract_query(req: &types::Request) -> std::collections::HashMap<String, String> {
+    req.query_params.clone()
 }
 
 async fn log_server_error(msg: &str, error_log_path: &std::path::Path) {
@@ -233,7 +222,7 @@ fn resolve_handler(
     lua: &mlua::Lua,
     method: &str,
     name: &str,
-) -> Result<mlua::Function, rouille::Response> {
+) -> Result<mlua::Function, types::Response> {
     let method_lower = method.to_lowercase();
     let globals = lua.globals();
 
@@ -249,7 +238,7 @@ fn resolve_handler(
         }
     }
 
-    Err(rouille::Response::text("Not Found").with_status_code(404))
+    Err(types::Response::text("Not Found").with_status(404))
 }
 
 async fn format_response(
@@ -257,21 +246,17 @@ async fn format_response(
     result: Result<mlua::Value, mlua::Error>,
     name: &str,
     error_log_path: &std::path::Path,
-) -> rouille::Response {
+) -> types::Response {
     match result {
         Ok(mlua::Value::Table(t)) => format_table_response(lua, &t),
-        Ok(mlua::Value::String(s)) => {
-            rouille::Response::text(s.to_string_lossy()).with_status_code(200)
-        }
-        Ok(mlua::Value::Nil) => rouille::Response::text("").with_status_code(200),
-        Ok(_) => {
-            rouille::Response::text("Invalid response type from Lua handler").with_status_code(500)
-        }
+        Ok(mlua::Value::String(s)) => types::Response::text(s.to_string_lossy()).with_status(200),
+        Ok(mlua::Value::Nil) => types::Response::text("").with_status(200),
+        Ok(_) => types::Response::text("Invalid response type from Lua handler").with_status(500),
         Err(e) => handle_error(name, e, error_log_path.to_path_buf()).await,
     }
 }
 
-fn format_table_response(lua: &mlua::Lua, t: &mlua::Table) -> rouille::Response {
+fn format_table_response(lua: &mlua::Lua, t: &mlua::Table) -> types::Response {
     let status = t.get::<i32>("status").unwrap_or(200);
     let status = status.clamp(100, 599) as u16;
     let body_val = t
@@ -304,15 +289,10 @@ fn format_table_response(lua: &mlua::Lua, t: &mlua::Table) -> rouille::Response 
         _ => {}
     }
 
-    let mut res = rouille::Response {
-        status_code: status,
-        headers: vec![],
-        data: rouille::ResponseBody::from_data(body_bytes),
-        upgrade: None,
-    };
+    let mut headers: Vec<(String, String)> = Vec::new();
 
     if let Some(ct) = content_type {
-        res.headers.push(("Content-Type".into(), ct.into()));
+        headers.push(("Content-Type".into(), ct.into()));
     }
 
     if let Ok(h_tbl) = t.get::<mlua::Table>("headers") {
@@ -326,12 +306,16 @@ fn format_table_response(lua: &mlua::Lua, t: &mlua::Table) -> rouille::Response 
                 {
                     continue;
                 }
-                res.headers.push((k.into(), v.into()));
+                headers.push((k.into(), v.into()));
             }
         }
     }
 
-    res
+    types::Response {
+        status,
+        headers,
+        body: types::ResponseBody::Bytes(body_bytes),
+    }
 }
 
 async fn run_deferred(lua: &mlua::Lua, error_log_path: &std::path::Path) {
@@ -371,7 +355,7 @@ async fn run_deferred(lua: &mlua::Lua, error_log_path: &std::path::Path) {
     }
 }
 
-async fn handle_error(name: &str, e: mlua::Error, error_log_path: PathBuf) -> rouille::Response {
+async fn handle_error(name: &str, e: mlua::Error, error_log_path: PathBuf) -> types::Response {
     crate::t_eprintln!("API Server error in endpoint '{}': {}", name, e);
     let msg = format!("Error in /api/v/{}: {}\n", name, e);
     let task = crate::services::io::IoTask {
@@ -382,37 +366,7 @@ async fn handle_error(name: &str, e: mlua::Error, error_log_path: PathBuf) -> ro
         reply: None,
     };
     let _ = crate::services::io::send_task(task).await;
-    rouille::Response::json(&serde_json::json!({ "error": "Internal Server Error" }))
-        .with_status_code(500)
-}
-
-fn url_decode(s: &str) -> String {
-    let mut bytes = Vec::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '+' {
-            bytes.push(b' ');
-        } else if c == '%' {
-            let mut hex = String::new();
-            if let Some(h1) = chars.next() {
-                hex.push(h1);
-            }
-            if let Some(h2) = chars.next() {
-                hex.push(h2);
-            }
-            if hex.len() == 2 {
-                if let Ok(b) = u8::from_str_radix(&hex, 16) {
-                    bytes.push(b);
-                    continue;
-                }
-            }
-            bytes.extend_from_slice(b"%");
-            bytes.extend_from_slice(hex.as_bytes());
-        } else {
-            bytes.extend_from_slice(c.to_string().as_bytes());
-        }
-    }
-    String::from_utf8(bytes).unwrap_or_default()
+    types::Response::json(&serde_json::json!({ "error": "Internal Server Error" })).with_status(500)
 }
 
 #[cfg(test)]
