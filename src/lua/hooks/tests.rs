@@ -49,6 +49,9 @@ end
             url: "https://example.com".into(),
             method: "GET".into(),
             headers: Arc::new(IndexMap::new()),
+            timeout: None,
+            proxy: None,
+            max_body_size: None,
         },
         proxy: None,
         result: Ok(RequestResult {
@@ -57,6 +60,8 @@ end
             headers: std::collections::HashMap::new(),
             body: "<html></html>".into(),
             proxy: None,
+            time_ms: None,
+            size: None,
         }),
     };
 
@@ -110,6 +115,9 @@ end
         url: "https://example.com".into(),
         method: "GET".into(),
         headers: Default::default(),
+        timeout: None,
+        proxy: None,
+        max_body_size: None,
     };
 
     // Test Success
@@ -131,6 +139,9 @@ end
         url: "https://fail.com".into(),
         method: "GET".into(),
         headers: Default::default(),
+        timeout: None,
+        proxy: None,
+        max_body_size: None,
     };
     let attempt_fail = smol::block_on(hooks.override_fetch(req_fail, &ctx)).unwrap();
     assert_eq!(attempt_fail.result.unwrap_err(), "simulated failure");
@@ -168,6 +179,8 @@ end
         headers: Default::default(),
         body: "Raw HTML body".into(),
         proxy: None,
+        time_ms: None,
+        size: None,
     };
 
     let ctx = smol::block_on(hooks.new_cycle_context(0)).unwrap();
@@ -216,6 +229,9 @@ end
         url: "https://example.com".into(),
         method: "GET".into(),
         headers: Default::default(),
+        timeout: None,
+        proxy: None,
+        max_body_size: None,
     };
 
     let ctx = smol::block_on(hooks.new_cycle_context(0)).unwrap();
@@ -291,6 +307,9 @@ end
         url: "https://example.com".into(),
         method: "GET".into(),
         headers: Default::default(),
+        timeout: None,
+        proxy: None,
+        max_body_size: None,
     };
 
     let ctx = smol::block_on(hooks.new_cycle_context(0)).unwrap();
@@ -591,6 +610,9 @@ end
             url: "https://example.com".into(),
             method: "GET".into(),
             headers: Default::default(),
+            timeout: None,
+            proxy: None,
+            max_body_size: None,
         };
 
         let _ = hooks.before_fetch(req, &ctx).await.unwrap();
@@ -653,6 +675,9 @@ end
             url: "https://example.com".into(),
             method: "GET".into(),
             headers: Default::default(),
+            timeout: None,
+            proxy: None,
+            max_body_size: None,
         };
 
         // 1. Before Fetch
@@ -998,6 +1023,9 @@ end
             url: "https://initial.com".into(),
             method: "GET".into(),
             headers: Default::default(),
+            timeout: None,
+            proxy: None,
+            max_body_size: None,
         };
 
         let overridden = hooks.before_fetch(req, &ctx).await.unwrap().unwrap();
@@ -1084,6 +1112,52 @@ end
 
     drop(db);
     let _ = fs::remove_file(db_path);
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_before_fetch_can_override_timeout_proxy_max_body() {
+    let dir = unique_test_dir("before-fetch-override");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(
+        &hook_path,
+        r#"
+function before_fetch(request, ctx)
+    request.timeout = 15
+    request.proxy = "http://user:pass@residential-proxy.com:8080"
+    request.max_body_size = 5     -- 5 MB
+    return request
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+    smol::block_on(async {
+        let ctx = hooks.new_cycle_context(0).await.unwrap();
+        let req = RequestConfig {
+            url: "https://example.com".into(),
+            method: "GET".into(),
+            headers: Default::default(),
+            timeout: None,
+            proxy: None,
+            max_body_size: None,
+        };
+
+        let overridden = hooks.before_fetch(req, &ctx).await.unwrap().unwrap();
+        assert_eq!(overridden.timeout, Some(15));
+        assert_eq!(
+            overridden.proxy.as_deref(),
+            Some("http://user:pass@residential-proxy.com:8080")
+        );
+        assert_eq!(overridden.max_body_size, Some(5 * 1024 * 1024));
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_file(&hook_path);
     let _ = fs::remove_dir(&dir);
 }

@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::io::Read;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use indexmap::IndexMap;
@@ -38,11 +39,16 @@ const DEFAULT_HEADERS: &[(&str, &str)] = &[
     ("Priority", "u=0, i"),
 ];
 
+const DEFAULT_MAX_BODY_SIZE: u64 = 10 * 1024 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestConfig {
     pub url: String,
     pub method: String,
     pub headers: Arc<IndexMap<String, String>>,
+    pub timeout: Option<u64>,
+    pub proxy: Option<String>,
+    pub max_body_size: Option<u64>,
 }
 
 impl RequestConfig {
@@ -64,6 +70,9 @@ impl RequestConfig {
             url: job.url.clone(),
             method: "GET".into(),
             headers: Arc::new(headers),
+            timeout: None,
+            proxy: None,
+            max_body_size: None,
         }
     }
 }
@@ -75,6 +84,8 @@ pub struct RequestResult {
     pub headers: HashMap<String, String>,
     pub body: String,
     pub proxy: Option<String>,
+    pub time_ms: Option<u64>,
+    pub size: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,20 +142,25 @@ impl RequestHandler {
         }
     }
 
-    fn get_agent(&self, proxy_url: Option<&str>) -> Result<Agent> {
-        match proxy_url {
-            Some(url) => self.build_agent(Some(url)),
-            None => match self.default_agent.get_or_init(|| self.build_agent(None)) {
+    fn get_agent(&self, proxy_url: Option<&str>, timeout: Duration) -> Result<Agent> {
+        if proxy_url.is_none() && timeout == self.timeout {
+            match self
+                .default_agent
+                .get_or_init(|| self.build_agent(None, self.timeout))
+            {
                 Ok(agent) => Ok(agent.clone()),
                 Err(err) => Err(anyhow::anyhow!("{}", err)),
-            },
+            }
+        } else {
+            self.build_agent(proxy_url, timeout)
         }
     }
 
     pub fn fetch(&self, job: &JobConfig) -> Result<RequestResult> {
         let selected_proxy = self.select_proxy(job);
-        let agent = self.get_agent(selected_proxy.as_deref())?;
+        let agent = self.get_agent(selected_proxy.as_deref(), self.timeout)?;
 
+        let start = Instant::now();
         let mut request = agent.get(&job.url);
 
         for (name, value) in DEFAULT_HEADERS {
@@ -167,6 +183,8 @@ impl RequestHandler {
             .body_mut()
             .read_to_string()
             .context("failed to read response body")?;
+        let elapsed = start.elapsed().as_millis() as u64;
+        let size = body.len() as u64;
 
         Ok(RequestResult {
             url: job.url.clone(),
@@ -174,14 +192,19 @@ impl RequestHandler {
             headers,
             body,
             proxy: selected_proxy,
+            time_ms: Some(elapsed),
+            size: Some(size),
         })
     }
 
-    /// Fetch using a RequestConfig (possibly mutated by Lua hooks) for URL and headers.
-    /// Proxy selection still comes from job.proxy.
+    /// Fetch using a RequestConfig (possibly mutated by Lua hooks).
+    /// Proxy, timeout, and body size can be overridden per-request.
     pub fn fetch_with_request(&self, job: &JobConfig, req: &RequestConfig) -> FetchAttempt {
-        let selected_proxy = self.select_proxy(job);
-        let agent = match self.get_agent(selected_proxy.as_deref()) {
+        let selected_proxy = req.proxy.clone().or_else(|| self.select_proxy(job));
+        let effective_timeout = req.timeout.map(Duration::from_secs).unwrap_or(self.timeout);
+        let max_body = req.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
+
+        let agent = match self.get_agent(selected_proxy.as_deref(), effective_timeout) {
             Ok(agent) => agent,
             Err(err) => {
                 return FetchAttempt {
@@ -192,74 +215,85 @@ impl RequestHandler {
             }
         };
 
+        let start = Instant::now();
+
+        let err_context = |job: &JobConfig, proxy: &Option<String>| {
+            let via = proxy
+                .as_deref()
+                .map(|p| format!(" via proxy '{}'", p))
+                .unwrap_or_default();
+            format!("request failed for job '{}'{}", job.name, via)
+        };
+
         let result = match req.method.to_uppercase().as_str() {
             "HEAD" => {
-                let request = agent.head(&req.url);
                 let request = req
                     .headers
                     .iter()
-                    .fold(request, |r, (name, value)| r.header(name, value));
+                    .fold(agent.head(&req.url), |r, (n, v)| r.header(n, v));
                 request
                     .call()
-                    .with_context(|| format!("request failed for job '{}'", job.name))
+                    .with_context(|| err_context(job, &selected_proxy))
                     .map(|response| {
-                        let status = response.status().as_u16();
-                        let headers = flatten_headers(response.headers());
+                        let elapsed = start.elapsed().as_millis() as u64;
                         RequestResult {
                             url: req.url.clone(),
-                            status,
-                            headers,
+                            status: response.status().as_u16(),
+                            headers: flatten_headers(response.headers()),
                             body: String::new(),
                             proxy: selected_proxy.clone(),
+                            time_ms: Some(elapsed),
+                            size: Some(0),
                         }
                     })
             }
             "DELETE" => {
-                let mut request = agent.delete(&req.url);
-                for (name, value) in req.headers.iter() {
-                    request = request.header(name, value);
-                }
+                let request = req
+                    .headers
+                    .iter()
+                    .fold(agent.delete(&req.url), |r, (n, v)| r.header(n, v));
                 request
                     .call()
-                    .with_context(|| format!("request failed for job '{}'", job.name))
+                    .with_context(|| err_context(job, &selected_proxy))
                     .and_then(|mut response| {
                         let status = response.status().as_u16();
                         let headers = flatten_headers(response.headers());
-                        let body = response
-                            .body_mut()
-                            .read_to_string()
-                            .context("failed to read response body")?;
+                        let body = read_body_bounded(response.body_mut().as_reader(), max_body)?;
+                        let elapsed = start.elapsed().as_millis() as u64;
+                        let size = body.len() as u64;
                         Ok(RequestResult {
                             url: req.url.clone(),
                             status,
                             headers,
                             body,
                             proxy: selected_proxy.clone(),
+                            time_ms: Some(elapsed),
+                            size: Some(size),
                         })
                     })
             }
             _ => {
-                // GET (default) and any other method fall through to a standard GET
-                let mut request = agent.get(&req.url);
-                for (name, value) in req.headers.iter() {
-                    request = request.header(name, value);
-                }
+                let request = req
+                    .headers
+                    .iter()
+                    .fold(agent.get(&req.url), |r, (n, v)| r.header(n, v));
                 request
                     .call()
-                    .with_context(|| format!("request failed for job '{}'", job.name))
+                    .with_context(|| err_context(job, &selected_proxy))
                     .and_then(|mut response| {
                         let status = response.status().as_u16();
                         let headers = flatten_headers(response.headers());
-                        let body = response
-                            .body_mut()
-                            .read_to_string()
-                            .context("failed to read response body")?;
+                        let body = read_body_bounded(response.body_mut().as_reader(), max_body)?;
+                        let elapsed = start.elapsed().as_millis() as u64;
+                        let size = body.len() as u64;
                         Ok(RequestResult {
                             url: req.url.clone(),
                             status,
                             headers,
                             body,
                             proxy: selected_proxy.clone(),
+                            time_ms: Some(elapsed),
+                            size: Some(size),
                         })
                     })
             }
@@ -272,9 +306,9 @@ impl RequestHandler {
         }
     }
 
-    pub(crate) fn build_agent(&self, proxy_url: Option<&str>) -> Result<Agent> {
+    pub(crate) fn build_agent(&self, proxy_url: Option<&str>, timeout: Duration) -> Result<Agent> {
         let mut config = Agent::config_builder()
-            .timeout_global(Some(self.timeout))
+            .timeout_global(Some(timeout))
             .http_status_as_error(false)
             .max_idle_connections(0)
             .build();
@@ -283,7 +317,7 @@ impl RequestHandler {
             let proxy = Proxy::new(proxy_url)
                 .with_context(|| format!("invalid proxy url '{}'", proxy_url))?;
             config = Agent::config_builder()
-                .timeout_global(Some(self.timeout))
+                .timeout_global(Some(timeout))
                 .http_status_as_error(false)
                 .max_idle_connections(0)
                 .proxy(Some(proxy))
@@ -311,6 +345,18 @@ impl RequestHandler {
             }
         }
     }
+}
+
+pub(crate) fn read_body_bounded<R: Read>(reader: R, max: u64) -> Result<String> {
+    let mut buf = Vec::new();
+    reader
+        .take(max + 1)
+        .read_to_end(&mut buf)
+        .context("failed to read response body")?;
+    if buf.len() as u64 > max {
+        anyhow::bail!("response body exceeds {} byte limit", max);
+    }
+    String::from_utf8(buf).map_err(|e| anyhow::anyhow!("response body is not valid UTF-8: {e}"))
 }
 
 pub(crate) fn flatten_headers(headers: &HeaderMap) -> HashMap<String, String> {

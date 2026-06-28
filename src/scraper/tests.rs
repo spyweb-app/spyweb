@@ -8,6 +8,7 @@ use crate::lua::hooks::JobHooks;
 use crate::scraper::pipeline::{run_multi_cycle, run_once, run_once_inner, run_urls_cycle};
 use crate::scraper::request::{
     RequestConfig, RequestHandler, RequestResult, flatten_headers, format_error_chain,
+    read_body_bounded,
 };
 use crate::scraper::runner::Runner;
 use crate::services::db::Db;
@@ -477,6 +478,8 @@ fn runner_response(body: &str) -> RequestResult {
         headers: Default::default(),
         body: body.into(),
         proxy: None,
+        time_ms: None,
+        size: None,
     }
 }
 
@@ -627,7 +630,7 @@ fn flatten_headers_preserves_header_names_and_values() {
 #[test]
 fn build_agent_disables_http_status_as_error() {
     let handler = RequestHandler::new();
-    let Ok(agent) = handler.build_agent(None) else {
+    let Ok(agent) = handler.build_agent(None, std::time::Duration::from_secs(30)) else {
         panic!("building an agent without a proxy should succeed");
     };
 
@@ -647,4 +650,25 @@ fn error_chain_formatter_preserves_context_and_cause() {
         formatted,
         "request failed for job 'Spyweb': dns lookup failed"
     );
+}
+
+#[test]
+fn test_read_body_bounded_ok() {
+    let body = b"hello world";
+    let result = read_body_bounded(std::io::Cursor::new(body), 1024).unwrap();
+    assert_eq!(result, "hello world");
+}
+
+#[test]
+fn test_read_body_bounded_truncated() {
+    let body = vec![b'a'; 100];
+    let err = read_body_bounded(std::io::Cursor::new(body), 50).unwrap_err();
+    assert!(err.to_string().contains("exceeds 50 byte limit"));
+}
+
+#[test]
+fn test_read_body_bounded_exact() {
+    let body = vec![b'b'; 64];
+    let result = read_body_bounded(std::io::Cursor::new(body), 64).unwrap();
+    assert_eq!(result.len(), 64);
 }

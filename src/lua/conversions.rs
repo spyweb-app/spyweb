@@ -20,6 +20,17 @@ pub fn request_to_lua(lua: &Lua, req: &RequestConfig) -> Result<Table> {
     }
     table.set("headers", headers)?;
 
+    if let Some(timeout) = req.timeout {
+        table.set("timeout", timeout)?;
+    }
+    if let Some(ref proxy) = req.proxy {
+        table.set("proxy", proxy.as_str())?;
+    }
+    if let Some(bytes) = req.max_body_size {
+        // expose to Lua as MB
+        table.set("max_body_size", bytes / 1024 / 1024)?;
+    }
+
     Ok(table)
 }
 
@@ -41,10 +52,20 @@ pub fn lua_to_request(table: Table, original: RequestConfig) -> Result<RequestCo
         None => original.headers,
     };
 
+    let timeout = table.get::<Option<u64>>("timeout")?.or(original.timeout);
+    let proxy = table.get::<Option<String>>("proxy")?.or(original.proxy);
+    let max_body_size = table
+        .get::<Option<u64>>("max_body_size")?
+        .map(|mb| mb * 1024 * 1024)
+        .or(original.max_body_size);
+
     Ok(RequestConfig {
         url,
         method,
         headers,
+        timeout,
+        proxy,
+        max_body_size,
     })
 }
 
@@ -59,6 +80,16 @@ pub fn response_to_lua(lua: &Lua, res: &RequestResult) -> Result<Table> {
         headers.set(k.as_str(), v.as_str())?;
     }
     table.set("headers", headers)?;
+
+    if let Some(ref proxy) = res.proxy {
+        table.set("proxy", proxy.as_str())?;
+    }
+    if let Some(time_ms) = res.time_ms {
+        table.set("time_ms", time_ms)?;
+    }
+    if let Some(size) = res.size {
+        table.set("size", size)?;
+    }
 
     Ok(table)
 }
@@ -145,6 +176,8 @@ pub fn lua_to_after_fetch_success_response(
         status: original.status,
         headers: original.headers,
         proxy: original.proxy,
+        time_ms: original.time_ms,
+        size: original.size,
     })
 }
 
@@ -155,6 +188,8 @@ pub fn lua_table_to_response(table: Table) -> Result<RequestResult> {
         headers: HashMap::new(),
         body: String::new(),
         proxy: None,
+        time_ms: None,
+        size: None,
     };
 
     let body: String = table
@@ -180,6 +215,8 @@ pub fn lua_table_to_response(table: Table) -> Result<RequestResult> {
     let proxy = table
         .get::<Option<String>>("proxy")?
         .or(original.proxy.clone());
+    let time_ms = table.get::<Option<u64>>("time_ms")?.or(original.time_ms);
+    let size = table.get::<Option<u64>>("size")?.or(original.size);
 
     Ok(RequestResult {
         body,
@@ -187,6 +224,8 @@ pub fn lua_table_to_response(table: Table) -> Result<RequestResult> {
         status,
         headers,
         proxy,
+        time_ms,
+        size,
     })
 }
 

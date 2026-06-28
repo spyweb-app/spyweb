@@ -15,9 +15,17 @@ fn test_request_config_roundtrip() {
         url: "https://example.com".into(),
         method: "HEAD".into(),
         headers: Arc::new(headers),
+        timeout: None,
+        proxy: None,
+        max_body_size: None,
     };
 
     let t = request_to_lua(&lua, &req).unwrap();
+
+    // new fields should not be present in the table when None
+    assert!(t.get::<Option<u64>>("timeout").unwrap().is_none());
+    assert!(t.get::<Option<String>>("proxy").unwrap().is_none());
+    assert!(t.get::<Option<u64>>("max_body_size").unwrap().is_none());
 
     lua.globals().set("req", t).unwrap();
     lua.load(
@@ -25,6 +33,9 @@ fn test_request_config_roundtrip() {
         req.url = "https://example.com/mutated"
         req.method = "GET"
         req.headers["Authorization"] = "Bearer token"
+        req.timeout = 15
+        req.proxy = "http://proxy:8080"
+        req.max_body_size = 5    -- 5 MB
     "#,
     )
     .exec()
@@ -40,6 +51,9 @@ fn test_request_config_roundtrip() {
         final_req.headers.get("Authorization").unwrap(),
         "Bearer token"
     );
+    assert_eq!(final_req.timeout, Some(15));
+    assert_eq!(final_req.proxy.as_deref(), Some("http://proxy:8080"));
+    assert_eq!(final_req.max_body_size, Some(5 * 1024 * 1024));
 }
 
 #[test]
@@ -51,6 +65,8 @@ fn test_response_roundtrip() {
         status: 200,
         headers: HashMap::new(),
         proxy: None,
+        time_ms: None,
+        size: None,
     };
 
     let attempt = FetchAttempt {
@@ -58,6 +74,9 @@ fn test_response_roundtrip() {
             url: "https://example.com".into(),
             method: "GET".into(),
             headers: Arc::new(IndexMap::from([("User-Agent".into(), "SpyWeb".into())])),
+            timeout: None,
+            proxy: None,
+            max_body_size: None,
         },
         proxy: None,
         result: Ok(res.clone()),
@@ -95,6 +114,9 @@ fn test_fetch_error_envelope_can_be_turned_into_response() {
             url: "https://example.com/products".into(),
             method: "GET".into(),
             headers: Arc::new(IndexMap::from([("Accept".into(), "text/html".into())])),
+            timeout: None,
+            proxy: None,
+            max_body_size: None,
         },
         proxy: Some("http://proxy-1:8080".into()),
         result: Err("request failed for job 'test': dns lookup failed".into()),
@@ -143,6 +165,9 @@ fn test_fetch_error_backcompat_top_level_response_still_works() {
             url: "https://example.com".into(),
             method: "GET".into(),
             headers: Arc::new(IndexMap::new()),
+            timeout: None,
+            proxy: None,
+            max_body_size: None,
         },
         proxy: None,
         result: Err("request failed for job 'test': timed out".into()),
@@ -178,6 +203,9 @@ fn test_http_error_response_has_response_and_not_ok() {
             url: "https://example.com/protected".into(),
             method: "GET".into(),
             headers: Arc::new(IndexMap::new()),
+            timeout: None,
+            proxy: None,
+            max_body_size: None,
         },
         proxy: None,
         result: Ok(RequestResult {
@@ -186,6 +214,8 @@ fn test_http_error_response_has_response_and_not_ok() {
             status: 403,
             headers: HashMap::from([("content-type".into(), "text/html".into())]),
             proxy: None,
+            time_ms: None,
+            size: None,
         }),
     };
 
