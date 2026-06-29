@@ -6,6 +6,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_BODY_SIZE: usize = 10 * 1024 * 1024; // 10MB
 
+/// Hop-by-hop headers that Lua handlers are not allowed to set in responses.
+const FORBIDDEN_RESPONSE_HEADERS: [&str; 6] = [
+    "transfer-encoding",
+    "content-length",
+    "connection",
+    "keep-alive",
+    "upgrade",
+    "trailer",
+];
+
 pub struct ApiServer {
     db: Arc<Db>,
     init_source: String,
@@ -306,6 +316,10 @@ fn format_table_response(lua: &mlua::Lua, t: &mlua::Table) -> types::Response {
                 {
                     continue;
                 }
+                let lower = k.to_lowercase();
+                if FORBIDDEN_RESPONSE_HEADERS.contains(&lower.as_str()) {
+                    continue;
+                }
                 headers.push((k.into(), v.into()));
             }
         }
@@ -330,26 +344,26 @@ async fn run_deferred(lua: &mlua::Lua, error_log_path: &std::path::Path) {
             return;
         }
     };
-    let deferred = match ctx.get::<mlua::Table>("__deferred") {
-        Ok(t) => t,
-        Err(e) => {
-            log_server_error(
-                &format!("API server: failed to get __deferred table: {}", e),
-                error_log_path,
-            )
-            .await;
+    loop {
+        let deferred = match ctx.get::<mlua::Table>("__deferred") {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+        let len = deferred.raw_len();
+        if len == 0 {
             return;
         }
-    };
-    let len = deferred.len().unwrap_or(0);
-    for i in (1..=len).rev() {
-        if let Ok(f) = deferred.get::<mlua::Function>(i) {
-            if let Err(e) = f.call_async::<mlua::Value>((ctx.clone(),)).await {
-                log_server_error(
-                    &format!("API server: deferred function failed: {}", e),
-                    error_log_path,
-                )
-                .await;
+        // swap in fresh table so new defers from this iteration are not lost
+        if let Ok(fresh) = lua.create_table() {
+            let _ = ctx.set("__deferred", fresh);
+        }
+        for i in (1..=len).rev() {
+            if let Ok(f) = deferred.get::<mlua::Function>(i) {
+                if let Err(e) = f.call_async::<mlua::Value>((ctx.clone(),)).await {
+                    let msg = format!("API server: deferred function failed: {}", e);
+                    crate::t_eprintln!("{}", msg);
+                    log_server_error(&msg, error_log_path).await;
+                }
             }
         }
     }

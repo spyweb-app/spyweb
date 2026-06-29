@@ -595,3 +595,45 @@ fn test_extract_query_edge_cases() {
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
 }
+
+#[test]
+fn test_run_deferred_re_entrant() {
+    use crate::lua::engine::create_engine;
+
+    let dir = unique_test_dir("defer-reentrant");
+    let db = setup_db(&dir);
+
+    let lua = create_engine(Some(dir.clone()), db, "__test", false).unwrap();
+
+    // Create a ctx table with __deferred and register as active_ctx
+    let ctx = lua.create_table().unwrap();
+    let deferred = lua.create_table().unwrap();
+    ctx.set("__deferred", deferred.clone()).unwrap();
+    lua.set_named_registry_value("active_ctx", ctx.clone())
+        .unwrap();
+
+    // Push two defers: the outer pushes the inner (re-entrant)
+    let outer_fn = lua
+        .create_function(move |_lua, (ctx,): (mlua::Table,)| {
+            let inner = _lua.create_function(|_, ()| Ok(())).unwrap();
+            let defers: mlua::Table = ctx.get("__deferred").unwrap();
+            defers.set(1, inner).unwrap();
+            Ok(())
+        })
+        .unwrap();
+    deferred.set(1, outer_fn).unwrap();
+
+    // Run deferred — the outer fn pushes an inner defer.
+    // Old code would only run the outer (len captured once).
+    // New code should also run the inner (swap-before-drain).
+    let error_log = std::path::Path::new("/dev/null");
+    smol::block_on(run_deferred(&lua, error_log));
+
+    // After both runs, __deferred should be empty (or have a fresh
+    // empty table swapped in).
+    let remaining: mlua::Table = ctx.get("__deferred").unwrap();
+    assert_eq!(remaining.raw_len(), 0);
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_dir(&dir);
+}

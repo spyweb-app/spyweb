@@ -120,7 +120,8 @@ fn handle_static_request(db: &Db, request: &types::Request) -> types::Response {
     }
 
     let path = url.trim_start_matches('/');
-    if let Err(e) = validate_static_path(path) {
+    let path = types::url_decode(path);
+    if let Err(e) = validate_static_path(&path) {
         crate::t_eprintln!("Blocked static request for '{}': {}", url, e);
         return types::Response::empty_404();
     }

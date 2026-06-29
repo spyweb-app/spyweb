@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Arc;
 
+const MAX_REQUEST_BODY: u64 = 10 * 1024 * 1024; // 10MB
+
 pub struct Request {
     pub method: String,
     pub url: String,
@@ -178,9 +180,9 @@ pub(crate) fn from_rouille_request(req: &rouille::Request) -> Request {
     let query_params = parse_query(&format!("?{}", req.raw_query_string()));
     let client_ip = Some(req.remote_addr().to_string());
 
-    let body = req.data().map(|mut reader| {
+    let body = req.data().map(|reader| {
         let mut buf = Vec::new();
-        let _ = reader.read_to_end(&mut buf);
+        let _ = reader.take(MAX_REQUEST_BODY).read_to_end(&mut buf);
         buf
     });
 
