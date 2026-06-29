@@ -1,13 +1,21 @@
-use mlua::{Lua, Result as LuaResult};
+use crate::lua::conversions::error_kind;
+use mlua::{Lua, Result as LuaResult, Value};
 use std::collections::HashMap;
 use std::io::Read;
+use std::time::{Duration, Instant};
+use ureq::{Agent, Proxy};
 
 const MAX_RESPONSE_BODY: u64 = 10 * 1024 * 1024;
+const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 struct RawResponse {
+    url: String,
     status: u16,
     headers: HashMap<String, String>,
     body: String,
+    proxy: Option<String>,
+    time_ms: u64,
+    size: u64,
 }
 
 impl RawResponse {
@@ -21,13 +29,27 @@ impl RawResponse {
 
         let table = lua.create_table().map_err(|e| format!("lua error: {e}"))?;
         table
+            .set("url", self.url.as_str())
+            .map_err(|e| format!("lua error: {e}"))?;
+        table
             .set("status", self.status)
             .map_err(|e| format!("lua error: {e}"))?;
         table
             .set("headers", headers_table)
             .map_err(|e| format!("lua error: {e}"))?;
         table
-            .set("body", self.body)
+            .set("body", self.body.as_str())
+            .map_err(|e| format!("lua error: {e}"))?;
+        if let Some(ref proxy) = self.proxy {
+            table
+                .set("proxy", proxy.as_str())
+                .map_err(|e| format!("lua error: {e}"))?;
+        }
+        table
+            .set("time_ms", self.time_ms)
+            .map_err(|e| format!("lua error: {e}"))?;
+        table
+            .set("size", self.size)
             .map_err(|e| format!("lua error: {e}"))?;
         Ok(table)
     }
@@ -56,16 +78,35 @@ fn collect_headers(headers: &ureq::http::HeaderMap) -> HashMap<String, String> {
     map
 }
 
-fn read_response_body(body: &mut ureq::Body) -> Result<String, String> {
+fn read_response_body(body: &mut ureq::Body, max_bytes: u64) -> Result<String, String> {
     let mut buf = Vec::new();
     body.as_reader()
-        .take(MAX_RESPONSE_BODY + 1)
+        .take(max_bytes + 1)
         .read_to_end(&mut buf)
         .map_err(|e| format!("read response body failed: {e}"))?;
-    if buf.len() as u64 > MAX_RESPONSE_BODY {
-        return Err("response body exceeds 10MB limit".to_string());
+    if buf.len() as u64 > max_bytes {
+        return Err(format!("response body exceeds {} byte limit", max_bytes));
     }
     String::from_utf8(buf).map_err(|e| format!("response body is not valid UTF-8: {e}"))
+}
+
+fn build_agent(proxy_url: Option<&str>, timeout: Duration) -> Result<Agent, String> {
+    let mut config = Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .http_status_as_error(false)
+        .build();
+
+    if let Some(proxy_url) = proxy_url {
+        let proxy = Proxy::new(proxy_url)
+            .map_err(|e| format!("invalid proxy url '{}': {}", proxy_url, e))?;
+        config = Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .http_status_as_error(false)
+            .proxy(Some(proxy))
+            .build();
+    }
+
+    Ok(config.into())
 }
 
 fn do_http(
@@ -73,12 +114,14 @@ fn do_http(
     url: &str,
     body: Option<&[u8]>,
     headers: Option<&HashMap<String, String>>,
+    proxy: Option<&str>,
+    timeout_secs: Option<u64>,
+    max_body_bytes: Option<u64>,
 ) -> Result<RawResponse, String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(std::time::Duration::from_secs(30)))
-        .http_status_as_error(false)
-        .build()
-        .into();
+    let start = Instant::now();
+    let effective_timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS));
+    let effective_max = max_body_bytes.unwrap_or(MAX_RESPONSE_BODY);
+    let agent = build_agent(proxy, effective_timeout)?;
 
     let method_upper = method.to_uppercase();
     let has_body = matches!(method_upper.as_str(), "POST" | "PUT" | "PATCH");
@@ -110,11 +153,17 @@ fn do_http(
             .map_err(|e| format!("http_{} failed: {e}", method.to_lowercase()))?;
         let status = response.status().as_u16();
         let headers = collect_headers(response.headers());
-        let body = read_response_body(response.body_mut())?;
+        let body = read_response_body(response.body_mut(), effective_max)?;
+        let elapsed = start.elapsed().as_millis() as u64;
+        let size = body.len() as u64;
         Ok(RawResponse {
+            url: url.to_string(),
             status,
             headers,
             body,
+            proxy: proxy.map(String::from),
+            time_ms: elapsed,
+            size,
         })
     } else {
         let mut req = match method_upper.as_str() {
@@ -135,13 +184,44 @@ fn do_http(
             .map_err(|e| format!("http_{} failed: {e}", method.to_lowercase()))?;
         let status = response.status().as_u16();
         let headers = collect_headers(response.headers());
-        let body = read_response_body(response.body_mut())?;
+        let body = read_response_body(response.body_mut(), effective_max)?;
+        let elapsed = start.elapsed().as_millis() as u64;
+        let size = body.len() as u64;
         Ok(RawResponse {
+            url: url.to_string(),
             status,
             headers,
             body,
+            proxy: proxy.map(String::from),
+            time_ms: elapsed,
+            size,
         })
     }
+}
+
+fn make_success(lua: &Lua, raw: RawResponse) -> Result<(Option<Value>, Option<Value>), String> {
+    let table = raw.into_lua_table(lua)?;
+    Ok((Some(Value::Table(table)), None))
+}
+
+fn make_error(
+    lua: &Lua,
+    msg: String,
+    proxy: Option<&str>,
+) -> Result<(Option<Value>, Option<Value>), String> {
+    let err_table = lua.create_table().map_err(|e| format!("lua error: {e}"))?;
+    err_table
+        .set("error", msg.as_str())
+        .map_err(|e| format!("lua error: {e}"))?;
+    err_table
+        .set("kind", error_kind(&msg))
+        .map_err(|e| format!("lua error: {e}"))?;
+    if let Some(p) = proxy {
+        err_table
+            .set("proxy", p)
+            .map_err(|e| format!("lua error: {e}"))?;
+    }
+    Ok((None, Some(Value::Table(err_table))))
 }
 
 pub fn register(lua: &Lua) -> LuaResult<()> {
@@ -153,43 +233,68 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
             .get::<Option<String>>("url")?
             .ok_or_else(|| mlua::Error::runtime("http_request: 'url' is required"))?;
         let body: Option<mlua::String> = args.get("body").ok().flatten();
-        let body_bytes = body.as_ref().map(|s| {
-            let bytes: Vec<u8> = s.as_bytes().to_vec();
-            bytes
-        });
+        let body_bytes = body.as_ref().map(|s| s.as_bytes().to_vec());
         let headers: Option<HashMap<String, String>> = args.get("headers").ok().flatten();
+        let proxy: Option<String> = args.get("proxy").ok().flatten();
+        let proxy_for_error = proxy.clone();
+        let timeout: Option<u64> = args.get("timeout").ok().flatten();
+        let max_body_mb: Option<u64> = args.get("max_body_size").ok().flatten();
+        let max_body_bytes = max_body_mb.map(|mb| mb * 1024 * 1024);
 
-        let result: LuaResult<mlua::Table> = smol::unblock(move || {
-            let raw = do_http(&method, &url, body_bytes.as_deref(), headers.as_ref())?;
-            raw.into_lua_table(&lua)
+        let result = smol::unblock(move || {
+            do_http(
+                &method,
+                &url,
+                body_bytes.as_deref(),
+                headers.as_ref(),
+                proxy.as_deref(),
+                timeout,
+                max_body_bytes,
+            )
         })
-        .await
-        .map_err(mlua::Error::runtime);
-        result
+        .await;
+
+        match result {
+            Ok(raw) => make_success(&lua, raw).map_err(|e| mlua::Error::runtime(e)),
+            Err(msg) => make_error(&lua, msg, proxy_for_error.as_deref())
+                .map_err(|e| mlua::Error::runtime(e)),
+        }
     })?;
 
     let http_get = lua.create_async_function(
         |lua, (url, headers): (String, Option<HashMap<String, String>>)| async move {
-            let result: LuaResult<mlua::Table> = smol::unblock(move || {
-                let raw = do_http("GET", &url, None, headers.as_ref())?;
-                raw.into_lua_table(&lua)
+            let result = smol::unblock(move || {
+                do_http("GET", &url, None, headers.as_ref(), None, None, None)
             })
-            .await
-            .map_err(mlua::Error::runtime);
-            result
+            .await;
+
+            match result {
+                Ok(raw) => make_success(&lua, raw).map_err(|e| mlua::Error::runtime(e)),
+                Err(msg) => make_error(&lua, msg, None).map_err(|e| mlua::Error::runtime(e)),
+            }
         },
     )?;
 
     let http_post = lua.create_async_function(
         |lua, (url, body, headers): (String, String, Option<HashMap<String, String>>)| async move {
             let body_bytes = body.into_bytes();
-            let result: LuaResult<mlua::Table> = smol::unblock(move || {
-                let raw = do_http("POST", &url, Some(&body_bytes), headers.as_ref())?;
-                raw.into_lua_table(&lua)
+            let result = smol::unblock(move || {
+                do_http(
+                    "POST",
+                    &url,
+                    Some(&body_bytes),
+                    headers.as_ref(),
+                    None,
+                    None,
+                    None,
+                )
             })
-            .await
-            .map_err(mlua::Error::runtime);
-            result
+            .await;
+
+            match result {
+                Ok(raw) => make_success(&lua, raw).map_err(|e| mlua::Error::runtime(e)),
+                Err(msg) => make_error(&lua, msg, None).map_err(|e| mlua::Error::runtime(e)),
+            }
         },
     )?;
 
@@ -224,14 +329,12 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
                 }
             }
 
-            let result: LuaResult<mlua::Table> = smol::unblock(move || {
+            let lua_for_unblock = lua.clone();
+            let result: Result<(Option<Value>, Option<Value>), String> = smol::unblock(move || {
                 use ureq::unversioned::multipart::{Form, Part};
 
-                let agent: ureq::Agent = ureq::Agent::config_builder()
-                    .timeout_global(Some(std::time::Duration::from_secs(30)))
-                    .http_status_as_error(false)
-                    .build()
-                    .into();
+                let start = Instant::now();
+                let agent = build_agent(None, Duration::from_secs(DEFAULT_TIMEOUT_SECS))?;
 
                 let mut form = Form::new();
                 for (name, field) in &field_list {
@@ -254,7 +357,7 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
                 }
 
                 let mut req = agent.post(&url);
-                if let Some(h) = headers {
+                if let Some(h) = headers.as_ref() {
                     for (k, v) in h {
                         req = req.header(k, v);
                     }
@@ -265,13 +368,27 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
                     .map_err(|e| format!("http_multipart failed: {e}"))?;
                 let status = response.status().as_u16();
                 let headers = collect_headers(response.headers());
-                let body = read_response_body(response.body_mut())?;
-                let raw = RawResponse { status, headers, body };
-                raw.into_lua_table(&lua)
+                let body = read_response_body(response.body_mut(), MAX_RESPONSE_BODY)?;
+                let elapsed = start.elapsed().as_millis() as u64;
+                let size = body.len() as u64;
+                let raw = RawResponse {
+                    url: url.clone(),
+                    status,
+                    headers,
+                    body,
+                    proxy: None,
+                    time_ms: elapsed,
+                    size,
+                };
+                raw.into_lua_table(&lua_for_unblock).map(|t| (Some(Value::Table(t)), None))
             })
-            .await
-            .map_err(mlua::Error::runtime);
-            result
+            .await;
+
+            match result {
+                Ok(success) => Ok(success),
+                Err(msg) => make_error(&lua, msg, None)
+                    .map_err(|e| mlua::Error::runtime(e)),
+            }
         },
     )?;
 

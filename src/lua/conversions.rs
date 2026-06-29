@@ -94,7 +94,7 @@ pub fn response_to_lua(lua: &Lua, res: &RequestResult) -> Result<Table> {
     Ok(table)
 }
 
-fn error_kind(message: &str) -> &'static str {
+pub(crate) fn error_kind(message: &str) -> &'static str {
     let lower = message.to_ascii_lowercase();
     if lower.contains("http status:") {
         "http"
@@ -108,6 +108,8 @@ fn error_kind(message: &str) -> &'static str {
         "proxy"
     } else if lower.contains("connect") || lower.contains("connection") {
         "connect"
+    } else if lower.contains("exceeds") {
+        "size"
     } else {
         "unknown"
     }

@@ -1285,3 +1285,200 @@ fn test_fs_rejected_path() {
     let _ = std::fs::remove_dir_all(&test_dir);
     result.unwrap();
 }
+
+#[test]
+fn test_http_bindings_two_return_success() {
+    let server = types::MockServer::start(|request| {
+        if request.method == "GET" {
+            types::Response::text("ok")
+        } else {
+            types::Response::empty_404()
+        }
+    });
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, None, "test").unwrap();
+
+        let port = server.port();
+        let code = format!(
+            r#"local res, err = http_get("http://127.0.0.1:{port}/"); return res ~= nil and err == nil"#
+        );
+        let ok: bool = lua.load(&code).eval_async().await.unwrap();
+        assert!(ok, "http_get should return (res, nil) on success");
+
+        let code = format!(
+            r#"local res, err = http_post("http://127.0.0.1:{port}/", "body"); return res ~= nil and err == nil"#
+        );
+        let ok: bool = lua.load(&code).eval_async().await.unwrap();
+        assert!(ok, "http_post should return (res, nil) on success");
+
+        let code = format!(
+            r#"local res, err = http_request({{ url = "http://127.0.0.1:{port}/" }}); return res ~= nil and err == nil"#
+        );
+        let ok: bool = lua.load(&code).eval_async().await.unwrap();
+        assert!(ok, "http_request should return (res, nil) on success");
+    });
+}
+
+#[test]
+fn test_http_bindings_two_return_timeout() {
+    let server = types::MockServer::start(|_request| {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        types::Response::text("too late")
+    });
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, None, "test").unwrap();
+
+        let port = server.port();
+        let code = format!(
+            r#"local res, err = http_request({{ url = "http://127.0.0.1:{port}/", timeout = 1 }}); return res == nil and err ~= nil and err.kind == "timeout""#
+        );
+        let ok: bool = lua.load(&code).eval_async().await.unwrap();
+        assert!(ok, "timeout should return (nil, {{kind='timeout'}})");
+    });
+}
+
+#[test]
+fn test_http_bindings_two_return_proxy_error() {
+    smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, None, "test").unwrap();
+
+        let code = r#"
+            local res, err = http_request({
+                url = "http://127.0.0.1:1/",
+                proxy = "http://invalid-proxy:9999",
+                timeout = 2
+            });
+            return res == nil and err ~= nil
+        "#;
+        let ok: bool = lua.load(code).eval_async().await.unwrap();
+        assert!(ok, "bad proxy should return (nil, err)");
+    });
+}
+
+#[test]
+fn test_http_bindings_error_table_proxy_field() {
+    smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, None, "test").unwrap();
+
+        let code = r#"
+            local res, err = http_request({
+                url = "http://127.0.0.1:1/",
+                proxy = "http://my-proxy:8080",
+                timeout = 1
+            });
+            return res == nil and err ~= nil and err.proxy == "http://my-proxy:8080"
+        "#;
+        let ok: bool = lua.load(code).eval_async().await.unwrap();
+        assert!(ok, "error table should include proxy field");
+    });
+}
+
+#[test]
+fn test_http_bindings_response_metadata() {
+    let server = types::MockServer::start(|request| {
+        if request.method == "GET" {
+            types::Response::text("hello world")
+        } else {
+            types::Response::empty_404()
+        }
+    });
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, None, "test").unwrap();
+
+        let port = server.port();
+        let code = format!(
+            r#"
+local res, err = http_get("http://127.0.0.1:{port}/")
+assert(res ~= nil, "expected success, got nil")
+assert(err == nil, "expected nil error")
+assert(res.url == "http://127.0.0.1:{port}/", "url should match")
+assert(type(res.time_ms) == "number", "time_ms should be a number")
+assert(res.time_ms > 0, "time_ms should be positive")
+assert(res.size == 11, "size should be 11 (len of 'hello world')")
+assert(res.proxy == nil, "proxy should be nil when not set")
+return true
+"#
+        );
+        let ok: bool = lua.load(&code).eval_async().await.unwrap();
+        assert!(ok, "response metadata fields should be present");
+    });
+}
+
+#[test]
+fn test_http_bindings_http_get_single_return_still_works() {
+    let server = types::MockServer::start(|request| {
+        if request.method == "GET" {
+            types::Response::text("ok")
+        } else {
+            types::Response::empty_404()
+        }
+    });
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, None, "test").unwrap();
+
+        // Single-return call (ignoring second value) still works
+        let port = server.port();
+        let code = format!(r#"local res = http_get("http://127.0.0.1:{port}/"); return res.body"#);
+        let body: String = lua.load(&code).eval_async().await.unwrap();
+        assert_eq!(body, "ok");
+
+        // http_request with single return
+        let code = format!(
+            r#"local res = http_request({{ url = "http://127.0.0.1:{port}/" }}); return res.status"#
+        );
+        let status: u16 = lua.load(&code).eval_async().await.unwrap();
+        assert_eq!(status, 200);
+    });
+}
+
+#[test]
+fn test_http_bindings_max_body_size_enforced() {
+    // Return a body larger than 1 MB to trigger the size limit
+    let server = types::MockServer::start(|_request| types::Response::text("X".repeat(1_050_000)));
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, None, "test").unwrap();
+
+        let port = server.port();
+        // max_body_size = 1 (1 MB = 1,048,576 bytes).
+        // Server returns ~1,050,000 bytes → should be rejected.
+        let code = format!(
+            r#"local res, err = http_request({{ url = "http://127.0.0.1:{port}/", max_body_size = 1 }}); return res == nil and err ~= nil and err.kind == "size""#
+        );
+        let ok: bool = lua.load(&code).eval_async().await.unwrap();
+        assert!(
+            ok,
+            "max_body_size=1 should reject a ~1MB response with kind='size'"
+        );
+    });
+}
+
+#[test]
+fn test_http_bindings_max_body_size_not_set_allows_10mb() {
+    // Without max_body_size, the default 10MB limit applies.
+    // Return a 2MB body (well under 10MB) to confirm no false rejection.
+    let server = types::MockServer::start(|_request| types::Response::text("X".repeat(2_000_000)));
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register_http_and_fs(&lua, None, "test").unwrap();
+
+        let port = server.port();
+        let code = format!(
+            r#"local res, err = http_get("http://127.0.0.1:{port}/"); return res ~= nil and err == nil"#
+        );
+        let ok: bool = lua.load(&code).eval_async().await.unwrap();
+        assert!(ok, "default 10MB limit should accept a 2MB response");
+    });
+}
