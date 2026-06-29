@@ -938,7 +938,8 @@ fn test_fs_read_binding() {
 
 #[test]
 fn test_require_deep_path() {
-    let test_dir = tempfile::tempdir().unwrap();
+    let cwd = std::env::current_dir().unwrap();
+    let test_dir = tempfile::tempdir_in(&cwd).unwrap();
     let job_dir = test_dir.path().join("jobs/test_job");
     let deep_dir = job_dir.join("mylua/deep/child");
     std::fs::create_dir_all(&deep_dir).unwrap();

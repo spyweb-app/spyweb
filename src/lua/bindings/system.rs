@@ -211,13 +211,10 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
                     if !path.exists() {
                         continue;
                     }
-                    if path
-                        .components()
-                        .any(|c| matches!(c, std::path::Component::ParentDir))
-                    {
-                        last_err = format!("module '{}' rejected: directory traversal", name);
-                        continue;
-                    }
+
+                    crate::services::io::validate_path(&path)
+                        .map_err(|e| mlua::Error::runtime(format!("require rejected: {e}")))?;
+
                     match std::fs::read_to_string(path) {
                         Ok(s) => {
                             source = Some(s);
