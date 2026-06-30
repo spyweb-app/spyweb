@@ -255,9 +255,10 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
         .await;
 
         match result {
-            Ok(raw) => make_success(&lua, raw).map_err(|e| mlua::Error::runtime(e)),
-            Err(msg) => make_error(&lua, msg, proxy_for_error.as_deref())
-                .map_err(|e| mlua::Error::runtime(e)),
+            Ok(raw) => make_success(&lua, raw).map_err(mlua::Error::runtime),
+            Err(msg) => {
+                make_error(&lua, msg, proxy_for_error.as_deref()).map_err(mlua::Error::runtime)
+            }
         }
     })?;
 
@@ -269,8 +270,8 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
             .await;
 
             match result {
-                Ok(raw) => make_success(&lua, raw).map_err(|e| mlua::Error::runtime(e)),
-                Err(msg) => make_error(&lua, msg, None).map_err(|e| mlua::Error::runtime(e)),
+                Ok(raw) => make_success(&lua, raw).map_err(mlua::Error::runtime),
+                Err(msg) => make_error(&lua, msg, None).map_err(mlua::Error::runtime),
             }
         },
     )?;
@@ -292,8 +293,8 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
             .await;
 
             match result {
-                Ok(raw) => make_success(&lua, raw).map_err(|e| mlua::Error::runtime(e)),
-                Err(msg) => make_error(&lua, msg, None).map_err(|e| mlua::Error::runtime(e)),
+                Ok(raw) => make_success(&lua, raw).map_err(mlua::Error::runtime),
+                Err(msg) => make_error(&lua, msg, None).map_err(mlua::Error::runtime),
             }
         },
     )?;
@@ -387,7 +388,7 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
             match result {
                 Ok(success) => Ok(success),
                 Err(msg) => make_error(&lua, msg, None)
-                    .map_err(|e| mlua::Error::runtime(e)),
+                    .map_err(mlua::Error::runtime),
             }
         },
     )?;

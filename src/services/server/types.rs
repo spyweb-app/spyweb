@@ -212,14 +212,13 @@ pub(crate) fn to_rouille_response(resp: Response) -> rouille::Response {
         upgrade: None,
     };
 
-    if let Some(ct) = explicit_ct {
-        if !resp
+    if let Some(ct) = explicit_ct
+        && !resp
             .headers
             .iter()
             .any(|(k, _)| k.eq_ignore_ascii_case("Content-Type"))
-        {
-            r.headers.push(("Content-Type".into(), ct.into()));
-        }
+    {
+        r.headers.push(("Content-Type".into(), ct.into()));
     }
 
     for (k, v) in resp.headers {
@@ -264,11 +263,11 @@ pub(crate) fn url_decode(s: &str) -> String {
             if let Some(h2) = chars.next() {
                 hex.push(h2);
             }
-            if hex.len() == 2 {
-                if let Ok(b) = u8::from_str_radix(&hex, 16) {
-                    bytes.push(b);
-                    continue;
-                }
+            if hex.len() == 2
+                && let Ok(b) = u8::from_str_radix(&hex, 16)
+            {
+                bytes.push(b);
+                continue;
             }
             bytes.extend_from_slice(b"%");
             bytes.extend_from_slice(hex.as_bytes());

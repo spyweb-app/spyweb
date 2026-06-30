@@ -212,7 +212,7 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
                         continue;
                     }
 
-                    crate::services::io::validate_path(&path)
+                    crate::services::io::validate_path(path)
                         .map_err(|e| mlua::Error::runtime(format!("require rejected: {e}")))?;
 
                     match std::fs::read_to_string(path) {
@@ -281,6 +281,9 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
         lua.create_function(|lua, f: mlua::Function| {
             let ctx: mlua::Table = lua.named_registry_value("active_ctx")?;
             let deferred: mlua::Table = ctx.get("__deferred")?;
+            if deferred.raw_len() >= 10000 {
+                return Err(mlua::Error::external("defer queue full (max 10000 items)"));
+            }
             deferred.push(f)?;
             Ok(())
         })?,

@@ -255,7 +255,7 @@ pub(crate) async fn run_once_inner(
     if items.is_empty() {
         if status_code == 200 {
             if extraction.selector_matches == 0 {
-                if tel.hooks().map_or(false, |h| h.has_override_extract()) {
+                if tel.hooks().is_some_and(|h| h.has_override_extract()) {
                     crate::t_println!(
                         "Job [{}]: override_extract returned 0 items",
                         color::c_job(&job.config.name),

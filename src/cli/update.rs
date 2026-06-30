@@ -104,7 +104,7 @@ pub fn run_update(
     )
     .context("Failed to replace spyweb binary")?;
 
-    if let Some(ref new_tray) = new_tray.as_ref() {
+    if let Some(new_tray) = new_tray.as_ref() {
         let current_tray = install_dir.join(binary_name("spyweb-tray"));
         if current_tray.exists() {
             swap_binary(&current_tray, new_tray, retain, suffix.as_deref(), local)

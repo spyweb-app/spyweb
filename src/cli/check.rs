@@ -150,7 +150,7 @@ fn check_lua_file(
             return None;
         }
     };
-    match crate::config::validate::validate_lua_syntax(&lua, &source, filename) {
+    match crate::config::validate::validate_lua_syntax(lua, &source, filename) {
         Ok(()) => Some(source),
         Err(e) => {
             *errors += 1;

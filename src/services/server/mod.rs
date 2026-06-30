@@ -66,16 +66,16 @@ impl WebServer {
             let req = types::from_rouille_request(rouille_req);
 
             if req.url.starts_with("/api") {
-                if let Some(ref required_key) = auth_key {
-                    if !constant_time_eq(
+                if let Some(ref required_key) = auth_key
+                    && !constant_time_eq(
                         req.header("X-SpyWeb-Key").unwrap_or_default().as_bytes(),
                         required_key.as_bytes(),
-                    ) {
-                        return types::to_rouille_response(
-                            types::Response::json(&serde_json::json!({"error": "Unauthorized"}))
-                                .with_status(401),
-                        );
-                    }
+                    )
+                {
+                    return types::to_rouille_response(
+                        types::Response::json(&serde_json::json!({"error": "Unauthorized"}))
+                            .with_status(401),
+                    );
                 }
 
                 return match handle_api_request(&server_db, &server_active_jobs, &req) {
@@ -216,8 +216,7 @@ fn handle_api_request(
 ) -> Result<types::Response> {
     let url = &request.url;
 
-    if url.starts_with("/api/v/") {
-        let path = &url["/api/v/".len()..];
+    if let Some(path) = url.strip_prefix("/api/v/") {
         let mut segments: Vec<String> = path
             .split('/')
             .filter(|s| !s.is_empty())

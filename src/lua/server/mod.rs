@@ -16,6 +16,30 @@ const FORBIDDEN_RESPONSE_HEADERS: [&str; 6] = [
     "trailer",
 ];
 
+struct LuaContext {
+    body: Option<String>,
+    headers: std::collections::HashMap<String, String>,
+    query: std::collections::HashMap<String, String>,
+    path: String,
+    path_args: Vec<String>,
+    client_ip: String,
+    method: String,
+}
+
+impl LuaContext {
+    fn from_api(req: &types::Request, method: &str, path_args: Vec<String>) -> Self {
+        Self {
+            body: extract_body(req),
+            headers: extract_headers(req),
+            query: extract_query(req),
+            path: req.url.clone(),
+            path_args,
+            client_ip: req.client_ip.clone().unwrap_or_default(),
+            method: method.to_string(),
+        }
+    }
+}
+
 pub struct ApiServer {
     db: Arc<Db>,
     init_source: String,
@@ -47,11 +71,7 @@ impl ApiServer {
         path_args: Vec<String>,
         req: &types::Request,
     ) -> types::Response {
-        let body = extract_body(req);
-        let headers = extract_headers(req);
-        let query = extract_query(req);
-        let path = req.url.clone();
-        let client_ip = req.client_ip.clone().unwrap_or_default();
+        let ctx_fields = LuaContext::from_api(req, method, path_args);
         let method = method.to_string();
         let name = name.to_string();
         let init_source = self.init_source.clone();
@@ -81,9 +101,7 @@ impl ApiServer {
                 return handle_error(&name, e, error_log_path).await;
             }
 
-            let self_table = build_context_table(
-                &lua, &body, &headers, &query, &path, &path_args, &client_ip, &method,
-            );
+            let self_table = build_context_table(&lua, &ctx_fields);
             let func = match resolve_handler(&lua, &method, &name) {
                 Ok(f) => f,
                 Err(r) => return r,
@@ -207,24 +225,15 @@ fn setup_timeout(lua: &mlua::Lua) {
     });
 }
 
-fn build_context_table(
-    lua: &mlua::Lua,
-    body: &Option<String>,
-    headers: &std::collections::HashMap<String, String>,
-    query: &std::collections::HashMap<String, String>,
-    path: &str,
-    path_args: &[String],
-    client_ip: &str,
-    method: &str,
-) -> mlua::Table {
+fn build_context_table(lua: &mlua::Lua, ctx: &LuaContext) -> mlua::Table {
     let table = lua.create_table().unwrap();
-    let _ = table.set("body", body.clone());
-    let _ = table.set("headers", headers.clone());
-    let _ = table.set("query", query.clone());
-    let _ = table.set("path", path);
-    let _ = table.set("path_args", path_args.to_vec());
-    let _ = table.set("client_ip", client_ip);
-    let _ = table.set("method", method);
+    let _ = table.set("body", ctx.body.clone());
+    let _ = table.set("headers", ctx.headers.clone());
+    let _ = table.set("query", ctx.query.clone());
+    let _ = table.set("path", ctx.path.as_str());
+    let _ = table.set("path_args", ctx.path_args.clone());
+    let _ = table.set("client_ip", ctx.client_ip.as_str());
+    let _ = table.set("method", ctx.method.as_str());
     table
 }
 
@@ -236,16 +245,16 @@ fn resolve_handler(
     let method_lower = method.to_lowercase();
     let globals = lua.globals();
 
-    if let Ok(m_table) = globals.get::<mlua::Table>(method_lower.as_str()) {
-        if let Ok(f) = m_table.get::<mlua::Function>(name) {
-            return Ok(f);
-        }
+    if let Ok(m_table) = globals.get::<mlua::Table>(method_lower.as_str())
+        && let Ok(f) = m_table.get::<mlua::Function>(name)
+    {
+        return Ok(f);
     }
 
-    if let Ok(all_table) = globals.get::<mlua::Table>("all") {
-        if let Ok(f) = all_table.get::<mlua::Function>(name) {
-            return Ok(f);
-        }
+    if let Ok(all_table) = globals.get::<mlua::Table>("all")
+        && let Ok(f) = all_table.get::<mlua::Function>(name)
+    {
+        return Ok(f);
     }
 
     Err(types::Response::text("Not Found").with_status(404))
@@ -302,26 +311,24 @@ fn format_table_response(lua: &mlua::Lua, t: &mlua::Table) -> types::Response {
     let mut headers: Vec<(String, String)> = Vec::new();
 
     if let Some(ct) = content_type {
-        headers.push(("Content-Type".into(), ct.into()));
+        headers.push(("Content-Type".into(), ct));
     }
 
     if let Ok(h_tbl) = t.get::<mlua::Table>("headers") {
-        for pair in h_tbl.pairs::<String, String>() {
-            if let Ok((k, v)) = pair {
-                if k.is_empty()
-                    || k.contains('\n')
-                    || k.contains('\r')
-                    || v.contains('\n')
-                    || v.contains('\r')
-                {
-                    continue;
-                }
-                let lower = k.to_lowercase();
-                if FORBIDDEN_RESPONSE_HEADERS.contains(&lower.as_str()) {
-                    continue;
-                }
-                headers.push((k.into(), v.into()));
+        for (k, v) in h_tbl.pairs::<String, String>().flatten() {
+            if k.is_empty()
+                || k.contains('\n')
+                || k.contains('\r')
+                || v.contains('\n')
+                || v.contains('\r')
+            {
+                continue;
             }
+            let lower = k.to_lowercase();
+            if FORBIDDEN_RESPONSE_HEADERS.contains(&lower.as_str()) {
+                continue;
+            }
+            headers.push((k, v));
         }
     }
 
@@ -358,12 +365,12 @@ async fn run_deferred(lua: &mlua::Lua, error_log_path: &std::path::Path) {
             let _ = ctx.set("__deferred", fresh);
         }
         for i in (1..=len).rev() {
-            if let Ok(f) = deferred.get::<mlua::Function>(i) {
-                if let Err(e) = f.call_async::<mlua::Value>((ctx.clone(),)).await {
-                    let msg = format!("API server: deferred function failed: {}", e);
-                    crate::t_eprintln!("{}", msg);
-                    log_server_error(&msg, error_log_path).await;
-                }
+            if let Ok(f) = deferred.get::<mlua::Function>(i)
+                && let Err(e) = f.call_async::<mlua::Value>((ctx.clone(),)).await
+            {
+                let msg = format!("API server: deferred function failed: {}", e);
+                crate::t_eprintln!("{}", msg);
+                log_server_error(&msg, error_log_path).await;
             }
         }
     }
