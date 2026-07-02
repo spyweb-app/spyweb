@@ -1,6 +1,7 @@
 .helix
 /target
 /jobs
+/sw-docs
 data
 jobs.toml
 test-*
