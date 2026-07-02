@@ -20,9 +20,10 @@ If the environment variable is not set, the API remains open and no header is re
 | `GET /api/records?job_id=<id>` | JSON records for a job |
 | `GET /api/records?job_id=<id>&limit=50&after=<timestamp>` | Paginated records |
 | `GET /api/jobs` | List all configured jobs |
+| `/api/v/{name}` | Programmable API server (see [server.md](server.md)) |
 
 
-## 💡 Bring Your Own UI
+## Bring Your Own UI
 The default admin dashboard is located in `ui/index.html`. Because spyweb serves this file dynamically from the filesystem on every request rather than embedding it into the binary or caching it in memory, you can easily build your own custom dashboard using **Vue, React, Svelte**, or vanilla JS. 
 
 As long as your build process outputs an `index.html` into the `ui/` directory, spyweb will serve it instantly — no restart required!
@@ -57,4 +58,4 @@ When a job finds new items, it can POST a JSON payload to a configured webhook U
 }
 ```
 
-> Use the `before_webhook(payload)` Lua hook to completely reshape this JSON before it is sent. This allows you to match specific API formats like **Discord embeds**, **Slack blocks**, or **Pushover** notifications without an external middleware.
+> Use the `before_webhook(payload, ctx)` Lua hook to completely reshape this JSON before it is sent. This allows you to match specific API formats like **Discord embeds**, **Slack blocks**, or **Pushover** notifications without an external middleware.

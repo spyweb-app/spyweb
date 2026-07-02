@@ -10,7 +10,7 @@ Download the latest Linux binary package directly to your server.
 
 ```bash
 # Download and extract SpyWeb
-curl -L -o spyweb.zip https://dl.spyweb.app/linux && tar -xf spyweb.zip && rm spyweb.zip
+curl -L -o spyweb.tar.gz https://dl.spyweb.app/linux && tar -xf spyweb.tar.gz && rm spyweb.tar.gz
 
 # Enter the directory and remove the tray version (not needed on VPS)
 cd spyweb && rm spyweb-tray

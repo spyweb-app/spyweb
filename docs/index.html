@@ -83,14 +83,17 @@
                                 <li><a href="#before_store">before_store</a></li>
                                 <li><a href="#before_notify">before_notify</a></li>
                                 <li><a href="#before_webhook">before_webhook</a></li>
-                            </ul>
-                            <p class="menu-label">Global Functions</p>
+                                <li><a href="#on_finished">on_finished</a></li>
+                                </ul>
+                                <p class="menu-label">Global Functions</p>
                             <ul class="menu-list">
                                 <li><a href="#storage">Persistent Storage</a></li>
                                 <li><a href="#http_get">http_get</a></li>
                                 <li><a href="#http_post">http_post</a></li>
                                 <li><a href="#http_request">http_request</a></li>
                                 <li><a href="#http_multipart">http_multipart</a></li>
+                                <li><a href="#db_query">db_query</a></li>
+                                <li><a href="#db_exec">db_exec</a></li>
                                 <li><a href="#json_encode">json_encode</a></li>
                                 <li><a href="#json_decode">json_decode</a></li>
                                 <li><a href="#defer">defer</a></li>
@@ -104,18 +107,20 @@
                                 <li><a href="#fs_read">fs_read</a></li>
                                 <li><a href="#fs_read_binary">fs_read_binary</a></li>
                                 <li><a href="#env_get">env_get</a></li>
-                                <li><a href="#selector_matches">selector_matches</a></li>
-                                <li><a href="#last_fetch">last_fetch</a></li>
-                                <li><a href="#spyweb_telemetry">spyweb_telemetry</a></li>
+                                <li><a href="#selector_matches"><code>ctx.selector_matches</code></a></li>
+                                <li><a href="#last_fetch"><code>ctx.last_fetch</code></a></li>
+                                <li><a href="#spyweb_telemetry"><code>ctx.telemetry</code></a></li>
                             </ul>
                             <p class="menu-label">More</p>
                             <ul class="menu-list">
+                                <li><a target="_blank" href="https://github.com/spyweb-app/spyweb/blob/beta/docs/database.md">Storage Backends</a></li>
                                 <li><a target="_blank" href="https://github.com/spyweb-app/spyweb/blob/beta/docs/lua-testing.md">Lua Testing</a></li>
                                 <li><a target="_blank"
                                         href="https://github.com/spyweb-app/spyweb/blob/beta/docs/lifecycle.md">Execution
                                         Lifecycle</a></li>
                                 <li><a href="#config">Config Reference</a></li>
                                 <li><a href="#rest-api">REST API</a></li>
+                                <li><a href="server.md">API Server</a></li>
                                 <li><a href="#examples">Examples</a></li>
                                 <li><a href="#tips">Tips &amp; Gotchas</a></li>
                             </ul>
@@ -131,7 +136,7 @@
                         <h1 class="title is-2">The SpyWeb Master Guide</h1>
                         <p class="subtitle is-5">High-performance web monitoring with zero dependencies</p>
                         <div class="tags is-centered mt-4" style="gap:.5em">
-                            <span class="tag is-info has-text-white">9 Hook Stages</span>
+                            <span class="tag is-info has-text-white">13 Hooks</span>
                             <span class="tag is-success has-text-white">Hot Reload</span>
                             <span class="tag is-warning">Error Resilient</span>
                         </div>
@@ -144,7 +149,7 @@
                             <p><strong>SpyWeb</strong> is a zero-dependency web monitoring engine that lets you
                                 customize every stage of the pipeline with <strong>Lua scripts</strong> (Luau dialect).
                                 Place a <code>hooks.lua</code> alongside your job's <code>config.toml</code> and define
-                                any combination of 9 hook functions.</p>
+                                any combination of 13 hook functions.</p>
                             <div class="notification is-info">
                                 <strong>All hooks are optional.</strong> Omit any you don't need - spyweb runs fine with
                                 just a <code>config.toml</code>.
@@ -175,41 +180,41 @@
                         <div class="content">
                             <p>Every scrape run flows through these stages in order:</p>
                         </div>
-                        <div class="pipeline-stage"><span class="stage-name">before_fetch(request)</span> <span
+                        <div class="pipeline-stage"><span class="stage-name">before_fetch(request, ctx)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Modify URL, headers, or return nil
                                 to skip this run entirely</small></div>
-                        <div class="pipeline-stage"><span class="stage-name">override_fetch(request)</span> <span
+                        <div class="pipeline-stage"><span class="stage-name">override_fetch(request, ctx)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Custom fetching phase (bypasses
                                 built-in HTTP client if defined)</small></div>
                         <div class="pipeline-stage" style="border-color:var(--blue)"><span class="stage-name">[HTTP
                                 fetch]</span> <span class="stage-thread">background thread</span><br><small>Automatic -
                                 uses request config from previous stage</small></div>
-                        <div class="pipeline-stage"><span class="stage-name">after_fetch(fetch_result)</span> <span
+                        <div class="pipeline-stage"><span class="stage-name">after_fetch(fetch_result, ctx)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Inspect success or failure,
                                 mutate body on success, or return a synthetic response to recover from fetch
                                 errors</small></div>
-                        <div class="pipeline-stage"><span class="stage-name">override_extract(response)</span> <span
+                        <div class="pipeline-stage"><span class="stage-name">override_extract(response, ctx)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Custom extraction phase for
                                 JSON/XML (bypasses built-in CSS extraction if defined)</small></div>
                         <div class="pipeline-stage" style="border-color:var(--blue)"><span class="stage-name">[CSS
                                 extraction]</span> <span class="stage-thread">background
                                 thread</span><br><small>Automatic - raw parser with DOM fallback</small></div>
-                        <div class="pipeline-stage"><span class="stage-name">after_extract(items)</span> <span
+                        <div class="pipeline-stage"><span class="stage-name">after_extract(items, ctx)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Batch filter/modify all items. nil
                                 or empty = no items</small></div>
-                        <div class="pipeline-stage"><span class="stage-name">filter_item(item)</span> <span
+                        <div class="pipeline-stage"><span class="stage-name">filter_item(item, ctx)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Per-item filter.
                                 <strong>Replaces</strong> built-in keyword filter if defined</small></div>
-                        <div class="pipeline-stage"><span class="stage-name">before_store(items)</span> <span
+                        <div class="pipeline-stage"><span class="stage-name">before_store(items, ctx)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Last chance before DB insert. nil
                                 = skip store + notify</small></div>
                         <div class="pipeline-stage" style="border-color:var(--blue)"><span class="stage-name">[dedup +
                                 insert]</span> <span class="stage-thread">background thread</span><br><small>Automatic -
                                 atomic check-and-insert</small></div>
-                        <div class="pipeline-stage"><span class="stage-name">before_notify(items)</span> <span
+                        <div class="pipeline-stage"><span class="stage-name">before_notify(items, ctx)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Reshape or silence notifications.
                                 Items already stored</small></div>
-                        <div class="pipeline-stage"><span class="stage-name">before_webhook(payload)</span> <span
+                        <div class="pipeline-stage"><span class="stage-name">before_webhook(payload, ctx)</span> <span
                                 class="stage-thread">executor thread</span><br><small>Reshape or silence webhook POSTs.
                                 Full JSON payload</small></div>
                         <div class="pipeline-stage" style="border-color:var(--blue)"><span class="stage-name">[notify +
@@ -244,7 +249,7 @@
                                 <li>Recommended terminal editor setup</li>
                             </ul>
                             <a target="blank"
-                                href="https://github.com/spyweb-rs/spyweb/blob/main/docs/vps-deployment.md"
+                                href="https://github.com/spyweb-app/spyweb/blob/beta/docs/vps-deployment.md"
                                 class="button is-accent is-outlined"
                                 style="border-color:var(--accent);color:var(--accent2)">
                                 View full VPS Deployment Guide →
@@ -262,10 +267,27 @@
                         </div>
                     </div>
 
+                    <div class="box mb-5" style="background:var(--surface2) !important">
+                        <div class="content">
+                            <p class="mb-2"><strong>What is <code>ctx</code>?</strong> Every hook receives a
+                                per-cycle context table as its second argument. <code>ctx</code> is a scratch table
+                                created fresh for each scrape cycle and discarded at the end. Use it to pass data
+                                between hooks within the same cycle (e.g., store a value in <code>before_fetch</code>
+                                and read it in <code>after_extract</code>). It also carries reserved fields set by
+                                the engine:</p>
+                            <ul style="list-style: disc; margin-left: 1.2rem;">
+                                <li><code>ctx.last_fetch</code> — FetchAttempt envelope with <code>request</code>, <code>ok</code>, <code>response</code> (on success), and <code>error</code> (on failure)</li>
+                                <li><code>ctx.selector_matches</code> — Number of CSS selector hits</li>
+                                <li><code>ctx.telemetry</code> — Performance telemetry for the cycle</li>
+                                <li><code>ctx.shared</code> — A table shared across all hooks in the cycle</li>
+                            </ul>
+                        </div>
+                    </div>
+
                     <!-- before_fetch -->
                     <div id="before_fetch" class="box mb-5" x-data="{ showAdvanced: false }">
                         <h3 class="title is-4">
-                            <span class="tag is-info mr-2">1</span> before_fetch(request)
+                            <span class="tag is-info mr-2">1</span> before_fetch(request, ctx)
                         </h3>
                         <div class="content">
                             <p>Called before every HTTP request. Modify the URL, add headers, or skip entirely.
@@ -287,10 +309,34 @@
                                         <td>Target URL</td>
                                     </tr>
                                     <tr>
+                                        <td><code>request.method</code></td>
+                                        <td>string</td>
+                                        <td>✅</td>
+                                        <td>HTTP method (GET, HEAD, DELETE, etc.)</td>
+                                    </tr>
+                                    <tr>
                                         <td><code>request.headers</code></td>
                                         <td>table</td>
                                         <td>✅</td>
                                         <td>HTTP headers (string→string)</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>request.timeout</code></td>
+                                        <td>number / nil</td>
+                                        <td>✅</td>
+                                        <td>Per-request timeout in seconds (default: 30)</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>request.proxy</code></td>
+                                        <td>string / nil</td>
+                                        <td>✅</td>
+                                        <td>Per-request proxy URL (overrides job proxy config)</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>request.max_body_size</code></td>
+                                        <td>number / nil</td>
+                                        <td>✅</td>
+                                        <td>Max response body in MB (integer, default: 10)</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -298,10 +344,14 @@
                             <h5 class="title is-6 mb-2">Parameter Structure:</h5>
                             <pre><code class="language-lua">{
   url = "https://example.com",
+  method = "GET",
   headers = {
     ["User-Agent"] = "SpyWeb/1.0",
     ["Accept"] = "*/*"
-  }
+  },
+  timeout = 15,          -- optional override (default 30s)
+  proxy = nil,           -- optional proxy override
+  max_body_size = nil    -- optional body limit in MB (default: 10)
 }</code></pre>
 
                             <table class="table is-fullwidth">
@@ -323,7 +373,7 @@
                                 </tbody>
                             </table>
                             <pre><code class="language-lua">-- Basic: add auth header
-function before_fetch(request)
+function before_fetch(request, ctx)
     request.headers["Authorization"] = "Bearer my-token"
     return request
 end</code></pre>
@@ -333,7 +383,7 @@ end</code></pre>
                                 x-text="showAdvanced?'Hide pagination example':'Show pagination example'"></button>
                             <template x-if="showAdvanced">
                                 <pre class="mt-3"><code>-- Pagination: cycle through pages using a Lua global
-function before_fetch(request)
+function before_fetch(request, ctx)
     page = page or 1
     request.url = request.url .. "?page=" .. page
     page = page + 1
@@ -348,7 +398,7 @@ end</code></pre>
                     <!-- override_fetch -->
                     <div id="override_fetch" class="box mb-5">
                         <h3 class="title is-4">
-                            <span class="tag is-info mr-2">2</span> override_fetch(request)
+                            <span class="tag is-info mr-2">2</span> override_fetch(request, ctx)
                         </h3>
                         <div class="content">
                             <p>Overrides Phase 1 (Fetching). If this hook is defined, SpyWeb will NOT use its
@@ -377,16 +427,18 @@ end</code></pre>
                             </table>
                             <h5 class="title is-6 mb-2">Example: Custom Fetching (e.g. bypassing internal HTTP
                                 client)</h5>
-                            <pre><code class="language-lua">function override_fetch(request)
+                            <pre><code class="language-lua">function override_fetch(request, ctx)
     -- E.g. call an external API or run a headless browser script
-    local custom_body = http_get("http://my-renderer.local/?url=" .. request.url)
-    
+    local res, err = http_get("http://my-renderer.local/?url=" .. request.url)
+    if not res then
+        return { error = "renderer request failed: " .. err.error }
+    end
     -- MUST return a response object (or { error = "message" } for failure):
     return {
-        status = 200,
+        status = res.status,
         url = request.url,
-        body = custom_body,
-        headers = { ["Content-Type"] = "text/html" }
+        body = res.body,
+        headers = res.headers
     }
 end</code></pre>
                         </div>
@@ -395,7 +447,7 @@ end</code></pre>
                     <!-- after_fetch -->
                     <div id="after_fetch" class="box mb-5">
                         <h3 class="title is-4">
-                            <span class="tag is-info mr-2">3</span> after_fetch(fetch_result)
+                            <span class="tag is-info mr-2">3</span> after_fetch(fetch_result, ctx)
                         </h3>
                         <div class="content">
                             <p>Called after every fetch attempt. It receives a stable envelope with request
@@ -470,6 +522,24 @@ end</code></pre>
                                         <td>Response headers on success</td>
                                     </tr>
                                     <tr>
+                                        <td><code>fetch_result.response.proxy</code></td>
+                                        <td>string / nil</td>
+                                        <td>❌</td>
+                                        <td>Proxy URL used for this request (if any)</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>fetch_result.response.time_ms</code></td>
+                                        <td>number / nil</td>
+                                        <td>❌</td>
+                                        <td>Total request time in milliseconds</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>fetch_result.response.size</code></td>
+                                        <td>number / nil</td>
+                                        <td>❌</td>
+                                        <td>Response body size in bytes</td>
+                                    </tr>
+                                    <tr>
                                         <td><code>fetch_result.error.message</code></td>
                                         <td>string</td>
                                         <td>❌</td>
@@ -498,7 +568,10 @@ end</code></pre>
     status = 200,
     url = "https://example.com",
     body = "<html>...",
-    headers = { ["Content-Type"] = "text/html" }
+    headers = { ["Content-Type"] = "text/html" },
+    proxy = "http://proxy:8080",       -- proxy used (if any)
+    time_ms = 1234,                     -- total request time in ms
+    size = 45678,                       -- body size in bytes
   },
   error = nil
 }</code></pre>
@@ -522,7 +595,7 @@ end</code></pre>
                                     </tr>
                                 </tbody>
                             </table>
-                            <pre><code class="language-lua">function after_fetch(fetch_result)
+                            <pre><code class="language-lua">function after_fetch(fetch_result, ctx)
     if not fetch_result.ok then
         if fetch_result.response then
             print("HTTP error: " .. fetch_result.response.status)
@@ -546,7 +619,7 @@ end</code></pre>
                     <!-- override_extract -->
                     <div id="override_extract" class="box mb-5">
                         <h3 class="title is-4">
-                            <span class="tag is-info mr-2">4</span> override_extract(response)
+                            <span class="tag is-info mr-2">4</span> override_extract(response, ctx)
                         </h3>
                         <div class="content">
                             <p>Overrides Phase 2 (Extraction). If this hook is defined, SpyWeb will NOT use its
@@ -590,7 +663,7 @@ end</code></pre>
                                 </tbody>
                             </table>
                             <h5 class="title is-6 mb-2">Example: Scraping a JSON API</h5>
-                            <pre><code class="language-lua">function override_extract(response)
+                            <pre><code class="language-lua">function override_extract(response, ctx)
     local data = json_decode(response.body)
     local items = {}
     for i, post in ipairs(data.posts) do
@@ -617,7 +690,7 @@ end</code></pre>
                     <!-- after_extract -->
                     <div id="after_extract" class="box mb-5">
                         <h3 class="title is-4">
-                            <span class="tag is-info mr-2">5</span> after_extract(items)
+                            <span class="tag is-info mr-2">5</span> after_extract(items, ctx)
                         </h3>
                         <div class="content">
                             <p>Batch hook - receives <strong>all</strong> extracted items at once. Good for
@@ -636,7 +709,7 @@ end</code></pre>
   ...
 }</code></pre>
 
-                            <pre><code class="language-lua">function after_extract(items)
+                            <pre><code class="language-lua">function after_extract(items, ctx)
     -- Remove duplicate titles
     local seen = {}
     local unique = {}
@@ -655,7 +728,7 @@ end</code></pre>
                     <!-- filter_item -->
                     <div id="filter_item" class="box mb-5">
                         <h3 class="title is-4">
-                            <span class="tag is-info mr-2">6</span> filter_item(item)
+                            <span class="tag is-info mr-2">6</span> filter_item(item, ctx)
                         </h3>
                         <div class="content">
                             <div class="notification is-warning">
@@ -696,7 +769,7 @@ end</code></pre>
   matches = { "keyword1", ... }
 }</code></pre>
 
-                            <pre><code class="language-lua">function filter_item(item)
+                            <pre><code class="language-lua">function filter_item(item, ctx)
     local title = (item.fields.title or ""):lower()
 
     -- Drop unwanted items
@@ -715,7 +788,7 @@ end</code></pre>
                     <!-- before_store -->
                     <div id="before_store" class="box mb-5">
                         <h3 class="title is-4">
-                            <span class="tag is-info mr-2">7</span> before_store(items)
+                            <span class="tag is-info mr-2">7</span> before_store(items, ctx)
                         </h3>
                         <div class="content">
                             <p>Last chance to drop items before dedup + insert. Return <code>nil</code> to skip
@@ -727,7 +800,7 @@ end</code></pre>
                             <pre><code class="language-lua">-- Array of item tables
 { {fields={...}, matches={...}}, ... }</code></pre>
 
-                            <pre><code class="language-lua">function before_store(items)
+                            <pre><code class="language-lua">function before_store(items, ctx)
     -- Only store during business hours
     local hour = os.date("*t").hour
     if hour &lt; 9 or hour > 17 then
@@ -741,7 +814,7 @@ end</code></pre>
                     <!-- before_notify -->
                     <div id="before_notify" class="box mb-5">
                         <h3 class="title is-4">
-                            <span class="tag is-info mr-2">8</span> before_notify(items)
+                            <span class="tag is-info mr-2">8</span> before_notify(items, ctx)
                         </h3>
                         <p>Called after items are saved to the DB. It receives only the <strong>new
                                 items</strong>
@@ -752,7 +825,7 @@ end</code></pre>
                         <pre><code class="language-lua">-- Array of item tables (Same shape as filter_item)
 { {fields={...}, matches={...}}, ... }</code></pre>
 
-                        <pre><code class="language-lua">function before_notify(items)
+                        <pre><code class="language-lua">function before_notify(items, ctx)
     -- Silence notifications if fewer than 3 new items
     if #items &lt; 3 then return nil end
 
@@ -768,7 +841,7 @@ end</code></pre>
                     <!-- before_webhook -->
                     <div id="before_webhook" class="box mb-5">
                         <h3 class="title is-4">
-                            <span class="tag is-info mr-2">9</span> before_webhook(payload)
+                            <span class="tag is-info mr-2">9</span> before_webhook(payload, ctx)
                         </h3>
                         <div class="content">
                             <p>Reshape or silence webhook POSTs. Receives the full JSON payload (job_name,
@@ -785,7 +858,7 @@ end</code></pre>
   }
 }</code></pre>
 
-                            <pre><code class="language-lua">function before_webhook(payload)
+                            <pre><code class="language-lua">function before_webhook(payload, ctx)
     local job = payload.job_name
     local count = payload.item_count
     
@@ -824,6 +897,25 @@ end</code></pre>
     end
     return { blocks = blocks }
 end</code></pre>
+                        </div>
+                    </div>
+
+                    <!-- on_finished -->
+                    <div id="on_finished" class="box mb-5">
+                        <h3 class="title is-4">
+                            <span class="tag is-info mr-2">10</span> on_finished()
+                        </h3>
+                        <div class="content">
+                            <p>Batch-level lifecycle hook that fires after all workers complete a job iteration, before the interval sleep. No <code>ctx</code> parameter — operates on shared globals accumulated during the batch.</p>
+
+                            <pre><code class="language-lua">function on_finished()
+    log("All workers done, sleeping until next interval")
+    _G.batch_stats = nil -- clear accumulated state
+end</code></pre>
+
+                            <div class="notification is-info">
+                                See the <a target="_blank" href="https://github.com/spyweb-app/spyweb/blob/beta/docs/lifecycle.md">Lifecycle docs</a> and <a target="_blank" href="https://github.com/spyweb-app/spyweb/blob/beta/docs/multi-worker.md">Multi-Worker docs</a> for details.
+                            </div>
                         </div>
                     </div>
 
@@ -949,11 +1041,11 @@ global_store_incr("visits", 0, 1)</code></pre>
                                     <p class="mb-3">Standard Lua variables persist in memory as long as the job is
                                         active. Because each job runs in its own <strong>Isolated VM</strong>, these
                                         variables are naturally job-scoped and cannot be accessed by other jobs.</p>
-                                    <p class="mb-3">SpyWeb also maintains a runtime-owned global,
-                                        <code>last_fetch</code>, which is overwritten on every fetch attempt and
-                                        persists until the next fetch. It reflects the last successful or failed
+                                    <p class="mb-3">SpyWeb also maintains
+                                        <code>ctx.last_fetch</code> on the per-cycle context, which is set on every fetch attempt and
+                                        persists for the duration of the cycle. It reflects the last successful or failed
                                         fetch
-                                        snapshot for that job VM.
+                                        snapshot for that cycle.
                                     </p>
 
                                     <p class="is-size-7 has-text-weight-bold mb-1">Example: Simple Memory Counter
@@ -964,10 +1056,10 @@ log("Session visit: " .. visit_count)</code></pre>
                                     <p class="is-size-7 has-text-weight-bold mb-1">Example: Inspect the last fetch
                                         in a
                                         later hook</p>
-                                    <pre><code class="language-lua">function before_webhook(payload)
-    if last_fetch and last_fetch.ok and last_fetch.response and last_fetch.response.body then
+                                    <pre><code class="language-lua">function before_webhook(payload, ctx)
+    if ctx.last_fetch and ctx.last_fetch.ok and ctx.last_fetch.response and ctx.last_fetch.response.body then
         local count = 0
-        for _ in last_fetch.response.body:gmatch("promo") do
+        for _ in ctx.last_fetch.response.body:gmatch("promo") do
             count = count + 1
         end
         payload.last_fetch_promo_hits = count
@@ -980,27 +1072,74 @@ end</code></pre>
                             <hr style="background-color: var(--border)">
 
                             <h3 class="title is-4" id="http_get"><code>http_get(url, [headers])</code> <span class="tag is-small is-dark">async</span></h3>
-                            <p>Performs a synchronous HTTP GET request. The <code>headers</code> argument is an
-                                optional
-                                Lua table containing key-value pairs for request headers.</p>
-                            <pre><code class="language-lua">local html = http_get("https://api.example.com", {
+                            <p>Performs an HTTP GET request. Returns <code>(response, nil)</code> on success
+                                or <code>(nil, error_table)</code> on failure. The <code>headers</code>
+                                argument is an optional Lua table containing key-value pairs for request headers.</p>
+
+                            <p><strong>Success response fields:</strong></p>
+                            <div class="table-container">
+                                <table class="table is-bordered is-fullwidth is-narrow">
+                                    <thead>
+                                        <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td><code>status</code></td><td>number</td><td>HTTP status code</td></tr>
+                                        <tr><td><code>body</code></td><td>string</td><td>Response body (binary-safe)</td></tr>
+                                        <tr><td><code>headers</code></td><td>table</td><td>Response headers as key-value pairs</td></tr>
+                                        <tr><td><code>url</code></td><td>string</td><td>Final URL (after redirects)</td></tr>
+                                        <tr><td><code>time_ms</code></td><td>number</td><td>Request duration in milliseconds</td></tr>
+                                        <tr><td><code>size</code></td><td>number</td><td>Response body size in bytes</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <p><strong>Error table fields:</strong></p>
+                            <div class="table-container">
+                                <table class="table is-bordered is-fullwidth is-narrow">
+                                    <thead>
+                                        <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td><code>error</code></td><td>string</td><td>Human-readable error message</td></tr>
+                                        <tr><td><code>kind</code></td><td>string</td><td>Classified error kind: <code>dns</code>, <code>timeout</code>, <code>proxy</code>, <code>tls</code>, <code>connect</code>, <code>size</code>, <code>http</code>, or <code>unknown</code></td></tr>
+                                        <tr><td><code>proxy</code></td><td>string?</td><td>Proxy URL that failed (only present on proxy errors)</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <pre><code class="language-lua">local res, err = http_get("https://api.example.com", {
     ["Authorization"] = "Bearer token123",
     ["X-Custom-Header"] = "my-value"
-})</code></pre>
+})
+if not res then
+    log("request failed: " .. err.error .. " (" .. err.kind .. ")")
+    return
+end</code></pre>
 
                             <h3 class="title is-4" id="http_post"><code>http_post(url, body, [headers])</code> <span class="tag is-small is-dark">async</span></h3>
-                            <p>Performs a synchronous HTTP POST request. By default, it sets the
+                            <p>Performs an HTTP POST request. Returns <code>(response, nil)</code> on success
+                                or <code>(nil, error_table)</code> on failure. The response and error
+                                tables follow the same schema as <a href="#http_get"><code>http_get</code></a>.
+                                By default, it sets the
                                 <code>Content-Type</code> to <code>application/x-www-form-urlencoded</code> unless
                                 overridden in the <code>headers</code> argument.
                             </p>
-                            <pre><code class="language-lua">local response = http_post("https://api.example.com", '{"foo":"bar"}', {
+                            <pre><code class="language-lua">local res, err = http_post("https://api.example.com", '{"foo":"bar"}', {
     ["Content-Type"] = "application/json",
     ["Accept"] = "application/json"
-})</code></pre>
+})
+if not res then
+    log("post failed: " .. err.error)
+    return
+end</code></pre>
 
                             <h3 class="title is-4" id="http_request"><code>http_request(options)</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Performs an arbitrary HTTP request with full control over method, URL, body,
-                                and headers. The <code>options</code> argument is a Lua table with these fields:
+                                headers, proxy, timeout, and response size limit. Returns <code>(response, nil)</code> on success
+                                or <code>(nil, error_table)</code> on failure. The response and error
+                                tables follow the same schema as <a href="#http_get"><code>http_get</code></a>.
+                                The <code>options</code>
+                                argument is a Lua table with these fields:
                             </p>
                             <div class="table-container">
                                 <table class="table is-bordered is-fullwidth">
@@ -1037,23 +1176,55 @@ end</code></pre>
                                             <td>No</td>
                                             <td>Optional key-value header pairs</td>
                                         </tr>
+                                        <tr>
+                                            <td><code>proxy</code></td>
+                                            <td>string | nil</td>
+                                            <td>No</td>
+                                            <td>Proxy URL (e.g. <code>"http://user:pass@proxy:8080"</code>)</td>
+                                        </tr>
+                                        <tr>
+                                            <td><code>timeout</code></td>
+                                            <td>number | nil</td>
+                                            <td>No</td>
+                                            <td>Timeout in seconds (default: 30)</td>
+                                        </tr>
+                                        <tr>
+                                            <td><code>max_body_size</code></td>
+                                            <td>number | nil</td>
+                                            <td>No</td>
+                                            <td>Max response body in MB (integer, default: 10)</td>
+                                        </tr>
                                     </tbody>
                                 </table>
                             </div>
                             <pre><code class="language-lua">-- HEAD request (no body)
-local resp = http_request({ method = "HEAD", url = "https://example.com" })
+local res, err = http_request({ method = "HEAD", url = "https://example.com" })
+if not res then
+    log("head failed: " .. err.error)
+    return
+end
 
--- POST with JSON body
-local resp = http_request({
+-- POST with JSON body through a proxy
+local res, err = http_request({
     method = "POST",
     url = "https://api.example.com/data",
     body = '{"key":"value"}',
-    headers = { ["Content-Type"] = "application/json" }
-})</code></pre>
+    headers = { ["Content-Type"] = "application/json" },
+    proxy = "http://user:pass@residential-proxy:8080",
+    timeout = 15
+})
+if not res then
+    log("request failed: " .. err.kind)
+    return
+end</code></pre>
 
                             <h3 class="title is-4" id="http_multipart"><code>http_multipart(url, fields, [headers])</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Performs a <code>multipart/form-data</code> POST request for file uploads.
-                                The <code>fields</code> argument is a Lua table where each value is either:
+                                Returns <code>(response, nil)</code> on success or <code>(nil, error_table)</code>
+                                on failure. The response and error tables follow the same schema as
+                                <a href="#http_get"><code>http_get</code></a>.
+                                The <code>fields</code> argument is a Lua table where each value
+                                is either:
                             </p>
                             <ul>
                                 <li>A <strong>string</strong> — sent as a text form field.</li>
@@ -1068,20 +1239,40 @@ local resp = http_request({
                             <p>Use together with <code>page:screenshot()</code> and <code>fs_read_binary()</code> for
                                 screenshot upload workflows.</p>
                             <pre><code class="language-lua">-- Text fields only
-http_multipart("https://api.example.com/form", {
+local res, err = http_multipart("https://api.example.com/form", {
     name = "SpyWeb",
     version = "1.0"
 })
+if not res then
+    log("upload failed: " .. err.error)
+    return
+end
 
 -- File upload (screenshot)
 local page = cdp.launch({ headless = true }):attach()
 page:open("https://example.com")
 page:screenshot("page.png", { full_page = true })
 local image_data = fs_read_binary("page.png")
-http_multipart("https://hooks.example.com/upload", {
+local res, err = http_multipart("https://hooks.example.com/upload", {
     screenshot = { content = image_data, filename = "page.png", type = "image/png" },
     caption = "my screenshot"
-})</code></pre>
+})
+if not res then
+    log("screenshot upload failed: " .. err.kind)
+    return
+end</code></pre>
+
+                            <h3 class="title is-4" id="db_query"><code>db_query(sql, [params])</code> <span class="tag is-small is-dark">async</span></h3>
+                            <p>Executes a <code>SELECT</code> query on the SQLite database. Available only on the <strong>SQL (SQLite)</strong> build variant. Returns an array of row-tables with column-value pairs. Integer/Real/Text/Null SQL types map to Lua number/string/nil. On the <strong>KV (redb)</strong> variant, calling this returns a clear error directing you to download the SQLite build.</p>
+                            <pre><code class="language-lua">local rows = db_query("SELECT json FROM records WHERE job_id = ? LIMIT 5", { "my-job" })
+for _, row in ipairs(rows) do
+    local data = json_decode(row.json)
+    log("Title: " .. data.title)
+end</code></pre>
+
+                            <h3 class="title is-4" id="db_exec"><code>db_exec(sql, [params])</code> <span class="tag is-small is-dark">async</span></h3>
+                            <p>Executes an <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, or DDL statement on the SQLite database. Available only on the <strong>SQL (SQLite)</strong> build variant. Returns the number of rows affected. On the <strong>KV (redb)</strong> variant, calling this returns a clear error directing you to download the SQLite build.</p>
+                            <pre><code class="language-lua">db_exec("INSERT OR REPLACE INTO markers (id, val) VALUES (?, ?)", { "page", 5 })</code></pre>
 
                             <h3 class="title is-4" id="json_encode"><code>json_encode(table)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Converts a Lua table or value into a JSON string. Handles nested tables, arrays,
@@ -1117,7 +1308,7 @@ log("Status is: " .. data.status)</code></pre>
                                 synchronous and **fully safe** to use. For async orchestration and post-cycle tasks, use
                                 <code>defer.lua</code>.
                             </div>
-                            <pre><code class="language-lua">function override_fetch(request)
+                            <pre><code class="language-lua">function override_fetch(request, ctx)
     local browser = cdp.launch({ headless = true })
     defer(function() browser:close() end) -- Always closes
 
@@ -1129,15 +1320,15 @@ end</code></pre>
 
                             <h3 class="title is-4" id="dump"><code>dump(value)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Formats any Lua value into a readable string for debugging. This is especially
-                                useful for nested hook payloads like <code>fetch_result</code> or
-                                <code>last_fetch</code>. It handles nested tables, quotes strings, and marks cycles
-                                as <code>&lt;cycle&gt;</code> instead of recursing forever.
-                            </p>
-                            <pre><code class="language-lua">function after_fetch(fetch_result)
-    print(dump(fetch_result))
-    log(dump(last_fetch))
-    return fetch_result
-end</code></pre>
+                                 useful for nested hook payloads like <code>fetch_result</code> or
+                                 <code>ctx.last_fetch</code>. It handles nested tables, quotes strings, and marks cycles
+                                 as <code>&lt;cycle&gt;</code> instead of recursing forever.
+                             </p>
+                             <pre><code class="language-lua">function after_fetch(fetch_result, ctx)
+     print(dump(fetch_result))
+     log(dump(ctx.last_fetch))
+     return fetch_result
+ end</code></pre>
 
                             <h3 class="title is-4" id="copy"><code>copy(table)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Returns a shallow copy of a table. Only the first level of keys and values are
@@ -1167,7 +1358,7 @@ deep.b.c = 99 -- original.b.c remains 2</code></pre>
                                 underlying
                                 OS/backend error.
                             </div>
-                            <pre><code class="language-lua">function after_fetch(fetch_result)
+                            <pre><code class="language-lua">function after_fetch(fetch_result, ctx)
     if not fetch_result.ok then
         notify("Network error", fetch_result.error.message, 10000)
         return nil
@@ -1178,7 +1369,7 @@ end</code></pre>
                             <h3 class="title is-4" id="log"><code>log(message)</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Appends a message to <code>hooks.log</code> inside the job's directory. This is the
                                 recommended way to debug hooks without using external libraries.</p>
-                            <pre><code class="language-lua">function after_extract(items)
+                            <pre><code class="language-lua">function after_extract(items, ctx)
     log("Extracted " .. #items .. " items from " .. request.url)
     return items
 end</code></pre>
@@ -1188,7 +1379,7 @@ end</code></pre>
                                 safe.
                                 Files feature <strong>automatic 10MB rotation</strong> with timestamped filenames
                                 (e.g., <code>data.20260514-143005.csv</code>), keeping a history of 5 files.</p>
-                            <pre><code class="language-lua">function after_extract(items)
+                            <pre><code class="language-lua">function after_extract(items, ctx)
     for _, item in ipairs(items) do
         local row = string.format("%s,%s\n", item.fields.title, item.fields.price)
         fs_append("data.csv", row)
@@ -1199,8 +1390,9 @@ end</code></pre>
                             <h3 class="title is-4" id="fs_overwrite"><code>fs_overwrite(filename, content)</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Replaces the entire content of a file in the job's directory. Ideal for keeping a
                                 "latest"
-                                snapshot of your scraping results.</p>
-                            <pre><code class="language-lua">function after_fetch(fetch_result)
+                                snapshot of your scraping results. Use <code>shared/</code> prefix to write to the
+                                project root's shared folder.</p>
+                            <pre><code class="language-lua">function after_fetch(fetch_result, ctx)
     if fetch_result.response then
         local etag = fetch_result.response.headers["ETag"]
         if etag then
@@ -1212,8 +1404,9 @@ end</code></pre>
 
                             <h3 class="title is-4" id="fs_read"><code>fs_read(filename)</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Reads a file from the job's directory and returns its content as a string. Returns
-                                <code>nil</code> if the file does not exist.</p>
-                            <pre><code class="language-lua">function before_fetch(request)
+                                <code>nil</code> if the file does not exist. Falls back to <code>shared/</code> if
+                                not found locally.</p>
+                            <pre><code class="language-lua">function before_fetch(request, ctx)
     local cached = fs_read("last_response.json")
     if cached then
         local data = json_decode(cached)
@@ -1225,6 +1418,7 @@ end</code></pre>
                             <h3 class="title is-4" id="fs_read_binary"><code>fs_read_binary(filename)</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Reads a file from the job's directory and returns its content as a binary-safe
                                 string (preserving all bytes). Returns <code>nil</code> if the file does not exist.
+                                Falls back to <code>shared/</code> if not found locally.
                                 Unlike <code>fs_read</code>, this function handles non-UTF-8 files such as images
                                 and other binary formats.</p>
                             <pre><code class="language-lua">local png_data = fs_read_binary("screenshot.png")
@@ -1244,7 +1438,7 @@ local resp = http_multipart("https://api.example.com/upload", {
                                     style="background:var(--surface2) !important; padding: 5px 10px !important; margin: 5px 0 !important; border: none !important;"><code class="language-bash">export SPYWEB_API_KEY="secret-123"</code></pre>
                                 Then in Lua, call <code>env_get("API_KEY")</code>.
                             </div>
-                            <pre><code class="language-lua">function before_fetch(request)
+                            <pre><code class="language-lua">function before_fetch(request, ctx)
     local api_key = env_get("API_KEY") -- Reads SPYWEB_API_KEY
     if api_key then
         request.headers["Authorization"] = "Bearer " .. api_key
@@ -1252,69 +1446,84 @@ local resp = http_multipart("https://api.example.com/upload", {
     return request
 end</code></pre>
 
-                            <h3 class="title is-4" id="selector_matches"><code>selector_matches</code> (Global)</h3>
+                            <h3 class="title is-4" id="selector_matches"><code>ctx.selector_matches</code> (Context)</h3>
                             <p>A read-only number representing how many elements on the page matched the main
                                 CSS <code>selector</code> defined in your config. This is set automatically
                                 after the extraction phase and is available in <code>after_extract</code> and
-                                all subsequent hooks.</p>
-                            <pre><code class="language-lua">function after_extract(items)
-    print("Found " .. #items .. " items (out of " .. selector_matches .. " selector hits)")
+                                all subsequent hooks via <code>ctx.selector_matches</code>.</p>
+                            <pre><code class="language-lua">function after_extract(items, ctx)
+    print("Found " .. #items .. " items (out of " .. ctx.selector_matches .. " selector hits)")
     return items
 end</code></pre>
 
-                            <h3 class="title is-4" id="last_fetch"><code>last_fetch</code> (Global)</h3>
-                            <p>A read-only table representing the result of the last network fetch. It contains
-                                <code>ok</code> (boolean), <code>status</code> (number), and <code>response</code>
-                                (table with <code>body</code> and <code>headers</code>).
-                                Useful for inspecting raw responses in later hook stages.
-                            </p>
-                            <pre><code class="language-lua">function after_extract(items)
-    if last_fetch and last_fetch.status == 200 then
-        log("Fetch was successful")
+                            <h3 class="title is-4" id="last_fetch"><code>ctx.last_fetch</code> (Context)</h3>
+                            <p>A read-only FetchAttempt envelope representing the last network fetch, accessible via
+                                <code>ctx.last_fetch</code>. Useful for inspecting fetch results in later hook stages.</p>
+
+                            <p><strong>Fields:</strong></p>
+                            <div class="table-container">
+                                <table class="table is-bordered is-fullwidth is-narrow">
+                                    <thead>
+                                        <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td><code>ok</code></td><td>boolean</td><td>Whether the fetch succeeded</td></tr>
+                                        <tr><td><code>request</code></td><td>table</td><td><code>url</code>, <code>method</code>, <code>headers</code>, <code>timeout</code>, <code>proxy</code>, <code>max_body_size</code></td></tr>
+                                        <tr><td><code>response</code></td><td>table?</td><td><code>status</code>, <code>url</code>, <code>body</code>, <code>headers</code>, <code>time_ms</code>, <code>size</code>, <code>proxy</code> (only on success)</td></tr>
+                                        <tr><td><code>error</code></td><td>table?</td><td><code>message</code>, <code>kind</code> (only on failure)</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <pre><code class="language-lua">function after_extract(items, ctx)
+    if ctx.last_fetch and ctx.last_fetch.ok then
+        log("Fetch was successful: " .. ctx.last_fetch.response.status)
     end
     return items
 end</code></pre>
 
-                            <h3 class="title is-4" id="spyweb_telemetry"><code>spyweb_telemetry</code> (Global)</h3>
-                            <p>A read-only table containing performance telemetry for the current scraping cycle. It is
+                            <h3 class="title is-4" id="spyweb_telemetry"><code>ctx.telemetry</code> (Context)</h3>
+                            <p>A read-only table containing performance telemetry for the current scraping cycle, accessible via
+                                <code>ctx.telemetry</code>. It is
                                 initialized at cycle start and updated dynamically as each stage executes, allowing
                                 scripts to inspect stage-by-stage resource usage and execution status.</p>
-                            <p><strong>Table Structure:</strong></p>
-                            <ul>
-                                <li><code>job_name</code> (string): The name of the job.</li>
-                                <li><code>start_time</code> (number): Epoch timestamp in seconds when the cycle started.
-                                </li>
-                                <li><code>total_duration_ms</code> (number): Total duration of the cycle (set at the end
-                                    of the run).</li>
-                                <li><code>stages</code> (array of tables): Sequence of stages in execution order. Each
-                                    stage table contains:
-                                    <ul>
-                                        <li><code>name</code> (string): The name of the stage (e.g.,
-                                            <code>before_fetch</code>, <code>fetch</code>,
-                                            <code>override_extract</code>).
-                                        </li>
 
-                                        <li><code>status</code> (string): <code>success</code>, <code>error</code>, or
-                                            <code>inactive</code>.
-                                        </li>
-                                        <li><code>type</code> (string): <code>hook</code> for Lua hooks or
-                                            <code>internal</code> for engine-native stages.
-                                        </li>
-                                        <li><code>duration_ms</code> (number): Stage execution time in milliseconds.
-                                        </li>
-                                        <li><code>lua_mem_bytes</code> (number): Total Lua memory usage after the stage.
-                                        </li>
-                                        <li><code>mem_delta_bytes</code> (number): Change in Lua memory during this
-                                            stage.</li>
-                                        <li><code>browsers</code> (number): Number of active browser processes.</li>
-                                        <li><code>error</code> (string/nil): The error message if the stage failed.</li>
-                                    </ul>
-                                </li>
-                            </ul>
-                            <pre><code class="language-lua">function on_success()
-    if spyweb_telemetry then
-        log("Job completed in " .. spyweb_telemetry.total_duration_ms .. "ms")
-        for _, stage in ipairs(spyweb_telemetry.stages) do
+                            <p><strong>Fields:</strong></p>
+                            <div class="table-container">
+                                <table class="table is-bordered is-fullwidth is-narrow">
+                                    <thead>
+                                        <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td><code>job_name</code></td><td>string</td><td>Name of the job</td></tr>
+                                        <tr><td><code>start_time</code></td><td>number</td><td>Epoch timestamp (seconds) when the cycle started</td></tr>
+                                        <tr><td><code>total_duration_ms</code></td><td>number</td><td>Total duration of the cycle in milliseconds (set at end of run)</td></tr>
+                                        <tr><td><code>stages</code></td><td>array</td><td>Sequence of stage records (see below)</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <p><strong>Stage record fields (entry in <code>stages</code> array):</strong></p>
+                            <div class="table-container">
+                                <table class="table is-bordered is-fullwidth is-narrow">
+                                    <thead>
+                                        <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td><code>name</code></td><td>string</td><td>Stage name (e.g. <code>before_fetch</code>, <code>fetch</code>, <code>override_extract</code>)</td></tr>
+                                        <tr><td><code>status</code></td><td>string</td><td><code>success</code>, <code>error</code>, or <code>inactive</code></td></tr>
+                                        <tr><td><code>type</code></td><td>string</td><td><code>hook</code> for Lua hooks, <code>internal</code> for engine-native stages</td></tr>
+                                        <tr><td><code>duration_ms</code></td><td>number</td><td>Stage execution time in milliseconds</td></tr>
+                                        <tr><td><code>lua_mem_bytes</code></td><td>number</td><td>Total Lua memory usage after the stage</td></tr>
+                                        <tr><td><code>mem_delta_bytes</code></td><td>number</td><td>Change in Lua memory during this stage</td></tr>
+                                        <tr><td><code>browsers</code></td><td>number</td><td>Number of active browser processes</td></tr>
+                                        <tr><td><code>error</code></td><td>string?</td><td>Error message if the stage failed, <code>nil</code> otherwise</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <pre><code class="language-lua">function on_success(ctx)
+    if ctx.telemetry then
+        log("Job completed in " .. ctx.telemetry.total_duration_ms .. "ms")
+        for _, stage in ipairs(ctx.telemetry.stages) do
             if stage.status == "error" then
                 log("Stage " .. stage.name .. " failed: " .. tostring(stage.error))
             end
@@ -1348,7 +1557,7 @@ end</code></pre>
                                         <td><code>name</code></td>
                                         <td>string</td>
                                         <td><em>required</em></td>
-                                        <td>Unique job name</td>
+                                        <td>Job name</td>
                                     </tr>
                                     <tr>
                                         <td><code>url</code></td>
@@ -1360,7 +1569,7 @@ end</code></pre>
                                         <td><code>selector</code></td>
                                         <td>string</td>
                                         <td><em>required</em></td>
-                                        <td>CSS selector for items</td>
+                                        <td>CSS selector for item containers</td>
                                     </tr>
                                     <tr>
                                         <td><code>fields</code></td>
@@ -1369,8 +1578,14 @@ end</code></pre>
                                         <td>Fields to extract</td>
                                     </tr>
                                     <tr>
+                                        <td><code>enabled</code></td>
+                                        <td>bool</td>
+                                        <td><code>true</code></td>
+                                        <td>Enable/disable job</td>
+                                    </tr>
+                                    <tr>
                                         <td><code>interval</code></td>
-                                        <td>u32</td>
+                                        <td>integer</td>
                                         <td><code>600</code></td>
                                         <td>Run interval (seconds)</td>
                                     </tr>
@@ -1381,16 +1596,58 @@ end</code></pre>
                                         <td>Filter by keywords</td>
                                     </tr>
                                     <tr>
-                                        <td><code>hash_fields</code></td>
+                                        <td><code>search_fields</code></td>
                                         <td>string[]</td>
-                                        <td><em>all</em></td>
-                                        <td>Fields for dedup hash</td>
+                                        <td><em>none</em></td>
+                                        <td>Limit keyword search to specific fields</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>debug</code></td>
+                                        <td>bool</td>
+                                        <td><code>false</code></td>
+                                        <td>Save raw HTML + extracted JSON</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>workers</code></td>
+                                        <td>integer</td>
+                                        <td><code>1</code></td>
+                                        <td>Per-job worker concurrency</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>urls</code></td>
+                                        <td>string[]</td>
+                                        <td><em>none</em></td>
+                                        <td>Multiple entry URLs</td>
                                     </tr>
                                     <tr>
                                         <td><code>headers</code></td>
                                         <td>table</td>
                                         <td><em>none</em></td>
                                         <td>Custom HTTP headers</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>hash_fields</code></td>
+                                        <td>string[]</td>
+                                        <td><em>all</em></td>
+                                        <td>Fields for dedup hash</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>proxy</code></td>
+                                        <td>table</td>
+                                        <td><em>none</em></td>
+                                        <td>Proxy configuration</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>webhook</code></td>
+                                        <td>table</td>
+                                        <td><em>none</em></td>
+                                        <td>Webhook configuration</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>notification</code></td>
+                                        <td>table</td>
+                                        <td><em>auto</em></td>
+                                        <td>Desktop notification settings</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -1399,15 +1656,20 @@ end</code></pre>
                                 <div class="column">
                                     <h4 class="title is-5">Validation Rules</h4>
                                     <ul>
+                                        <li><code>name</code>, <code>url</code>, <code>selector</code>, and <code>fields</code> are required and cannot be blank</li>
+                                        <li><code>fields</code> must contain at least one entry</li>
                                         <li><code>interval</code> must be &gt; 0</li>
-                                        <li>All URLs must be absolute (including webhooks/proxies)</li>
-                                        <li>Job names and normalized IDs must be unique</li>
-                                        <li><code>hash_fields</code> must exist in the extracted fields</li>
+                                        <li><code>workers</code> must be &gt; 0 if set</li>
+                                        <li>All URLs must be absolute (including <code>webhook.url</code> and <code>proxy.urls</code>)</li>
+                                        <li><code>urls</code> must contain at least one valid URL if set</li>
+                                        <li>Field names must be unique within a job</li>
+                                        <li><code>search_fields</code> and <code>hash_fields</code> must reference existing extracted field names</li>
+                                        <li>Job names and normalized IDs must be unique across all jobs</li>
                                     </ul>
                                 </div>
                                 <div class="column">
                                     <h4 class="title is-5">Field Syntax</h4>
-                                    <pre><code class="language-lua"># Shorthand
+                                    <pre><code class="language-toml"># Shorthand
 fields = ["title:h2", "link:a@href"]
 
 # Full form
@@ -1580,6 +1842,10 @@ body = "Title: {title}\nLink: {link}"</code></pre>
                                         <td><code>GET /api/jobs</code></td>
                                         <td>List all active jobs with human-readable names</td>
                                     </tr>
+                                    <tr>
+                                        <td><code>/api/v/{name}</code></td>
+                                        <td>Programmable API server — define custom Lua routes via <code>server/init.lua</code> (<a href="server.md">docs</a>)</td>
+                                    </tr>
                                 </tbody>
                             </table>
 
@@ -1675,7 +1941,7 @@ local ONE_DAY = 24 * 60 * 60 -- 24 hours in seconds
 
 -- Circuit Breaker & Self-Healing: Stop fetching on fatal errors, 
 -- but try to revive the job automatically after 24 hours.
-function before_fetch(request)
+function before_fetch(request, ctx)
     local fail_count = tonumber(store_get("fail_count")) or 0
     local stop_time = tonumber(store_get("stop_time")) or 0
 
@@ -1695,7 +1961,7 @@ end
 
 -- Track failures and only alert when a real problem persists.
 -- Aborts extraction (returns nil) on any failure.
-function after_fetch(fetch_result)
+function after_fetch(fetch_result, ctx)
     local fail_count = tonumber(store_get("fail_count")) or 0
     local status = fetch_result.response and fetch_result.response.status or nil
     local is_failure = not fetch_result.ok or status ~= 200
@@ -1747,12 +2013,12 @@ end
 -- --------------------------------------------------------------------------
 -- Detect layout changes. If the site is alive (200 OK) but the selector 
 -- returns 0 hits, the CSS selector in config.toml is likely outdated.
-function after_extract(items)
-    if selector_matches == 0 then
+function after_extract(items, ctx)
+    if ctx.selector_matches == 0 then
         log("🚨 [FATAL] CSS Selector matched 0 items. Layout might have changed!")
         
         -- Clone state to log diagnostics without the massive body
-        local debug_info = deep_copy(last_fetch)
+        local debug_info = deep_copy(ctx.last_fetch)
         if debug_info.response then
             debug_info.page_title = debug_info.response.body:match("&lt;title&gt;(.-)&lt;/title&gt;")
             debug_info.response.body = "[stripped]"
@@ -1775,7 +2041,7 @@ end
 -- Monitor for price drops or sales. This demonstrates using the persistent
 -- store to track state (lowest price) across different scrape runs.
 
-function before_notify(items)
+function before_notify(items, ctx)
     for _, item in ipairs(items) do
         -- Clean currency symbols (e.g., "$1,200" -> "1200")
         local price_str = (item.fields.price or "0"):gsub("[^%d%.]", "")
@@ -1818,16 +2084,16 @@ end
                                     Lua
                                     pattern matching (regex-like) for data hidden in script tags or unstructured
                                     text.
-                                    Uses the <code>last_fetch</code> global to access the raw response body.</p>
+                                    Uses <code>ctx.last_fetch</code> to access the raw response body.</p>
                                 <pre><code class="language-lua">-- Example: Grabbing a token from a script tag and adding it to every item
-function after_extract(items)
+function after_extract(items, ctx)
     -- Safety check: only proceed if fetch was successful and has content
-    if not last_fetch or not last_fetch.ok or not last_fetch.response or not last_fetch.response.body then
+    if not ctx.last_fetch or not ctx.last_fetch.ok or not ctx.last_fetch.response or not ctx.last_fetch.response.body then
         return items 
     end
 
-    -- last_fetch.response.body contains the raw HTML from the server
-    local html = last_fetch.response.body
+    -- ctx.last_fetch.response.body contains the raw HTML from the server
+    local html = ctx.last_fetch.response.body
     
     -- Extract an internal app_id from a javascript variable: var app_id = "12345"
     local internal_id = html:match('var app_id = "(%w+)"')
@@ -1850,8 +2116,8 @@ end</code></pre>
                         <div x-show="tab==='pagination'">
                             <div class="content">
                                 <p><strong>Cycle through pages using a Lua global counter:</strong></p>
-                                <pre><code class="language-lua">-- hook.lua - globals persist while the job process stays alive
-function before_fetch(request)
+                                <pre><code class="language-lua">-- hooks.lua - globals persist while the job process stays alive
+function before_fetch(request, ctx)
     page = page or 1
     if string.find(request.url, "?") then
         request.url = request.url .. "&amp;page=" .. page
@@ -1864,7 +2130,7 @@ function before_fetch(request)
     return request
 end
 
-function filter_item(item)
+function filter_item(item, ctx)
     if (item.fields.title or "") == "" then
         return nil
     end
@@ -1875,10 +2141,10 @@ end</code></pre>
                         <div x-show="tab==='filtering'">
                             <div class="content">
                                 <p><strong>Replace the keyword filter with custom Lua logic:</strong></p>
-                                <pre><code class="language-lua">-- hook.lua - replaces built-in keyword filter
+                                <pre><code class="language-lua">-- hooks.lua - replaces built-in keyword filter
 blocked = { ["spam co"] = true }
 
-function filter_item(item)
+function filter_item(item, ctx)
     local title = (item.fields.title or ""):lower()
     local company = (item.fields.company or ""):lower()
 
@@ -1902,14 +2168,14 @@ end</code></pre>
                         <div x-show="tab==='headers'">
                             <div class="content">
                                 <p><strong>Add auth headers dynamically:</strong></p>
-                                <pre><code class="language-lua">-- hook.lua - dynamic headers
-function before_fetch(request)
+                                <pre><code class="language-lua">-- hooks.lua - dynamic headers
+function before_fetch(request, ctx)
     request.headers["Authorization"] = "Bearer my-api-key"
     request.headers["X-Custom"] = "spyweb"
     return request
 end
 
-function after_fetch(fetch_result)
+function after_fetch(fetch_result, ctx)
     if not fetch_result.ok then
         notify("Auth request failed", fetch_result.error.message)
         return nil
@@ -1927,13 +2193,13 @@ end</code></pre>
                                 <p><strong>Page Change & Anti-Bot Detection:</strong> If a website blocks you or
                                     changes its layout, your CSS selector will return 0 items. Use this to instantly
                                     inspect the underlying HTTP response and trigger an alert.</p>
-                                <pre><code class="language-lua">-- hook.lua - fallback debugging
-function after_extract(items)
-    -- selector_matches tells us if the CSS selector found anything at all, 
+                                <pre><code class="language-lua">-- hooks.lua - fallback debugging
+function after_extract(items, ctx)
+    -- ctx.selector_matches tells us if the CSS selector found anything at all, 
     -- regardless of whether keywords filtered them out later.
-    if selector_matches == 0 then
-        -- Clone last_fetch so we can safely mutate it for logging
-        local debug_info = deep_copy(last_fetch)
+    if ctx.selector_matches == 0 then
+        -- Clone ctx.last_fetch so we can safely mutate it for logging
+        local debug_info = deep_copy(ctx.last_fetch)
         
         if debug_info.response then 
             -- Extract the page title so we can see if it's a 403 or Cloudflare page
@@ -2009,7 +2275,7 @@ end</code></pre>
                                         <td>Access <code>os.time</code>, <code>os.date</code>, <code>math.*</code>,
                                             and
                                             <code>require</code> for code sharing. Modules are searched in the job's
-                                            directory first, then in the global <code>shared/</code> folder. The
+                                            directory first, then in the project root. The
                                             <code>io</code> library is disabled; use <code>fs_append()</code> or
                                             <code>log()</code> instead.
                                         </td>
@@ -2028,12 +2294,6 @@ end</code></pre>
                                             changes and reloads. All Lua state resets. No restart needed.</td>
                                     </tr>
                                     <tr>
-                                        <td><strong>last_fetch Global</strong></td>
-                                        <td>The <code>last_fetch</code> global is reserved and overwritten by the
-                                            engine every run with the latest results. Overwriting it is harmless
-                                            but futile, as your changes will be lost on the next fetch attempt.</td>
-                                    </tr>
-                                    <tr>
                                         <td><strong>Deduplication</strong></td>
                                         <td>By default, SpyWeb hashes all fields to determine uniqueness. Use
                                             <code>hash_fields</code> only if you want to lock an item's identity to
@@ -2044,14 +2304,6 @@ end</code></pre>
                                         </td>
                                     </tr>
                                     <tr>
-                                        <td><strong>Security &amp; Privacy</strong></td>
-                                        <td>SpyWeb UI has no built-in authentication. It is designed for
-                                            <code>127.0.0.1</code>.
-                                            If you expose it on a public IP (<code>0.0.0.0</code>), use a reverse
-                                            proxy
-                                            like Nginx with Basic Auth to protect your data.
-                                        </td>
-                                    </tr>
                                 </tbody>
                             </table>
                         </div>

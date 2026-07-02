@@ -166,7 +166,7 @@ local browser = cdp.connect(ws_url, {
                             <p>CDP is available globally via the <code>cdp</code> table. While it can be used in any
                                 hook, it is most commonly used in <code>override_fetch</code> to replace the default
                                 HTTP client with a real browser.</p>
-                            <pre><code class="language-lua">function override_fetch(request)
+                            <pre><code class="language-lua">function override_fetch(request, ctx)
     -- 1. Launch a temporary browser
     local browser = cdp.launch({})
 
@@ -213,7 +213,7 @@ if not browser then
     })
 end
 
-function override_fetch(request)
+function override_fetch(request, ctx)
     local page = browser:attach()
     local ok, err = page:open(request.url)
     if not ok then

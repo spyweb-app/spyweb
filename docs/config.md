@@ -20,6 +20,8 @@ SpyWeb validates config statically before startup or reload. It checks required 
 | `search_fields` | string[] | *none* | Limit keyword search to specific fields |
 | `debug` | bool | `false` | Save raw HTML and extracted JSON for debugging |
 | `headers` | table | *none* | Custom HTTP headers |
+| `workers` | u32 | `1` | Per-job worker concurrency |
+| `urls` | string[] | *none* | Multiple entry URLs (overrides `url` for multi-page entry) |
 | `proxy` | table | *none* | Proxy configuration |
 | `webhook` | table | *none* | Webhook configuration |
 | `notification` | table | *auto* | Desktop notification settings |
@@ -77,7 +79,9 @@ This command is ideal for iterative development because:
 - `name`, `url`, `selector`, and `fields` are required and cannot be blank
 - `fields` must contain at least one entry
 - `interval` must be greater than `0`
+- `workers` must be greater than `0` if set
 - `url` must be a valid absolute URL
+- `urls` must contain at least one valid absolute URL if set
 - `webhook.url` must be a valid absolute URL when webhook is enabled
 - `proxy.urls` must be valid absolute URLs when proxy is enabled
 - field names must be unique within a job
@@ -157,20 +161,63 @@ Available tags: `{job_name}`, `{url}`, `{item_count}`, `{timestamp}`, `{matches}
 For advanced workflows, you can place a `hooks.lua` file in the same directory as your `config.toml`. SpyWeb will automatically detect and run these hooks during the scraping pipeline.
 
 Common use cases for hooks:
-- **`before_fetch`**: Handle pagination, custom authentication, or change HTTP method (set `request.method = "HEAD"`).
-- **`override_fetch`**: Use a headless browser or external API for fetching.
-- **`after_fetch`**: Recover from network errors or clean the HTML body.
-- **`override_extract`**: Parse JSON/XML APIs instead of HTML.
-- **`filter_item`**: Apply complex custom filtering logic per item.
+- **`before_fetch(request, ctx)`**: Handle pagination, custom authentication, change HTTP method, override timeout/proxy/max_body_size per-request. See `docs/index.html` for full field reference.
+- **`override_fetch(request, ctx)`**: Use a headless browser or external API for fetching.
+- **`after_fetch(result, ctx)`**: Recover from network errors or clean the HTML body.
+- **`override_extract(response, ctx)`**: Parse JSON/XML APIs instead of HTML.
+- **`after_extract(items, ctx)`**: Transform or enrich extracted items.
+- **`filter_item(item, ctx)`**: Apply complex custom filtering logic per item.
+- **`before_store(items, ctx)`**: Intercept items before database insertion.
+- **`before_notify(items, ctx)`**: Modify items before desktop notification.
+- **`before_webhook(payload, ctx)`**: Reshape the webhook JSON payload.
+- **`on_finished()`**: Run after every complete job iteration (all workers done, before sleep). Receives no arguments.
+
+All hooks except `on_finished()` receive the per-cycle `ctx` table, which provides:
+- **`ctx.worker_id`** — 1-based index for multi-worker jobs (always `1` for single-worker)
+- **`ctx.shared`** — a table for passing data between hooks within the same cycle
 
 ### Safe File I/O
-SpyWeb provides safe, non-blocking file operations for hooks. These operations are strictly scoped to the job's directory and feature automatic 10MB rotation with a 5-file history.
+SpyWeb provides safe, non-blocking file operations for hooks. Writes go to the job's directory. Reads scan the job's directory first, then fall back to the shared `./shared/` folder for cross-job data sharing.
 
-- **`log(message)`**: Appends a timestamped line to `hook.log`.
+- **`log(message)`**: Appends a timestamped line to `hooks.log`.
 - **`fs_append(filename, content)`**: Appends raw content to a file. Useful for CSV/JSONL exports.
 - **`fs_overwrite(filename, content)`**: Replaces a file's content. Ideal for saving `latest_state.json`.
-- **`fs_read(filename)`**: Reads a file and returns its content as a string, or `nil` if the file does not exist.
+- **`fs_read(filename)`**: Reads a text file and returns its content as a string, or `nil` if the file does not exist. Falls back to `./shared/` if not found locally.
+- **`fs_read_binary(filename)`**: Reads any file (including binary files like images) from the job directory. Falls back to `./shared/` if not found locally. Returns binary-safe Lua string; returns `nil` if file doesn't exist.
+ 
+> **Security Note:** Writes (`fs_append`, `fs_overwrite`) and text reads (`fs_read`) are restricted to `.csv`, `.json`, `.jsonl`, `.txt`, and `.log` extensions. **`fs_read_binary`** additionally supports media and assets including `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp`, `.ico`, `.pdf`, `.zip`, `.woff`, `.woff2`, `.ttf`, `.otf`, etc. Absolute paths and directory traversal (`../`) are strictly prohibited. Paths are resolved relative to the job directory. Use `shared/` prefix to read/write from the project root's shared folder.
 
-> **Security Note:** Only `.csv`, `.json`, `.jsonl`, `.txt`, and `.log` extensions are allowed. Absolute paths and directory traversal (`../`) are strictly prohibited. All paths are resolved relative to the job directory.
+### Global Functions Reference
 
-For a full reference of all 9 hook stages and built-in Lua functions like `dump()`, `http_get()`, `http_request()`, and `store_set()`, see the [Master Guide](https://docs.spyweb.app/).
+All globals listed below are available inside any hook function.
+
+| Function | Async | Description |
+|----------|-------|-------------|
+| `http_get(url, [headers])` | ✅ | HTTP GET request. Returns `(res, err)` — two-return pattern. |
+| `http_post(url, body, [headers])` | ✅ | HTTP POST request. Returns `(res, err)` — two-return pattern. |
+| `http_request({ method, url, body?, headers?, proxy?, timeout?, max_body_size? })` | ✅ | Generic HTTP request with optional proxy/timeout/max_body_size. Returns `(res, err)`. |
+| `http_multipart(url, fields, [headers])` | ✅ | Multipart file uploads. Returns `(res, err)` — two-return pattern. |
+| `sleep(ms)` | ✅ | Sleep for N milliseconds |
+| `notify(title, body, [timeout])` | ✅ | Send desktop notification |
+| `log(message)` | ✅ | Append timestamped line to `hooks.log` |
+| `fs_append(path, content)` | ✅ | Append to a file in the job directory |
+| `fs_overwrite(path, content)` | ✅ | Overwrite a file in the job directory |
+| `fs_read(path)` | ✅ | Read a text file (returns string or nil), falls back to `shared/` |
+| `fs_read_binary(path)` | ✅ | Read a binary file, falls back to `shared/` |
+| `store_set(key, value)` | ✅ | Set per-job storage key |
+| `store_get(key)` | ✅ | Get per-job storage value |
+| `store_delete(key)` | ✅ | Delete a per-job storage key |
+| `global_store_set(key, value)` | ✅ | Set global (cross-job) storage key |
+| `global_store_get(key)` | ✅ | Get global (cross-job) storage value |
+| `global_store_incr(key, default, delta)` | ✅ | Atomically increment a global counter |
+| `global_store_delete(key)` | ✅ | Delete a global storage key |
+| `json_encode(val)` | ❌ | Encode a Lua value to JSON string |
+| `json_decode(str)` | ❌ | Decode a JSON string to Lua value (10MB input limit) |
+| `env_get(key)` | ❌ | Read an environment variable |
+| `defer(fn)` | ❌ | Register hook-scoped cleanup callback |
+| `require(name)` | ❌ | Load a Lua module from the job directory or project root (Luau only) |
+| `dump(value)` | ❌ | Pretty-print a Lua value (debugging) |
+| `copy(table)` | ❌ | Shallow copy of a Lua table |
+| `deep_copy(table)` | ❌ | Deep copy of a Lua table |
+
+For usage examples and detailed hook stage documentation, see the [Master Guide](https://docs.spyweb.app/).

@@ -15,6 +15,7 @@ Key properties:
 - Fresh Lua VM for every test function
 - Temporary Redb database per test run
 - Production Lua bindings are available in tests
+- Production `ctx` table injected as `active_ctx` in the Lua registry, enabling `defer()` and ctx-aware assertions
 
 ## CLI Usage
 
@@ -124,7 +125,7 @@ Example:
 
 ```lua
 function test_override_fetch_logic()
-    override_fetch = function(req)
+    override_fetch = function(req, ctx)
         return { status = 200, body = "mock", url = req.url }
     end
 
@@ -188,7 +189,8 @@ Things to keep in mind:
 - Test discovery is name-based, not annotation-based.
 - Only global `test_*` functions are discovered.
 - Tests run in isolated VMs, so state does not persist between them.
-- `defer.lua` is loaded, but `defer()` callbacks still follow the same lifecycle rules as production hooks.
+- `defer.lua` is loaded, and `defer()` callbacks follow the same lifecycle rules as production hooks.
+- A production `ctx` table is registered as `active_ctx` before each test, so `defer()` and any other ctx-dependent bindings work out of the box.
 
 ## Example Layout
 

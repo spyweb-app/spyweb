@@ -36,7 +36,7 @@ CDP is available globally via the `cdp` table. While it can be used in any hook,
 To use CDP for a job, define an `override_fetch` function in your `hooks.lua`:
 
 ```lua
-function override_fetch(request)
+function override_fetch(request, ctx)
     -- 1. Launch a temporary browser
     local browser = cdp.launch({})
     
@@ -88,7 +88,7 @@ if not browser then
     })
 end
 
-function override_fetch(request)
+function override_fetch(request, ctx)
     -- Attach to a page (reuses blank tabs by default)
     local page = browser:attach()
     
@@ -237,7 +237,7 @@ The `Page` object combines native transport methods with high-level Lua helpers.
 
 ### Native Methods (Core)
 - `page:call(method, params)`: (Async) Raw page-level CDP command.
-- `page:call_save(method, params, path)`: (Async) Optimized binary call. Saves the `data` field of the response to `path` and returns the JSON without the massive data string.
+- `page:call_save(method, params, path)`: (Async) Optimized binary call. Saves the `data` field of the response to `path` and returns the JSON without the massive data string. **Supports media and asset extensions including `.png`, `.jpg`, `.pdf`, `.zip`, etc.**
 - `page:wait_event(event, ...)`: (Async) Wait for a page notification. Accepts variadic args: timeout (number), predicate (function), or a table with `timeout_ms`/`timeout` and `predicate`.
 - `page:close()`: (Sync) Closes the specific tab.
 
@@ -251,7 +251,7 @@ Injected via `cdp.lua` to provide a higher-level CDP abstraction.
 - `page:click(selector, [opts])`: (Async) `opts.real = true` uses hardware mouse events.
 - `page:type(selector, text, [opts])`: (Async) `opts.real = true` uses hardware keyboard events.
 - `page:content()`: (Async) Returns the full rendered HTML.
-- `page:screenshot(path, [opts])`: (Async) Saves a screenshot. Supports `{format = "png"|"jpeg", quality = 1..100, full_page = true, fullPage = true, fromSurface = true}`. Defaults to PNG.
+- `page:screenshot(path, [opts])`: (Async) Saves a screenshot. Supports `{format = "png"|"jpeg", quality = 1..100, full_page = true, fullPage = true, fromSurface = true}`. Defaults to PNG. **Subject to 10MB response limit.**
 - `page:block_resources(types)`: (Async) e.g., `{"image", "font", "media"}`.
 - `page:wait_for_url(pattern, timeout_ms)`: (Async) Polls `location.href` until it matches the string `pattern`. Returns the URL or `nil, error`.
 - `page:wait_for_response([predicate], [timeout_ms])`: (Async) Waits for `Network.responseReceived`. Optional `predicate` function receives params, returns `true` when match found.
