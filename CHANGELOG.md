@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-beta] - 2026-07-01
+
+### Added
+- **CLI:** Added `spyweb types` command that writes `spyweb-types.lua` and `.luarc.json` to the current directory for Lua LSP type definitions.
+- **CLI:** Added `spyweb update` command for self-updating.
+- **Storage Backend:** Added **SQLite** as an optional compile-time storage backend (`--features sqlite`) alongside the default **redb** backend. swap at download by picking the `-sql` variant.
+- **Lua API (SQLite only):** Added `db_query(sql, params?)` for arbitrary SELECT queries from Lua scripts. Returns an array of row-tables with column-value pairs. Integer/Real/Text/Null SQL types map to Lua number/string/nil.
+- **Lua API (SQLite only):** Added `db_exec(sql, params?)` for executing INSERT, UPDATE, DELETE, REPLACE, CREATE TABLE, and any other SQL from Lua scripts. Returns the number of rows affected.
+- **Lua API:** Added `fs_read(filename)` for reading files from the job directory. Returns file content as a string, or `nil` if the file does not exist. 
+- **Lua API:** HTTP binding responses now include `url`, `proxy`, `time_ms`, and `size` metadata fields
+- **Lua API:** All HTTP bindings (`http_get`, `http_post`, `http_request`, `http_multipart`) now return `(result, error)`, a nil result + error table on failure instead of throwing
+- **Lua API:** Added `http_request(options)` generic HTTP binding supporting any method (GET, HEAD, POST, PUT, DELETE, etc.). Body is binary-safe (accepts arbitrary bytes). 
+- **Lua API:** Added `http_multipart(url, fields, headers)` for multipart/file upload HTTP requests. Supports text fields and file attachments with binary content, custom filename, and MIME type.
+- **Lua API:** Added `fs_read_binary(filename)` for reading any file (including binary files like images) from the job directory. Returns binary-safe Lua string; returns `nil` if file doesn't exist.
+- **Config:** Added `workers` field to job config to control per-job concurrency.
+- **Config:** Added `urls` field to job config for specifying multiple entry URLs.
+- **Multi-worker Loop:** `run_job_loop` spawns N workers as configured by `workers` field, with 200ms stagger between worker starts to prevent thundering herd.
+- **URL Dispatch:** Rust-managed `VecDeque` URL queue with work-stealing pop; workers atomically claim URLs from the shared `urls` config list.
+- **on_finished hook:** New batch-level lifecycle hook `on_finished()` fires once per job cycle after all workers complete and all URLs drain, before the interval sleep. No `ctx` parameter — operates on shared globals accumulated during the batch.
+- **Test Infrastructure:** Consolidated 13 scraper tests from `pipeline.rs`, `runner.rs`, `request.rs` into a single `src/scraper/tests.rs`.
+- **Lua File I/O:** Added `shared/` folder support. `fs_read`/`fs_read_binary` fall back to `./shared/` when file not found in job directory. `fs_append`/`fs_overwrite` write to `./shared/` when path starts with `shared/`.
+- **API Server:** Added programmable Lua-based API routing via `/api/v/<name>/...` endpoints. Requests are dispatched to `server/init.lua` which receives the HTTP method, route name, path segments, and raw request for fully custom REST endpoints alongside the built-in `/api/*` routes.
+
+### Changed
+- **CLI:** `spyweb version` now shows the compiled database backend (e.g. `SpyWeb v1.4.0-beta (Engine: Luau, DB: SQLite)` or `DB: redb`).
+- **CLI:** Extended `spyweb check` with subcommands `config` and `update`. Plain `spyweb check` now also runs version, config validation, and update check.
+- **Config:** refactor config to have its own validation and test file.
+- **CLI:** Refactored `cli.rs` into `cli/mod.rs` (command dispatcher) and `cli/profile.rs` (profile handler + tests) for better maintainability.
+- **Request Config:** `before_fetch` Lua hooks can now set `request.timeout = 15`, `request.proxy = "http://..."`,`request.max_body_size = 5`, `request.method = 'HEAD/POST` or any method.
+- **HTTP Client:** Built-in fetch now enforces a 10MB response body limit by defaults
+- **HTTP Client:** Proxy URL is now included in fetch error messages when a proxy was in use.
+- **HTTP Client:** `ctx.last_fetch.response` now includes `proxy`, `time_ms`, and `size` metadata fields on the default fetch envelope.
+- **HTTP Client:** Connection is now dropped immediately after request completion to free resources sooner.
+- **Threading:** Server moved to a dedicated thread, server no longer steal and hostage one `SPYWEB_THREADS` creating deadlock if `SPYWEB_THREADS = 1`.
+- **I/O Service:** Major refactor of the IO service for improved maintainability and structure.
+- **Performance:** `RequestConfig.headers` wrapped in `Arc<IndexMap>` to avoid expensive clones on every fetch.
+- **Compression:** Removed brotli compression support from HTTP client (drops `brotli` feature from ureq and `br` from `Accept-Encoding`).
+- **Lua Context Isolation:** Hook state (`last_fetch`, `selector_matches`, `telemetry`, `__deferred`, `filter_error`) moved from global Lua scope to per-cycle context tables.
+- **Pipeline Telemetry:** Introduced `TelemetryHandle` wrapper to DRY up telemetry stage recording across the entire pipeline.
+- **Refactor:** `defer()` cleanup uses the active execution context via named registry instead of Lua globals.
+- **Refactor:** Pipeline telemetry boilerplate consolidated behind `TelemetryHandle::stage()` and `TelemetryHandle::record()` helpers.
+- **Refactor:** Collapsed 12 hook presence booleans in `JobHooks` into a `u16` bitmask.
+- **Lua `require`:** Now scans job directory first, then project root. Removed `shared/` candidate.
+- **Refactor:** `validate_path` refactored to only validate path safety (traversal, symlinks). Extension checks moved to callers (`handle_task`, `fs_read`, `fs_read_binary`) so each function controls its own allowlist.
+- **Security:** `cdp._write_base64` now validates paths via `validate_path()` before writing to disk.
+- **Security:** `page:call_save` now validates paths via `validate_path()` before writing to disk.
+- **Security:** `json_decode` input capped at 10MB to prevent OOM.
+
+### Fixed
+- **Build:** Separated `spyweb` (headless) and `spyweb-tray` (tray) builds so tray feature no longer leaks into the headless binary.
+- **Security:** Static asset path validation now uses `path.components()` instead of `contains("..")` to catch encoded traversal attempts.
+
 ## [1.4.0-beta] - 2026-05-29
 
 ### Added
@@ -27,7 +79,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Lazy-load CDP:** CDP bindings are now registered only for hook sources that reference `cdp.*`, jobs that never use CDP no longer pay the startup cost for that VM surface.
 - **Lazy-load Hooks:** Disabled job no longer load `hooks.lua`, they do not create idle Lua VMs during startup or config reload.
 - **Jobs API:** `/api/jobs` now includes an `enabled` flag while preserving the existing `{ id, name }` structure order for compatibility.
-
 
 ### Fixed
 - None.
@@ -114,3 +165,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial stable "Clean Release".
+    
