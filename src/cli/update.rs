@@ -176,7 +176,7 @@ fn extract_archive(archive: &Path, dest: &Path) -> Result<()> {
 
 fn self_test(binary: &Path) -> Result<()> {
     let output = Command::new(binary)
-        .arg("--version")
+        .arg("v")
         .output()
         .context("Failed to execute new binary for self-test")?;
 
