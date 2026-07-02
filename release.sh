@@ -76,7 +76,7 @@ assemble_package() {
 
 # 4. Build Binaries
 if [[ "$OS_NAME" == "macos" ]]; then
-    echo "[*] Building Universal Binaries for macOS (Intel + Apple Silicon)..."
+    echo "[*] Building for macOS (Intel + Apple Silicon)..."
     rustup target add x86_64-apple-darwin aarch64-apple-darwin
 
     cargo build --release $CARGO_FEATURES --target x86_64-apple-darwin --bin spyweb
@@ -84,15 +84,6 @@ if [[ "$OS_NAME" == "macos" ]]; then
     cargo build --release $CARGO_FEATURES --target aarch64-apple-darwin --bin spyweb
     cargo build --release --features "$TRAY_FEATURES" --target aarch64-apple-darwin --bin spyweb-tray
 
-    mkdir -p target/universal
-    lipo -create -output target/universal/spyweb target/x86_64-apple-darwin/release/spyweb target/aarch64-apple-darwin/release/spyweb
-    lipo -create -output target/universal/spyweb-tray target/x86_64-apple-darwin/release/spyweb-tray target/aarch64-apple-darwin/release/spyweb-tray
-
-    assemble_package
-    cp target/universal/spyweb "$DIST_DIR/$PACKAGE_DIR/"
-    cp target/universal/spyweb-tray "$DIST_DIR/$PACKAGE_DIR/"
-
-    # 2. Create Lean ZIPs (arm64, x86_64)
     for target_arch in "aarch64-apple-darwin:arm64" "x86_64-apple-darwin:x86_64"; do
         target=${target_arch%%:*}
         arch_name=${target_arch#*:}
