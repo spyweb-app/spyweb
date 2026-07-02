@@ -10,7 +10,7 @@ You can choose between two storage backends depending on your needs. The choice 
 
 | Feature | **KV** (redb, default) | **SQL** (SQLite, queryable) |
 | :--- | :--- | :--- |
-| **Binary Size** | ~7MB | ~7MB |
+| **Binary Size** | ~7MB | ~8MB |
 | **Philosophy** | "Minimalist & Zero-Configuration" | "Transparent & Queryable" |
 | **Performance** | High (Low overhead) | Moderate (WAL optimized) |
 | **External Access** | None (Internal format) | High (Any SQLite tool) |
@@ -49,7 +49,7 @@ The **SQLite** backend is available in the `-sql` variants of Spyweb. It transfo
 
 ### Technical Details
 - **Files:** `data` (Main DB), `data-wal` (Write-Ahead Log), `data-shm` (Shared Memory) — all in the working directory.
-- **Performance:** Configured with `PRAGMA journal_mode=WAL` and `PRAGMA synchronous=NORMAL` for high-concurrency and fast writes.
+- **Performance:** Configured with `PRAGMA journal_mode=WAL` and `PRAGMA synchronous=NORMAL` for balanced concurrency and fast writes.
 
 ### Database Schema
 The database contains three primary tables for both variants:
@@ -77,7 +77,7 @@ end
 #### `db_exec(sql, params)`
 Executes any SQL statement and returns the number of rows affected.
 ```lua
--- file: myjob/defer.lua
+-- file: myjob/defer.lua (or hooks.lua)
 -- Top-level: runs once at load time (startup/reload)
 db_exec("CREATE TABLE IF NOT EXISTS markers (id TEXT PRIMARY KEY, val INTEGER)")
 
@@ -136,7 +136,7 @@ end
 ```
 
 #### 3. Mark Completion (`on_finally`)
-Update the status based on whether the cycle succeeded or failed.
+Only fires in `defer.lua`, not `hooks.lua`. Update the status based on whether the cycle succeeded or failed.
 
 ```lua
 function on_finally(ctx)
