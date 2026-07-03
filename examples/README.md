@@ -174,6 +174,75 @@ Demonstrates how to bypass SpyWeb's internal database entirely and send extracte
 
 ---
 
+### [`override-fetch-retry/`](override-fetch-retry/)
+
+Demonstrates a self-contained `override_fetch` function with retry, proxy failover, jitter, and configurable timeout using the two-return pattern.
+
+**What it does:**
+- Loops through a list of proxy URLs across multiple retry attempts
+- Uses `http_request` with `proxy` and `timeout` fields
+- Handles errors via the two-return `(res, err)` pattern with `err.kind` classification
+- Reports `res.size` and `res.time_ms` on success
+- Adds jittered delay between retry waves to prevent thundering herd
+- Returns `{ error = "..." }` when all retries are exhausted
+
+**Key concepts:** `override_fetch`, `http_request` with proxy/timeout/max_body_size, two-return pattern, error classification, jittered sleep, graceful degradation.
+
+---
+
+### [`full/`](full/)
+
+A fully-featured job demonstrating all 9 hook stages of the SpyWeb lifecycle pipeline.
+
+**What it does:**
+- Custom headers and proxy rotation
+- Pagination across multiple pages
+- Keyword filtering and item mutation
+- Notifications, webhooks, and deduplication
+- End-to-end pipeline coverage with every hook defined
+
+---
+
+### [`multi-worker/`](multi-worker/)
+
+Demonstrates atomic DB-driven URL queue coordination across multiple workers.
+
+**What it does:**
+- Maintains a `targets` table in the built-in SQLite database
+- Seeds 5 demo targets with staggered intervals (10–60s)
+- Uses atomic `UPDATE ... RETURNING` to claim the next due target — no two workers ever collide
+- Records per-target status (`ok`/`error`) back to the database
+- Falls back gracefully when no targets are due (`before_fetch` returns nil)
+
+**Key concepts:** `db_exec`, `db_query`, atomic claim pattern, multi-worker coordination via SQLite, `ctx.shared` for passing state across hooks in the same cycle.
+
+---
+
+### [`starter-kit/`](starter-kit/)
+
+A stripped-down version of the full pipeline example. Introduces the core lifecycle hooks with minimal config.
+
+**What it does:**
+- Defines `before_fetch`, `after_fetch`, `after_extract`, `filter_item`, `before_store`, `before_notify`, `before_webhook`
+- Basic config with keywords and notification settings
+- Good starting point for new users to understand the pipeline
+
+---
+
+### [`set-and-forget/`](set-and-forget/)
+
+A production-oriented VPS monitoring agent with circuit breaker, self-healing, and push alerts.
+
+**What it does:**
+- Circuit breaker stops fetching after N consecutive failures
+- 24-hour cooldown before attempting revival
+- Failure masking (`override_fetch` returns fallback data)
+- ntfy.sh push notifications to your phone
+- CSS layout-change detection
+- Price-drop tracking via persistent `store_*` state
+
+---
+
 ## Pipeline Stage Reference
 
 Every scrape run goes through these stages in order:

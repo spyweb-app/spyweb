@@ -1,0 +1,7 @@
+name = "Test Worker"
+enabled = true
+interval = 1
+workers = 4
+url = "https://example.com"
+selector = "body"
+fields = ["dummy:body"]
