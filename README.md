@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">SpyWeb</h1>
-  <p align="center">Tiny web scraper with Lua scripting - ~7MB binary, no runtime required, under 5MB idle RAM</p>
+  <p align="center">Tiny web scraping/monitoring engine with Lua scripting - ~7MB binary, no runtime required, under 5MB idle RAM</p>
 </p>
 
 <p align="center">
@@ -11,6 +11,7 @@
 
 <p align="center">
   📖 <a href="https://docs.spyweb.app/"><b>Master Guide</b></a> |
+  📂 <a href="docs/database.md">Storage</a> |
   🧪 <a href="docs/lua-testing.md">Testing</a> |
   🌐 <a href="https://docs.spyweb.app/cdp">Browser Automation</a> |
   ⚙️ <a href="docs/config.md">Config</a> |
@@ -24,8 +25,8 @@
 
 ---
 
-## What is spyweb?
-**SpyWeb** is a zero-dependency web monitoring engine built for speed and simplicity. Track listings, job boards, classifieds, price drops, restocks, public records, and anything that lives on an HTML page with simple TOML configs. Inject custom Lua logic for advanced workflows, and receive real-time alerts via desktop or webhooks, all packaged as two self-contained binaries that use under 5MB of RAM at idle.
+## What is SpyWeb?
+**SpyWeb** is a zero-dependency web scraping & monitoring engine built for speed, efficiency and simplicity. Track listings, job boards, classifieds, price drops, restocks, public records, and anything that lives on an HTML page with simple TOML configs. Inject custom Lua logic for advanced workflows, and receive real-time alerts via desktop or webhooks, all packaged as two self-contained binaries that use under 5MB of RAM at idle.
 
 ## Quick Demo
 ```toml
@@ -42,9 +43,9 @@ keywords = ["rust", "linux", "open source"]
 | Feature | Description |
 | :--- | :--- |
 | **Zero Dependencies** | ~7MB self-contained binary. Completely portable, no runtime required. |
-| **Lua Scripting** | 9 hook stages plus persistent Lua storage for counters, cursors, and shared state. |
+| **Lua Scripting** | 10 hook stages plus persistent Lua storage for counters, cursors, and shared state. |
 | **Hot Reload** | Save a config or Lua script and SpyWeb respawns the job instantly. |
-| **Internal DB** | Built-in deduplication ensures you never see the same item twice. |
+| **Internal DB** | Choice of **KV** (redb, default) or **SQL** (SQLite, queryable) backends for storage and deduplication. |
 | **Dual Binary** | Choice of a headless CLI or a silent system tray app for background runs. |
 | **Concurrency** | Async-first engine; slow proxies or large jobs never block others. |
 | **Fault Tolerant** | Lua hook errors are caught and logged without stopping the job, preventing process crashes. |
@@ -53,27 +54,30 @@ keywords = ["rust", "linux", "open source"]
 | **Alerting** | Integrated desktop notifications and customizable webhooks for monitoring. |
 | **Lua Testing** | Co-located `test_*` functions run in fresh Lua VMs with isolated temporary databases. |
 | **Pipeline Telemetry** | Stage-by-stage tracking of execution time, memory usage, and active browsers. |
+| **Multi-Worker** | Per-job concurrency with URL queue mode and shared Lua state. |
+| **API Server** | Programmable Lua-defined REST endpoints at `/api/v/*` via `server/init.lua`. |
 
 ## Install & Run
-Download the latest ZIP from the [Beta Release](https://github.com/spyweb-app/spyweb/releases/tag/beta) and extract it.
+Download the latest archive from the [Beta Release](https://github.com/spyweb-app/spyweb/releases/tag/beta) and extract it. Two variants are available - **KV** (redb, default) and **SQL** (SQLite, queryable).
 
---- OR USE THE COMMAND BELOW ---
+Or download via terminal:
+ >To get the SQL version, append `-sql` to the download URL (e.g. `https://beta.spyweb.app/linux-sql`).
 
 ```bash
 # Linux
-curl -L -o spyweb.zip https://beta.spyweb.app/linux && tar -xf spyweb.zip && rm spyweb.zip
+curl -L -o spyweb.tar.gz https://beta.spyweb.app/linux && tar -xf spyweb.tar.gz && rm spyweb.tar.gz
 
 # macOS (Intel)
-curl -L -o spyweb.zip https://beta.spyweb.app/mac-intel && tar -xf spyweb.zip && rm spyweb.zip
+curl -L -o spyweb.tar.gz https://beta.spyweb.app/mac-intel && tar -xf spyweb.tar.gz && rm spyweb.tar.gz
 
 # macOS (Apple Silicon)
-curl -L -o spyweb.zip https://beta.spyweb.app/mac-arm && tar -xf spyweb.zip && rm spyweb.zip
+curl -L -o spyweb.tar.gz https://beta.spyweb.app/mac-arm && tar -xf spyweb.tar.gz && rm spyweb.tar.gz
 
 # Windows (CMD, Windows 10 or later)
-curl -L -o spyweb.zip https://beta.spyweb.app/windows && tar -xf spyweb.zip && del spyweb.zip
+curl -L -o spyweb.tar.gz https://beta.spyweb.app/windows && tar -xf spyweb.tar.gz && del spyweb.tar.gz
 
 # Windows (PowerShell)
-Invoke-WebRequest -Uri https://beta.spyweb.app/windows -OutFile spyweb.zip; Expand-Archive spyweb.zip; Remove-Item spyweb.zip
+Invoke-WebRequest -Uri https://beta.spyweb.app/windows -OutFile spyweb.tar.gz; tar -xf spyweb.tar.gz; Remove-Item spyweb.tar.gz
 
 ```
 
@@ -110,7 +114,7 @@ Right-click the tray icon to open the web UI or quit the app.
 ### Recommended Workflow
 A typical workflow is to use the **Terminal Version** for your initial setup, debugging Lua hooks, and verifying selectors. Once you are happy with the results, switch to the **Tray Version** to let it run silently in the background without cluttering your taskbar or terminal.
 
-Both binaries serve the admin dashboard at **http://127.0.0.1:7979** and will loop each enabled job at its configured interval. check <a href="docs/api.md">REST API</a> for more details
+Both binaries serve the admin dashboard at **http://127.0.0.1:7979** and will loop each enabled job at its configured interval. See the <a href="docs/api.md">REST API</a> docs for the built-in endpoints and the <a href="docs/server.md">Programmable API Server</a> for custom Lua-defined routes at `/api/v/*`.
 
 > **Tip:** You can customize the port with `--port` or the `SPYWEB_PORT` environment variable:
 ```bash
@@ -128,50 +132,22 @@ $env:SPYWEB_PORT=9000; .\spyweb.exe start
 ```
 
 ## CLI Tools
-The terminal binary includes helpful developer tools:
-
-### Utility Commands
 ```bash
-# Validate your jobs.toml without running the scraper
-./spyweb check
-
-# Check version and active Lua engine
-./spyweb version
-
-# Profile management — check, list, clear, or delete per-job browser profiles
-./spyweb profile check "My Job"  # Show profile status (all jobs if no name given)
-./spyweb profile list            # Alias for check
-./spyweb profile clear all       # Wipe browser caches for all jobs
-./spyweb profile clear "My Job"  # Clear a specific job's cache
-./spyweb profile delete all      # Delete profile directories entirely
-./spyweb profile delete "My Job" # Delete a specific job's profile directory
-```
-
-### Development & Testing
-```bash
-# Run a single job instantly (bypasses interval and runs the 7 core stages of the Lua pipeline up to before_store)
-# Saves '{job_location}/{job-id}-response.html' and '{job_location}/{job-id}-fields.json' for easy inspection!
-./spyweb debug "My Job Name"
+./spyweb check [config|update]       # Health check or targeted validation
+./spyweb version                     # Print version and active engine
+./spyweb types                       # Generate Lua LSP type definitions
+./spyweb update [--check|--force|--keep [suffix]|--overwrite]  # Self-update
+./spyweb profile <check|clear|delete> [all|<name>]  # Browser profiles
+./spyweb test [<job> [<pattern>]]    # Run Lua tests
+./spyweb debug "<job>"               # Run a single job with debug output
 ```
 
 <p align="center">
   <img alt="SpyWeb CLI Debug Telemetry" src="https://spyweb.app/images/spyweb-debug.png" width="100%" style="max-width: 800px;">
 </p>
 
-```bash
-# Run Lua unit tests for jobs
-./spyweb test                       # run all test 
-./spyweb test "My Job Name"         # run all test from specific job
-./spyweb test "My Job Name" price   # runa ll test from specific job which name containts price
-```
-
-<p align="center">
-  <img alt="SpyWeb Lua Unit Testing" src="https://spyweb.app/images/spyweb-test.png" width="100%" style="max-width: 800px;">
-</p>
-
-
 ## Lua API & Hooks
-Place a `hooks.lua` next to your config to customize the pipeline. SpyWeb provides persistent storage to track state (like page numbers or failure counts) across restarts.
+Place a `hooks.lua` next to your config to customize the pipeline. SpyWeb provides persistent storage to track state (like page numbers or failure counts) across restarts. For multi-worker jobs, define `on_finished()` to run logic after all workers complete each iteration - see the [lifecycle docs](docs/lifecycle.md) and [multi-worker docs](docs/multi-worker.md) for details.
 
 ## Testing
 SpyWeb supports co-located Lua tests for jobs. Define global functions that start with `test_` in `hooks.lua` or `tests.lua`, and run them with the `spyweb test` command.
@@ -179,6 +155,10 @@ SpyWeb supports co-located Lua tests for jobs. Define global functions that star
 Tests run in isolated Lua VMs with temporary databases, so global state and database changes do not leak between cases.
 
 See [docs/lua-testing.md](docs/lua-testing.md) for the full testing workflow, file layout, and examples.
+
+<p align="center">
+  <img alt="SpyWeb Lua Unit Testing" src="https://spyweb.app/images/spyweb-test.png" width="100%" style="max-width: 800px;">
+</p>
 
 ### Scoped vs Global Storage
 *   **`store_get/set/delete(key)`**: Scoped to the individual job. Safe for standard logic because hooks for a single job are sequential.
@@ -220,12 +200,11 @@ function override_fetch(request)
 end
 ```
  
- See the [CDP Documentation](docs/cdp.md) for the full API — browser management, page navigation, click/wait/inject, cookies, screenshots, and a complete hybrid-recovery pattern that falls back to a visual browser on bot detection.
+ See the [CDP Documentation](docs/cdp.md) for the full API - browser management, page navigation, click/wait/inject, cookies, screenshots, and a complete hybrid-recovery pattern that falls back to a visual browser on bot detection.
 
 ---
 
-## ⚖️ A Note on Scraping Morality
-Please be a good internet citizen:
+## ⚖️ Use Responsibly
 - **Do not hammer sites:** Set a reasonable, modest `interval` in your configurations. Scraping a page every 5 seconds is almost never necessary and costs the site owner money. Furthermore, aggressive abuse is the fastest way to get your connection throttled, flagged, or permanently IP banned.
 - **Respect resources:** If you are monitoring a small independent site, be extra gentle with your request frequency.
 - **Honor the web:** SpyWeb is a tool built for personal monitoring and automation; it is not a weapon for Denial of Service or aggressive data harvesting. Be modest when scraping.
