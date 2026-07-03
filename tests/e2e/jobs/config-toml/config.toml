@@ -1,0 +1,27 @@
+name = "config-toml"
+url = "http://127.0.0.1:1"
+selector = ".item"
+fields = ["title:.title", "desc:.desc"]
+interval = 999999
+
+debug = true
+headers = { "X-Test-Header" = "from-config" }
+keywords = ["target"]
+search_fields = ["title", "desc"]
+hash_fields = ["title"]
+
+[webhook]
+enabled = false
+url = "http://127.0.0.1:1/webhook"
+headers = { "X-Webhook" = "custom" }
+
+[notification]
+enabled = true
+timeout = 3000
+title = "Config Test: {job_name}"
+body = "{item_count} new items"
+
+[proxy]
+enabled = true
+rotate = "RoundRobin"
+urls = ["http://127.0.0.1:19999"]

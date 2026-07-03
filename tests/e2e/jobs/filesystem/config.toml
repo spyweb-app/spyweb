@@ -1,0 +1,6 @@
+name = "filesystem"
+url = "https://example.com"
+selector = ".item"
+fields = ["title:h2"]
+enabled = true
+interval = 999999

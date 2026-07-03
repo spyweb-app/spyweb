@@ -1,0 +1,6 @@
+name = "override-fetch-retry"
+url = "http://127.0.0.1:1/"
+selector = ".item"
+fields = ["title:h2"]
+enabled = true
+interval = 999999
