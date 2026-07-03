@@ -58,26 +58,26 @@ keywords = ["rust", "linux", "open source"]
 | **API Server** | Programmable Lua-defined REST endpoints at `/api/v/*` via `server/init.lua`. |
 
 ## Install & Run
-Download the latest archive from the [Beta Release](https://github.com/spyweb-app/spyweb/releases/tag/beta) and extract it. Two variants are available - **KV** (redb, default) and **SQL** (SQLite, queryable).
+Download the latest archive from the [Release Page](https://github.com/spyweb-app/spyweb/releases/tag/latest) and extract it. Two variants are available - **KV** (redb, default) and **SQL** (SQLite, queryable).
 
 Or download via terminal:
- >To get the SQL version, append `-sql` to the download URL (e.g. `https://beta.spyweb.app/linux-sql`).
+ >To get the SQL version, append `-sql` to the download URL (e.g. `https://dl.spyweb.app/linux-sql`).
 
 ```bash
 # Linux
-curl -L -o spyweb.tar.gz https://beta.spyweb.app/linux && tar -xf spyweb.tar.gz && rm spyweb.tar.gz
+curl -L -o spyweb.tar.gz https://dl.spyweb.app/linux && tar -xf spyweb.tar.gz && rm spyweb.tar.gz
 
 # macOS (Intel)
-curl -L -o spyweb.tar.gz https://beta.spyweb.app/mac-intel && tar -xf spyweb.tar.gz && rm spyweb.tar.gz
+curl -L -o spyweb.tar.gz https://dl.spyweb.app/mac-intel && tar -xf spyweb.tar.gz && rm spyweb.tar.gz
 
 # macOS (Apple Silicon)
-curl -L -o spyweb.tar.gz https://beta.spyweb.app/mac-arm && tar -xf spyweb.tar.gz && rm spyweb.tar.gz
+curl -L -o spyweb.tar.gz https://dl.spyweb.app/mac-arm && tar -xf spyweb.tar.gz && rm spyweb.tar.gz
 
 # Windows (CMD, Windows 10 or later)
-curl -L -o spyweb.tar.gz https://beta.spyweb.app/windows && tar -xf spyweb.tar.gz && del spyweb.tar.gz
+curl -L -o spyweb.tar.gz https://dl.spyweb.app/windows && tar -xf spyweb.tar.gz && del spyweb.tar.gz
 
 # Windows (PowerShell)
-Invoke-WebRequest -Uri https://beta.spyweb.app/windows -OutFile spyweb.tar.gz; tar -xf spyweb.tar.gz; Remove-Item spyweb.tar.gz
+Invoke-WebRequest -Uri https://dl.spyweb.app/windows -OutFile spyweb.tar.gz; tar -xf spyweb.tar.gz; Remove-Item spyweb.tar.gz
 
 ```
 
