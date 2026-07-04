@@ -6,14 +6,17 @@
 --=============================================================================
 
 ---@class spyweb_context
----@field body string|nil    Raw request body (nil for GET/HEAD)
----@field method string      HTTP method ("GET", "POST", etc.)
----@field path string        Full request path (e.g. "/api/v/users/123")
----@field path_args string[]  Trailing URL segments (e.g. {"123"})
----@field query table<string,string>  URL query parameters
----@field headers table<string,string>  Request headers (lowercase keys)
----@field client_ip string   Client IP address
----@field shared table|nil   Job-scoped shared state (pipeline hooks only)
+---@field shared table|nil              Per-cycle shared state (pipeline hooks)
+---@field worker_id integer|nil         1-based worker ID (pipeline hooks)
+---@field last_fetch table|nil          Fetch result envelope (pipeline hooks, after fetch)
+---@field telemetry table|nil           Pipeline telemetry (pipeline hooks)
+---@field body string|nil               Raw request body (API server)
+---@field method string|nil             HTTP method (API server)
+---@field path string|nil               Full request path (API server)
+---@field path_args string[]|nil        Trailing URL segments (API server)
+---@field query table<string,string>|nil  URL query parameters (API server)
+---@field headers table<string,string>|nil  Request headers (API server)
+---@field client_ip string|nil          Client IP address (API server)
 
 --=============================================================================
 -- HTTP response (returned by http_get, http_post, etc.)
@@ -32,6 +35,16 @@
 ---@field status?  integer                         HTTP status (100-599, default 200)
 ---@field body?    string|table|number|boolean|nil  Response body
 ---@field headers? table<string,string>             Custom response headers
+
+--=============================================================================
+-- Fetch result envelope (passed to after_fetch)
+--=============================================================================
+
+---@class spyweb_fetch_result
+---@field ok boolean                        Whether the request succeeded
+---@field request { url: string, method?: string, headers?: table<string,string>, body?: string, proxy?: string }
+---@field response spyweb_http_response|nil  The HTTP response (nil on error)
+---@field error { message: string, kind: string }|nil  Error info (nil on success)
 
 --=============================================================================
 -- Items (returned by extract stages)
@@ -123,8 +136,9 @@ function require(name) end
 function json_encode(value) end
 
 ---Decode a JSON string to a Lua value. 10MB input limit.
+---Returns (value, nil) on success, (nil, error) on failure.
 ---@param string string
----@return any
+---@return any, string?
 function json_decode(string) end
 
 ---Read an environment variable. Automatically prefixed with SPYWEB_ unless
@@ -228,8 +242,17 @@ function db_exec(sql, params) end
 -- Testing
 --=============================================================================
 
----@type { assert_eq: fun(left: any, right: any, msg?: string), assert_ne: fun(left: any, right: any, msg?: string) }
-spyweb = {}
+---Assert that two values are equal.
+---@param left any
+---@param right any
+---@param msg? string
+function spyweb.assert_eq(left, right, msg) end
+
+---Assert that two values are not equal.
+---@param left any
+---@param right any
+---@param msg? string
+function spyweb.assert_ne(left, right, msg) end
 
 --=============================================================================
 -- CDP (Chrome DevTools Protocol) - browser automation
@@ -315,12 +338,12 @@ function before_fetch(request, ctx) end
 ---@return spyweb_http_response?
 function override_fetch(request, ctx) end
 
----Post-process the response from the fetch stage. Return nil to skip the
----rest of the pipeline.
----@param response spyweb_http_response
+---Post-process the fetch result. Return nil to skip the rest of the
+---pipeline.
+---@param fetch_result spyweb_fetch_result
 ---@param ctx spyweb_context
 ---@return spyweb_http_response?
-function after_fetch(response, ctx) end
+function after_fetch(fetch_result, ctx) end
 
 ---Completely replace the extraction stage. Return a table of items, or nil
 ---for empty items (after_extract still runs with an empty list).
