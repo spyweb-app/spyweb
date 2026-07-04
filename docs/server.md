@@ -229,7 +229,7 @@ The server VM has access to the same globals as scraper hooks:
 | Function | Description |
 |----------|-------------|
 | `json_encode(value)` | Encode Lua value to JSON string |
-| `json_decode(string)` | Decode JSON string to Lua value (10MB input limit) |
+| `json_decode(string)` | Decode JSON string to Lua value, returns (value, err) (10MB input limit) |
 | `env_get(key)` | Read an environment variable |
 | `defer(fn)` | Register an async cleanup function (runs after response) |
 | `sleep(ms)` | Sleep for N milliseconds |
@@ -295,13 +295,13 @@ project/
 
 ### Robust JSON API
 
-It is best practice to use `pcall` when decoding the request body to avoid 500 errors on malformed JSON.
+`json_decode` returns `(value, nil)` on success and `(nil, error)` on failure, so you can handle malformed JSON gracefully without `pcall`.
 
 ```lua
 function post:items()
-    local ok, data = pcall(json_decode, self.body or "")
-    if not ok or type(data) ~= "table" then
-        return { status = 400, body = { error = "Invalid JSON payload" } }
+    local data, err = json_decode(self.body or "")
+    if not data then
+        return { status = 400, body = { error = "Invalid JSON payload: " .. err } }
     end
 
     if not data.name then

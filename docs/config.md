@@ -220,4 +220,4 @@ All globals listed below are available inside any hook function.
 | `copy(table)` | ❌ | Shallow copy of a Lua table |
 | `deep_copy(table)` | ❌ | Deep copy of a Lua table |
 
-For usage examples and detailed hook stage documentation, see the [Master Guide](https://docs.spyweb.app/).
+For usage examples and detailed hook stage documentation, see the <a href="https://docs.spyweb.app/" target="_blank">Master Guide</a>.

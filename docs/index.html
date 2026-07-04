@@ -1287,10 +1287,13 @@ local body = json_encode(payload)
 local resp = http_post("https://api.rendering-service.com/render", body, {["Content-Type"]="application/json"})</code></pre>
 
                             <h3 class="title is-4" id="json_decode"><code>json_decode(string)</code> <span class="tag is-small is-dark">sync</span></h3>
-                            <p>Parses a JSON string into a native Lua table. Returns <code>nil</code> and logs an
-                                error
-                                if the JSON is malformed.</p>
-                            <pre><code class="language-lua">local data = json_decode('{"status": "ok", "count": 42}')
+                            <p>Parses a JSON string into a native Lua value. Returns <code>(value, nil)</code>
+                                on success or <code>(nil, error)</code> on malformed input.</p>
+                            <pre><code class="language-lua">local data, err = json_decode('{"status": "ok", "count": 42}')
+if not data then
+    log("decode failed: " .. err)
+    return
+end
 log("Status is: " .. data.status)</code></pre>
 
                             <h3 class="title is-4" id="defer"><code>defer(fn)</code> <span class="tag is-small is-dark">sync</span></h3>

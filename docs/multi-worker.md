@@ -8,10 +8,12 @@ Think of it like having multiple scraper bots working for the same job at the sa
 
 ## When to Use Multi-Worker
 
+All URLs in a multi-worker job **must use the same pipeline and extraction logic**. If URLs need different selectors, fields, or hook behavior, use separate jobs instead. (Exception: `override_extract` can handle different structures programmatically.)
+
 Multi-worker mode is designed for **I/O-bound concurrency**. Use it when:
 
+- **Pipeline Consolidation:** Many URLs with identical extraction logic (e.g., 100 product categories with the same selector and fields), processed in a single job instead of 100 separate ones.
 - **Shared State Coordination:** All workers share the same Lua VM. Use this to maintain in-memory caches, global rate-limiters, or IP rotation state without the overhead of database roundtrips.
-- **Pipeline Consolidation:** If you have many different URLs that require identical extraction logic (e.g., 100 different product categories), multi-worker allows you to process them in a single job with one set of hooks and a unified database, rather than managing 100 separate jobs.
 - **Parallel Queue Processing:** You have a large list of `urls` and want to maximize throughput by processing multiple targets in parallel.
 - **I/O Wait Mitigation:** Your targets or proxies have high latency. Workers ensure the engine stays productive even when several tasks are blocked waiting for network handshakes or slow server responses.
 - **High-Frequency Monitoring:** For volatile data (e.g., restock alerts or price changes), multiple workers reduce the time gap between checks, ensuring one worker is fetching while another is processing.

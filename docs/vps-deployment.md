@@ -1,6 +1,6 @@
 # VPS Setup & Deployment Guide
 
-This guide covers everything you need to go from a fresh Linux VPS to a production-ready SpyWeb monitoring station.
+This guide covers everything you need to go from a fresh Linux VPS to a working SpyWeb monitoring station.
 
 ---
 
@@ -90,7 +90,32 @@ sudo journalctl -u spyweb -f
 
 ---
 
-## 3. Remote Editor Setup (Optional)
+## 3. Token Validation (Recommended)
+
+Protect your API endpoints with a secret key. When set, all requests to the built-in API server must include the key in the `X-SpyWeb-Key` header.
+
+```bash
+# Set in systemd service file
+Environment=SPYWEB_API_KEY=your-secret-key-here
+```
+
+Or export directly:
+
+```bash
+export SPYWEB_API_KEY=your-secret-key-here
+```
+
+Test with curl:
+
+```bash
+curl -H "X-SpyWeb-Key: your-secret-key-here" http://localhost:7979/api/jobs
+```
+
+Without the correct header, requests return `401 Unauthorized`.
+
+---
+
+## 4. Remote Editor Setup (Optional)
 
 For setups with complex Lua hooks and frequent configuration edits, configuring a remote editor with Language Server Protocol (LSP) integration is highly recommended. It provides an IDE-like experience directly on the VPS, ensuring that syntax errors in your scripts or TOML configs are caught immediately.
 
@@ -157,7 +182,7 @@ Because SpyWeb supports hot-reloading, saving any configuration or Lua script wi
 
 ---
 
-## 4. Accessing the UI (Securely)
+## 5. Accessing the UI (Securely)
 By default, SpyWeb serves the admin dashboard on port **7979**. While you can open this port globally, we highly recommend one of the following secure access methods:
 
 ### Option 1: SSH Tunnel (Zero Public Exposure)
@@ -170,15 +195,15 @@ ssh -L 7979:localhost:7979 user@your-vps-ip
 
 Then, simply open `http://localhost:7979` in your local browser. The data travels through SSH, and the port remains closed to the outside world.
 
-### Option 2: Nginx Reverse Proxy + Basic Auth
-Use this if you want a custom domain and shared access. It adds a password prompt before anyone can see the dashboard.
+### Option 2: Nginx Reverse Proxy
+
+Use this if you want a custom domain and shared access.
+
+First, [set up SPYWEB_API_KEY](#3-token-validation-recommended) as your primary auth layer. All API requests will require the `X-SpyWeb-Key` header.
 
 ```bash
-# Install Nginx and password tools
-sudo apt install nginx apache2-utils
-
-# Create a password for your user
-sudo htpasswd -c /etc/nginx/.htpasswd yourusername
+# Install Nginx
+sudo apt install nginx
 ```
 
 Then create an Nginx config (e.g., `/etc/nginx/sites-available/spyweb`):
@@ -189,8 +214,6 @@ server {
     server_name your-domain.com;
 
     location / {
-        auth_basic "SpyWeb Admin";
-        auth_basic_user_file /etc/nginx/.htpasswd;
         proxy_pass http://127.0.0.1:7979;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -198,7 +221,54 @@ server {
 }
 ```
 
-### Option 3: UFW Whitelist (Your IP Only)
+**Optional: Add Basic Auth** for an extra password prompt before reaching the dashboard:
+
+```bash
+sudo apt install apache2-utils
+sudo htpasswd -c /etc/nginx/.htpasswd yourusername
+```
+
+Add `auth_basic` lines to the `location /` block:
+
+```nginx
+    location / {
+        auth_basic "SpyWeb Admin";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        proxy_pass http://127.0.0.1:7979;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+```
+
+### Option 3: Caddy (Automatic HTTPS)
+
+Zero-config HTTPS via Let's Encrypt. Caddy automatically provisions and renews certificates.
+
+```bash
+# Install Caddy
+sudo apt install caddy
+```
+
+Caddyfile (`/etc/caddy/Caddyfile`):
+
+```caddy
+your-domain.com {
+    reverse_proxy localhost:7979
+}
+```
+
+**Optional: Add Basic Auth** by adding a `basicauth` directive:
+
+```caddy
+your-domain.com {
+    basicauth {
+        yourusername $2a$14$hash  # generate with: caddy hash-password
+    }
+    reverse_proxy localhost:7979
+}
+```
+
+### Option 4: UFW Whitelist (Your IP Only)
 If you have a static IP at home/office, you can tell the VPS firewall to only talk to you.
 
 ```bash

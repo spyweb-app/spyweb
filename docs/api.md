@@ -39,20 +39,16 @@ When a job finds new items, it can POST a JSON payload to a configured webhook U
   "item_count": 2,
   "items": [
     {
-      "fields": {
-        "title": "Item A",
-        "price": "$49.99",
-        "link": "https://example.com/a"
-      },
-      "matches": ["sale"]
+      "title": "Item A",
+      "price": "$49.99",
+      "link": "https://example.com/a",
+      "keywords": ["sale"]
     },
     {
-      "fields": {
-        "title": "Item B",
-        "price": "$20.00",
-        "link": "https://example.com/b"
-      },
-      "matches": ["deal"]
+      "title": "Item B",
+      "price": "$20.00",
+      "link": "https://example.com/b",
+      "keywords": ["deal"]
     }
   ]
 }

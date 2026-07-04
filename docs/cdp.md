@@ -6,7 +6,7 @@
 
 If you need JS rendering in a hook (to scrape a React site, bypass a Cloudflare challenge, click buttons, wait for DOM elements), you use the `cdp` module. That's it.
 
-For detailed documentation with examples, see [SpyWeb CDP Docs](https://docs.spyweb.app/cdp.html).
+For detailed documentation with examples, see <a href="https://docs.spyweb.app/cdp.html" target="_blank">SpyWeb CDP Docs</a>.
 
 ### How It Works
 
@@ -163,7 +163,7 @@ While standard Chromium-based browsers are the most compatible, they are resourc
 
 For a lighter approach, consider these specialized alternatives designed for scraping and automation. They offer a much smaller footprint while speaking the same CDP protocol.
 
-### [Lightpanda](https://lightpanda.io)
+### <a href="https://lightpanda.io" target="_blank">Lightpanda</a>
 A high-performance, lightweight browser written in Zig, designed for speed and low resource usage. **Note:** Lightpanda runs as a persistent server; use `cdp.connect()` rather than `cdp.launch()`.
 
 1. **Launch the server**:
@@ -175,7 +175,7 @@ A high-performance, lightweight browser written in Zig, designed for speed and l
    local browser = cdp.connect("ws://127.0.0.1:9222")
    ```
 
-### [Obscura](https://github.com/h4ckf0r0day/obscura)
+### <a href="https://github.com/h4ckf0r0day/obscura" target="_blank">Obscura</a>
 A headless browser specifically built for AI agents and advanced anti-detection.
 
 1. **Launch the server**:
@@ -252,7 +252,7 @@ Injected via `cdp.lua` to provide a higher-level CDP abstraction.
 - `page:type(selector, text, [opts])`: (Async) `opts.real = true` uses hardware keyboard events.
 - `page:content()`: (Async) Returns the full rendered HTML.
 - `page:screenshot(path, [opts])`: (Async) Saves a screenshot. Supports `{format = "png"|"jpeg", quality = 1..100, full_page = true, fullPage = true, fromSurface = true}`. Defaults to PNG. **Subject to 10MB response limit.**
-- `page:block_resources(types)`: (Async) e.g., `{"image", "font", "media"}`.
+- `page:block_resources(types_or_patterns)`: (Async) e.g., `{"image", "font", "media"}`. Also accepts raw glob patterns (`"*.css"`, `"*.woff2"`) and full URL patterns (`"https://example.com/tracker.js"`). Returns the resolved pattern list.
 - `page:wait_for_url(pattern, timeout_ms)`: (Async) Polls `location.href` until it matches the string `pattern`. Returns the URL or `nil, error`.
 - `page:wait_for_response([predicate], [timeout_ms])`: (Async) Waits for `Network.responseReceived`. Optional `predicate` function receives params, returns `true` when match found.
 - `page:scroll([opts])`: (Async) Scrolls the page. `opts` can include `max_scrolls` (default 20), `step`, `delay_ms` (default 250), `until_selector`, `until_bottom` (default `true`).
@@ -277,4 +277,4 @@ For sites with aggressive bot detection (Cloudflare, CAPTCHAs, etc.), you can im
 5.  **Intervention**: Wait in a `while` loop, polling for a "success" selector that appears after the human solves the puzzle.
 6.  **Handback**: Once solved, capture the HTML, close the visual browser, and return to headless mode.
 
-See [examples/hybrid-recovery/hooks.lua](../examples/hybrid-recovery/hooks.lua) for a complete, production-ready implementation of this pattern.
+See [examples/hybrid-recovery/hooks.lua](../examples/hybrid-recovery/hooks.lua) for a complete implementation of this pattern.
