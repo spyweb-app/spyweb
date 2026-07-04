@@ -37,17 +37,18 @@ pub async fn trigger_webhook(
 pub fn build_default_payload(job_name: &str, items: &[ExtractedItem]) -> serde_json::Value {
     let items_json: Vec<serde_json::Value> = items
         .iter()
-        .take(50)
         .map(|item| {
             let mut obj = serde_json::Map::new();
             for (key, value) in &item.fields {
                 obj.insert(key.clone(), serde_json::Value::String(value.clone()));
             }
             if !item.matches.is_empty() {
-                obj.insert(
-                    "_keywords".to_string(),
-                    serde_json::Value::String(item.matches.join(", ")),
-                );
+                let keywords: Vec<serde_json::Value> = item
+                    .matches
+                    .iter()
+                    .map(|k| serde_json::Value::String(k.clone()))
+                    .collect();
+                obj.insert("keywords".to_string(), serde_json::Value::Array(keywords));
             }
             serde_json::Value::Object(obj)
         })
