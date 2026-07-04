@@ -993,10 +993,15 @@ fn test_json_encode_decode_roundtrip() {
     assert_eq!(nested.get::<String>(2).unwrap(), "two");
     assert_eq!(nested.get::<bool>(3).unwrap(), true);
 
-    let err = lua
+    let (val, err): (mlua::Value, mlua::Value) = lua
         .load(r#"return json_decode("not json")"#)
-        .eval::<mlua::Value>();
-    assert!(err.is_err(), "invalid JSON should error");
+        .eval()
+        .unwrap();
+    assert!(val.is_nil(), "first return should be nil on error");
+    assert!(
+        err.is_string(),
+        "second return should be error string on error"
+    );
 }
 
 #[test]
