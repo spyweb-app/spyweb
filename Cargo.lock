@@ -3559,7 +3559,7 @@ dependencies = [
 
 [[package]]
 name = "spyweb"
-version = "1.4.0-beta"
+version = "1.5.1"
 dependencies = [
  "anyhow",
  "async-channel",

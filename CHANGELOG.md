@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-07-04
+
+### Changed
+- **Webhook:** Default payload format now uses flat item objects with `keywords` array instead of nested `fields`/`matches`. removed 50-item cap has been on payload.
+- **Lua API:** `json_decode` now returns `(value, nil)` on success and `(nil, error)` on failure instead of throwing. 
+
 ## [1.5.0-beta] - 2026-07-01
 
 ### Added
