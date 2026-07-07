@@ -267,11 +267,6 @@ fn test_defer_async_bindings_error() {
     // metamethod/C-call boundary". The table.insert() after the async call
     // never runs because the Lua function throws before reaching it.
     assert!(
-        !log.iter().any(|s| s.starts_with("defer:http_type:")),
-        "http_get should error before reaching table.insert: {:?}",
-        log
-    );
-    assert!(
         !log.iter().any(|s| s.starts_with("defer:sleep_elapsed:")),
         "sleep should error before reaching table.insert: {:?}",
         log

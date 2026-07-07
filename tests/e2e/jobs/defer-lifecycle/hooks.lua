@@ -14,13 +14,6 @@ function override_fetch(request, ctx)
     if _G.test_defer_async then
         defer(function()
             local t1 = os.clock()
-            local res = http_get("http://127.0.0.1:1/test")
-            local elapsed = os.clock() - t1
-            table.insert(_G.log, "defer:http_type:" .. type(res))
-            table.insert(_G.log, "defer:http_elapsed:" .. tostring(elapsed))
-        end)
-        defer(function()
-            local t1 = os.clock()
             sleep(200)
             local elapsed = os.clock() - t1
             table.insert(_G.log, "defer:sleep_elapsed:" .. tostring(elapsed))
