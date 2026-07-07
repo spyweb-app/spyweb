@@ -471,7 +471,7 @@ fn test_lua_testing_discovery() {
     let env = TestEnv::new("lua-testing", DbVariant::Kv);
     let job_dir = env.jobs_dir.join("lua-testing");
 
-    let tests = discover_tests(&job_dir, "lua-testing").unwrap();
+    let tests = smol::block_on(discover_tests(&job_dir, "lua-testing")).unwrap();
 
     assert!(tests.contains(&"test_discovered_from_tests_lua".to_string()));
     assert!(tests.contains(&"test_discovered_from_hooks_lua".to_string()));

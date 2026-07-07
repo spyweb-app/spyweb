@@ -61,7 +61,7 @@ async fn run_tests_async(
             None => continue,
         };
 
-        let tests = discover_tests(job_dir, &job.config.name)?;
+        let tests = discover_tests(job_dir, &job.config.name).await?;
         if tests.is_empty() {
             continue;
         }
@@ -91,7 +91,7 @@ async fn run_tests_async(
     }
 
     if has_server_tests {
-        let server_tests = match discover_tests(server_dir, "__server") {
+        let server_tests = match discover_tests(server_dir, "__server").await {
             Ok(tests) => tests,
             Err(e) => {
                 eprintln!("  {} server/tests.lua: {:#}", crate::color::c_err("✗"), e);
@@ -174,7 +174,7 @@ fn print_failure_block(test_name: &str, err: &anyhow::Error) {
     println!("{:?}", err);
 }
 
-pub fn discover_tests(job_dir: &Path, job_name: &str) -> Result<Vec<String>> {
+pub async fn discover_tests(job_dir: &Path, job_name: &str) -> Result<Vec<String>> {
     let mut tests = Vec::new();
 
     // We need a temporary VM just to discover tests
@@ -184,7 +184,7 @@ pub fn discover_tests(job_dir: &Path, job_name: &str) -> Result<Vec<String>> {
     let uses_cdp = job_source_uses_cdp(job_dir)?;
     let lua = engine::create_engine(Some(job_dir.to_path_buf()), db, job_name, uses_cdp)?;
 
-    load_test_sources(&lua, job_dir)?;
+    load_test_sources(&lua, job_dir).await?;
 
     let globals = lua.globals();
     for pair in globals.pairs::<String, mlua::Value>() {
@@ -210,7 +210,7 @@ pub async fn run_single_test(job_dir: &Path, job_name: &str, test_name: &str) ->
     let uses_cdp = job_source_uses_cdp(job_dir)?;
     let lua = engine::create_engine(Some(job_dir.to_path_buf()), db, job_name, uses_cdp)?;
 
-    load_test_sources(&lua, job_dir)?;
+    load_test_sources(&lua, job_dir).await?;
 
     let hooks = JobHooks {
         lua: Mutex::new(lua),
@@ -287,10 +287,10 @@ async fn run_single_server_test(dir: &Path, test_name: &str, port: u16, db: Arc<
         for m in &["get", "post", "put", "patch", "delete", "all"] {
             let _ = globals.set(*m, lua.create_table()?);
         }
-        load_lua_file(&lua, &init_path)?;
+        load_lua_file(&lua, &init_path).await?;
     }
 
-    load_lua_file(&lua, &dir.join("tests.lua"))?;
+    load_lua_file(&lua, &dir.join("tests.lua")).await?;
 
     let test_fn: Function = lua.globals().get(test_name)?;
     test_fn
@@ -301,14 +301,14 @@ async fn run_single_server_test(dir: &Path, test_name: &str, port: u16, db: Arc<
     Ok(())
 }
 
-fn load_test_sources(lua: &mlua::Lua, job_dir: &Path) -> Result<()> {
+async fn load_test_sources(lua: &mlua::Lua, job_dir: &Path) -> Result<()> {
     for file in [
         job_dir.join("hooks.lua"),
         job_dir.join("defer.lua"),
         job_dir.join("tests.lua"),
     ] {
         if file.exists() {
-            load_lua_file(lua, &file)?;
+            load_lua_file(lua, &file).await?;
         }
     }
 
@@ -331,12 +331,13 @@ fn job_source_uses_cdp(job_dir: &Path) -> Result<bool> {
     Ok(source_uses_cdp(&source))
 }
 
-fn load_lua_file(lua: &mlua::Lua, file: &Path) -> Result<()> {
+async fn load_lua_file(lua: &mlua::Lua, file: &Path) -> Result<()> {
     let source = std::fs::read_to_string(file)
         .with_context(|| format!("Failed to read {}", file.display()))?;
     lua.load(&source)
         .set_name(file.to_string_lossy().as_ref())
-        .exec()
+        .exec_async()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to load {}: {}", file.display(), e))?;
     Ok(())
 }
@@ -389,7 +390,7 @@ end
 "#,
         );
 
-        let tests = discover_tests(tempdir.path(), "demo_job").unwrap();
+        let tests = smol::block_on(discover_tests(tempdir.path(), "demo_job")).unwrap();
         assert_eq!(
             tests,
             vec!["test_alpha".to_string(), "test_beta".to_string()]

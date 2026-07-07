@@ -1,4 +1,5 @@
 _G.log = {}
+sleep(5)
 
 function before_fetch(request, ctx)
     -- require from job directory

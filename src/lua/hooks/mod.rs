@@ -102,14 +102,22 @@ impl JobHooks {
 
         let lua = engine::create_engine(job_dir, db, job_name, uses_cdp)?;
         let chunk_name = path.to_string_lossy();
-        lua.load(&source).set_name(chunk_name.as_ref()).exec()?;
+        smol::block_on(async {
+            lua.load(&source)
+                .set_name(chunk_name.as_ref())
+                .exec_async()
+                .await
+        })?;
 
         let has_defer_lua = defer_source.is_some();
         if let Some(defer_source) = defer_source {
-            lua.load(&defer_source)
-                .set_name("defer.lua")
-                .exec()
-                .map_err(|e| anyhow::anyhow!("defer.lua load error for job '{job_name}': {e}"))?;
+            smol::block_on(async {
+                lua.load(&defer_source)
+                    .set_name("defer.lua")
+                    .exec_async()
+                    .await
+            })
+            .map_err(|e| anyhow::anyhow!("defer.lua load error for job '{job_name}': {e}"))?;
         }
 
         let has = |name: &str| -> bool {

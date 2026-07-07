@@ -97,7 +97,12 @@ impl ApiServer {
             #[cfg(feature = "luau")]
             setup_timeout(&lua);
 
-            if let Err(e) = lua.load(&init_source).set_name("server/init.lua").exec() {
+            if let Err(e) = lua
+                .load(&init_source)
+                .set_name("server/init.lua")
+                .exec_async()
+                .await
+            {
                 return handle_error(&name, e, error_log_path).await;
             }
 
