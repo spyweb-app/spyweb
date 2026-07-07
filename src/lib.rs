@@ -5,5 +5,6 @@ pub mod config;
 pub mod entry;
 pub mod lua;
 pub mod macros;
+pub mod platform;
 pub mod scraper;
 pub mod services;
