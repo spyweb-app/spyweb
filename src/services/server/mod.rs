@@ -126,7 +126,7 @@ fn handle_static_request(db: &Db, request: &types::Request) -> types::Response {
         return types::Response::empty_404();
     }
 
-    let file_path = std::path::Path::new("ui").join(path);
+    let file_path = std::path::Path::new("ui").join(&path);
     match std::fs::read(&file_path) {
         Ok(bytes) => {
             let ext = file_path
@@ -141,7 +141,16 @@ fn handle_static_request(db: &Db, request: &types::Request) -> types::Response {
                 body: types::ResponseBody::Bytes(bytes),
             }
         }
-        Err(_) => types::Response::empty_404(),
+        Err(_) => {
+            if path.contains('.') {
+                types::Response::empty_404()
+            } else {
+                match std::fs::read_to_string(std::path::Path::new("ui/index.html")) {
+                    Ok(content) => types::Response::html(content),
+                    Err(_) => types::Response::empty_404(),
+                }
+            }
+        }
     }
 }
 
