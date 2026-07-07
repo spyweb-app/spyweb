@@ -9,9 +9,11 @@ use tempfile::NamedTempFile;
 
 use crate::config::loader;
 use crate::config::types::{Job, Jobs};
+use crate::lua::server::ApiServer;
 use crate::lua::{JobHooks, engine, hooks::source_uses_cdp};
 use crate::services::db::Db;
 use crate::services::profiles;
+use crate::services::server::types;
 
 pub fn run_tests(job_name_filter: Option<String>, pattern_filter: Option<String>) -> Result<()> {
     smol::block_on(run_tests_async(job_name_filter, pattern_filter))
@@ -36,7 +38,11 @@ async fn run_tests_async(
         jobs.list.iter().collect()
     };
 
-    if filtered_jobs.is_empty() {
+    let server_dir = std::path::Path::new("server");
+    let has_server_tests =
+        server_dir.join("init.lua").exists() && server_dir.join("tests.lua").exists();
+
+    if filtered_jobs.is_empty() && !has_server_tests {
         if let Some(name) = job_name_filter {
             println!("No jobs found matching '{}'", crate::color::c_err(&name));
         } else {
@@ -79,6 +85,46 @@ async fn run_tests_async(
                     println!(" ... {}", crate::color::c_err("FAILED"));
                     print_failure_block(&test_name, &e);
                     total_failed += 1;
+                }
+            }
+        }
+    }
+
+    if has_server_tests {
+        let server_tests = match discover_tests(server_dir, "__server") {
+            Ok(tests) => tests,
+            Err(e) => {
+                eprintln!("  {} server/tests.lua: {:#}", crate::color::c_err("✗"), e);
+                Vec::new()
+            }
+        };
+        let filtered_tests = filter_tests_by_pattern(server_tests, pattern_filter.as_deref());
+
+        if !filtered_tests.is_empty() {
+            let server_db_file = NamedTempFile::new()?;
+            let server_db_path = server_db_file
+                .path()
+                .to_str()
+                .context("Failed to convert temp db path to string")?
+                .to_string();
+            let server_db = Arc::new(Db::open(&server_db_path)?);
+            let port = start_server_for_tests(server_db.clone())?;
+
+            print_test_header("server", filtered_tests.len());
+
+            for test_name in filtered_tests {
+                print!("  test {:<32}", crate::color::c_info(&test_name));
+                match run_single_server_test(server_dir, &test_name, port, server_db.clone()).await
+                {
+                    Ok(_) => {
+                        println!(" ... {}", crate::color::c_ok("OK"));
+                        total_passed += 1;
+                    }
+                    Err(e) => {
+                        println!(" ... {}", crate::color::c_err("FAILED"));
+                        print_failure_block(&test_name, &e);
+                        total_failed += 1;
+                    }
                 }
             }
         }
@@ -197,6 +243,64 @@ pub async fn run_single_test(job_dir: &Path, job_name: &str, test_name: &str) ->
     Ok(())
 }
 
+fn start_server_for_tests(db: Arc<Db>) -> Result<u16> {
+    let init_source =
+        std::fs::read_to_string("server/init.lua").context("Failed to read server/init.lua")?;
+    let api_server = Arc::new(ApiServer::new(
+        db,
+        init_source,
+        std::path::PathBuf::from("/dev/null"),
+    ));
+
+    let server = rouille::Server::new("127.0.0.1:0", move |rouille_req| {
+        let req = types::from_rouille_request(rouille_req);
+        if req.url.starts_with("/api/v/") {
+            let path = req.url.strip_prefix("/api/v/").unwrap_or("");
+            let mut segments: Vec<String> = path
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+            if !segments.is_empty() {
+                let name = segments.remove(0);
+                let resp = api_server.handle(req.method.as_str(), &name, segments, &req);
+                return types::to_rouille_response(resp);
+            }
+        }
+        rouille::Response::text("Not Found").with_status_code(404)
+    })
+    .map_err(|e| anyhow::anyhow!("Failed to start server for tests: {}", e))?;
+
+    let port = server.server_addr().port();
+    std::thread::spawn(move || server.run());
+    Ok(port)
+}
+
+async fn run_single_server_test(dir: &Path, test_name: &str, port: u16, db: Arc<Db>) -> Result<()> {
+    let lua = engine::create_engine(Some(dir.to_path_buf()), db, "__server", false)?;
+
+    lua.globals().set("SERVER_PORT", port as i64)?;
+
+    let init_path = dir.join("init.lua");
+    if init_path.exists() {
+        let globals = lua.globals();
+        for m in &["get", "post", "put", "patch", "delete", "all"] {
+            let _ = globals.set(*m, lua.create_table()?);
+        }
+        load_lua_file(&lua, &init_path)?;
+    }
+
+    load_lua_file(&lua, &dir.join("tests.lua"))?;
+
+    let test_fn: Function = lua.globals().get(test_name)?;
+    test_fn
+        .call_async::<()>(())
+        .await
+        .with_context(|| format!("Test {} failed", crate::color::c_err(test_name)))?;
+
+    Ok(())
+}
+
 fn load_test_sources(lua: &mlua::Lua, job_dir: &Path) -> Result<()> {
     for file in [
         job_dir.join("hooks.lua"),
@@ -228,11 +332,12 @@ fn job_source_uses_cdp(job_dir: &Path) -> Result<bool> {
 }
 
 fn load_lua_file(lua: &mlua::Lua, file: &Path) -> Result<()> {
-    let source = std::fs::read_to_string(file)?;
+    let source = std::fs::read_to_string(file)
+        .with_context(|| format!("Failed to read {}", file.display()))?;
     lua.load(&source)
         .set_name(file.to_string_lossy().as_ref())
         .exec()
-        .with_context(|| format!("Failed to load {}", file.display()))?;
+        .map_err(|e| anyhow::anyhow!("Failed to load {}: {}", file.display(), e))?;
     Ok(())
 }
 

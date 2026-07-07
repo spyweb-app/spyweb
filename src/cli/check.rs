@@ -294,6 +294,25 @@ fn config_check() -> anyhow::Result<()> {
         println!("  {} server/init.lua", crate::color::c_ok("✓"));
     }
 
+    // server/tests.lua
+    if let Some(source) = check_lua_file(&lua, Path::new("."), "server/tests.lua", &mut errors) {
+        let count = count_test_functions(&source);
+        let label = if count > 0 {
+            format!(
+                "server/tests.lua ({} test{})",
+                count,
+                if count == 1 { "" } else { "s" }
+            )
+        } else {
+            "server/tests.lua".to_string()
+        };
+        println!(
+            "  {} {}",
+            crate::color::c_ok("✓"),
+            crate::color::c_info(&label)
+        );
+    }
+
     if errors > 0 {
         crate::t_eprintln!("Config has errors (see above)");
         return Err(anyhow::anyhow!("config check failed"));
