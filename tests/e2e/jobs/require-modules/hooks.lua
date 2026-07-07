@@ -9,6 +9,10 @@ function before_fetch(request, ctx)
     local deep_mod = require("deep.child.deep_module")
     table.insert(_G.log, "deep:" .. tostring(deep_mod.val))
 
+    -- require with init.lua (directory module)
+    local dir_mod = require("dir_module")
+    table.insert(_G.log, "dir:" .. tostring(dir_mod.val))
+
     -- require from project root (fallback, optional)
     local root_ok, root_mod = pcall(require, "root_module")
     if root_ok then

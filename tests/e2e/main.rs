@@ -672,6 +672,10 @@ fn test_require_modules() {
         "require with deep dotted path"
     );
     assert!(
+        log.contains(&"dir:dir".to_string()),
+        "require with init.lua directory module"
+    );
+    assert!(
         log.contains(&"root:root".to_string()),
         "require from project root"
     );

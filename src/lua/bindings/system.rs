@@ -202,7 +202,9 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
                 let rel_path = name.replace('.', "/");
                 let candidates = [
                     require_dir.join(format!("{}.lua", rel_path)),
+                    require_dir.join(format!("{}/init.lua", rel_path)),
                     std::path::Path::new(".").join(format!("{}.lua", rel_path)),
+                    std::path::Path::new(".").join(format!("{}/init.lua", rel_path)),
                 ];
 
                 let mut last_err = String::new();
@@ -230,7 +232,7 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
                     Some(s) => s,
                     None => {
                         return Err(mlua::Error::runtime(format!(
-                            "module '{}' not found in job folder, or project root ({})",
+                            "module '{}' not found in job folder or project root ({})",
                             name, last_err
                         )));
                     }
