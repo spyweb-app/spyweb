@@ -138,13 +138,16 @@ fn render_body_template(
 }
 
 pub fn send_notification(title: &str, body: &str, timeout: u32) -> Result<()> {
+    if crate::platform::PlatformInfo::is_headless() {
+        return Ok(());
+    }
     if let Err(e) = Notification::new()
         .summary(title)
         .body(body)
         .timeout(Timeout::Milliseconds(timeout))
         .show()
     {
-        crate::t_println!("Skipped desktop notification (headless or OS error): {}", e);
+        crate::t_println!("Skipped desktop notification (OS error): {}", e);
     }
     Ok(())
 }
