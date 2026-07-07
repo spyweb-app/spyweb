@@ -208,7 +208,7 @@ fn validate_static_path(path: &str) -> Result<()> {
         .unwrap_or("")
         .to_lowercase();
 
-    if !allowed_extensions.contains(&ext.as_str()) {
+    if !ext.is_empty() && !allowed_extensions.contains(&ext.as_str()) {
         return Err(anyhow::anyhow!(
             "File type not allowed for static assets: .{}",
             ext

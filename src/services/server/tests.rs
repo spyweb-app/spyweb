@@ -32,7 +32,10 @@ fn test_validate_static_path_blocks_bad_extensions() {
     assert!(validate_static_path("binary.exe").is_err());
     assert!(validate_static_path("data.csv").is_err());
     assert!(validate_static_path("file.lua").is_err());
-    assert!(validate_static_path("noext").is_err());
+    assert!(
+        validate_static_path("noext").is_ok(),
+        "extensionless paths are allowed (SPA fallback)"
+    );
 }
 
 #[test]
@@ -153,6 +156,38 @@ fn test_handle_static_request_blocks_bad_extension() {
     let request = types::Request::fake("GET", "/script.sh");
     let resp = handle_static_request(&db, &request);
     assert_eq!(resp.status, 404, "bad extension should return 404");
+}
+
+#[test]
+fn test_static_extensionless_path_falls_back_to_index() {
+    let db = test_db();
+    let request = types::Request::fake("GET", "/some/client/route");
+    let resp = handle_static_request(&db, &request);
+    let index_path = std::path::Path::new("ui/index.html");
+    if index_path.exists() {
+        let expected = std::fs::read_to_string(index_path).unwrap();
+        assert_eq!(
+            resp.status, 200,
+            "extensionless path should serve index.html"
+        );
+        assert_eq!(
+            resp.body_string(),
+            expected,
+            "should serve index.html content"
+        );
+    }
+    // If ui/index.html doesn't exist, the test is a no-op (SPA feature isn't set up)
+}
+
+#[test]
+fn test_static_path_with_extension_returns_404_when_missing() {
+    let db = test_db();
+    let request = types::Request::fake("GET", "/nonexistent.js");
+    let resp = handle_static_request(&db, &request);
+    assert_eq!(
+        resp.status, 404,
+        "missing file with extension should 404 even if index.html exists"
+    );
 }
 
 #[test]
