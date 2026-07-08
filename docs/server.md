@@ -205,6 +205,13 @@ The server VM has access to the same globals as scraper hooks:
 | `http_post(url, body, [headers])` | HTTP POST request. Returns `(res, err)` — two-return pattern. |
 | `http_request({ method, url, body?, headers?, proxy?, timeout?, max_body_size? })` | Generic HTTP request with optional proxy/timeout/max_body_size. Returns `(res, err)`. |
 | `http_multipart(url, fields, [headers])` | Multipart file uploads. Returns `(res, err)` — two-return pattern. |
+| `tls_probe(host, [port])` | TLS certificate inspection. Returns `(cert, err)` with subject, issuer, expiry, fingerprint. |
+
+### Runtime
+
+| Table | Description |
+|-------|-------------|
+| `engine` | Runtime info: `os`, `arch`, `headless`, `version`, `lua_version`, `storage` |
 
 ### Storage
 

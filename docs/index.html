@@ -92,6 +92,8 @@
                                 <li><a href="#http_post">http_post</a></li>
                                 <li><a href="#http_request">http_request</a></li>
                                 <li><a href="#http_multipart">http_multipart</a></li>
+                                <li><a href="#tls_probe">tls_probe</a></li>
+                                <li><a href="#engine">engine</a></li>
                                 <li><a href="#db_query">db_query</a></li>
                                 <li><a href="#db_exec">db_exec</a></li>
                                 <li><a href="#json_encode">json_encode</a></li>
@@ -1261,6 +1263,53 @@ if not res then
     log("screenshot upload failed: " .. err.kind)
     return
 end</code></pre>
+
+                            <h3 class="title is-4" id="tls_probe"><code>tls_probe(host, [port])</code> <span class="tag is-small is-dark">async</span></h3>
+                            <p>Connects to a host and retrieves its TLS certificate information. Returns <code>(cert_table, nil)</code> on success or <code>(nil, error_string)</code> on failure. Self-signed certificates are allowed (useful for monitoring internal services). Default port is 443.</p>
+                            <pre><code class="language-lua">local cert, err = tls_probe("example.com")
+if cert then
+    log("Subject: " .. cert.subject)
+    log("Issuer: " .. cert.issuer)
+    log("Expires in " .. cert.days_left .. " days")
+
+    if cert.days_left < 14 then
+        notify("Cert Expiring", cert.subject .. " expires in " .. cert.days_left .. " days")
+    end
+else
+    log("TLS probe failed: " .. err)
+end</code></pre>
+                            <table class="table is-fullwidth">
+                                <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+                                <tbody>
+                                    <tr><td><code>subject</code></td><td>string</td><td>Certificate subject (e.g. <code>"CN=example.com"</code>)</td></tr>
+                                    <tr><td><code>issuer</code></td><td>string</td><td>Certificate issuer</td></tr>
+                                    <tr><td><code>serial</code></td><td>string</td><td>Serial number in hex format</td></tr>
+                                    <tr><td><code>not_before</code></td><td>string</td><td>Validity start (ISO 8601)</td></tr>
+                                    <tr><td><code>not_after</code></td><td>string</td><td>Validity end (ISO 8601)</td></tr>
+                                    <tr><td><code>days_left</code></td><td>number</td><td>Days until certificate expires</td></tr>
+                                    <tr><td><code>fingerprint</code></td><td>string</td><td>XXH3 fingerprint for change detection</td></tr>
+                                </tbody>
+                            </table>
+
+                            <h3 class="title is-4" id="engine"><code>engine</code> <span class="tag is-small is-dark">table</span></h3>
+                            <p>Read-only table providing runtime environment information.</p>
+                            <table class="table is-fullwidth">
+                                <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+                                <tbody>
+                                    <tr><td><code>os</code></td><td>string</td><td><code>"linux"</code>, <code>"macos"</code>, or <code>"windows"</code></td></tr>
+                                    <tr><td><code>arch</code></td><td>string</td><td><code>"aarch64"</code> or <code>"x86_64"</code></td></tr>
+                                    <tr><td><code>headless</code></td><td>boolean</td><td><code>true</code> if running without a display server</td></tr>
+                                    <tr><td><code>version</code></td><td>string</td><td>SpyWeb version (e.g. <code>"1.5.1"</code>)</td></tr>
+                                    <tr><td><code>lua_version</code></td><td>string</td><td><code>"luau"</code> or <code>"lua54"</code></td></tr>
+                                    <tr><td><code>storage</code></td><td>string</td><td><code>"redb"</code> or <code>"sqlite"</code></td></tr>
+                                </tbody>
+                            </table>
+                            <pre><code class="language-lua">-- Skip desktop notifications on headless servers
+if not engine.headless then
+    notify("Alert", "Something happened")
+end
+
+log("Running " .. engine.version .. " on " .. engine.os .. "/" .. engine.arch)</code></pre>
 
                             <h3 class="title is-4" id="db_query"><code>db_query(sql, [params])</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Executes a <code>SELECT</code> query on the SQLite database. Available only on the <strong>SQL (SQLite)</strong> build variant. Returns an array of row-tables with column-value pairs. Integer/Real/Text/Null SQL types map to Lua number/string/nil. On the <strong>KV (redb)</strong> variant, calling this returns a clear error directing you to download the SQLite build.</p>

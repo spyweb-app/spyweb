@@ -25,13 +25,17 @@ Use the `test` subcommand:
 spyweb test
 spyweb test "Job Name"
 spyweb test "Job Name" price
+spyweb test server
+spyweb test server price
 ```
 
 Behavior:
 
-- `spyweb test` runs every discovered `test_*` function across all jobs with Lua files.
+- `spyweb test` runs every discovered `test_*` function across all jobs with Lua files, and also server tests if `server/tests.lua` exists.
 - `spyweb test "Job Name"` runs tests for the matching job.
 - `spyweb test "Job Name" price` runs only tests whose function name contains `price`.
+- `spyweb test server` runs tests for the programmable API server at `server/tests.lua`, auto-starting the server on a random port.
+- `spyweb test server price` runs only server tests whose name contains `price`.
 
 Job matching uses the same exact resolver as the rest of the app, so it matches by job name or normalized job id.
 
@@ -85,6 +89,8 @@ Tests get the same core bindings as production jobs, including:
 - `http_post`
 - `http_request` — generic `{ method, url, body?, headers? }`
 - `http_multipart` — multipart file uploads
+- `tls_probe` — TLS certificate inspection
+- `engine` — runtime environment info
 - `fs_read_binary` — binary file reads
 - storage helpers such as `store_set`, `store_get`, `global_store_set`, `global_store_get`
 - `spyweb.assert_eq`
@@ -161,6 +167,27 @@ For larger jobs:
 - Put production hooks in `hooks.lua`
 - Put shared helpers and broader test cases in `tests.lua`
 - Keep `test_*` functions global
+
+## Server Testing
+
+The programmable API server (`server/init.lua`) can be tested the same way. If `server/tests.lua` exists alongside `server/init.lua`, the test runner automatically starts the server on a random port, loads `init.lua` so helpers are available, runs tests, and shuts it down.
+
+```lua
+-- server/tests.lua
+
+-- Logic test — helpers from init.lua are available
+function test_format_price()
+    spyweb.assert_eq(format_price(100), "$100.00")
+end
+
+-- Integration test — hits the server over HTTP
+function test_hello_endpoint()
+    local resp = http_get("http://127.0.0.1:" .. SERVER_PORT .. "/api/v/hello")
+    spyweb.assert_eq(resp.status, 200)
+end
+```
+
+The `SERVER_PORT` global tells tests where to reach the server. The server and all tests share the same temporary database.
 
 ## Failure Output
 

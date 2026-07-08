@@ -197,6 +197,8 @@ All globals listed below are available inside any hook function.
 | `http_post(url, body, [headers])` | ✅ | HTTP POST request. Returns `(res, err)` — two-return pattern. |
 | `http_request({ method, url, body?, headers?, proxy?, timeout?, max_body_size? })` | ✅ | Generic HTTP request with optional proxy/timeout/max_body_size. Returns `(res, err)`. |
 | `http_multipart(url, fields, [headers])` | ✅ | Multipart file uploads. Returns `(res, err)` — two-return pattern. |
+| `tls_probe(host, [port])` | ✅ | TLS certificate inspection. Returns `(cert, err)` with subject, issuer, expiry, fingerprint. |
+| `engine` | — | Runtime info table: `os`, `arch`, `headless`, `version`, `lua_version`, `storage`. |
 | `sleep(ms)` | ✅ | Sleep for N milliseconds |
 | `notify(title, body, [timeout])` | ✅ | Send desktop notification |
 | `log(message)` | ✅ | Append timestamped line to `hooks.log` |
@@ -215,7 +217,7 @@ All globals listed below are available inside any hook function.
 | `json_decode(str)` | ❌ | Decode a JSON string to Lua value (10MB input limit) |
 | `env_get(key)` | ❌ | Read an environment variable |
 | `defer(fn)` | ❌ | Register hook-scoped cleanup callback |
-| `require(name)` | ❌ | Load a Lua module from the job directory or project root (Luau only) |
+| `require(name)` | ❌ | Load a Lua module from the job directory or project root, with `init.lua` fallback (Luau only) |
 | `dump(value)` | ❌ | Pretty-print a Lua value (debugging) |
 | `copy(table)` | ❌ | Shallow copy of a Lua table |
 | `deep_copy(table)` | ❌ | Deep copy of a Lua table |
