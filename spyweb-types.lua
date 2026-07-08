@@ -17,15 +17,20 @@
 ---@field query table<string,string>|nil  URL query parameters (API server)
 ---@field headers table<string,string>|nil  Request headers (API server)
 ---@field client_ip string|nil          Client IP address (API server)
+---@field selector_matches integer|nil   Matched selector count (pipeline hooks, after extract)
 
 --=============================================================================
 -- HTTP response (returned by http_get, http_post, etc.)
 --=============================================================================
 
 ---@class spyweb_http_response
----@field status integer                HTTP status code
----@field body string                   Response body
+---@field status  integer               HTTP status code
+---@field body    string                Response body
 ---@field headers table<string,string>  Response headers
+---@field url     string                Final URL after redirects
+---@field time_ms integer               Request duration in milliseconds
+---@field size    integer               Response body size in bytes
+---@field proxy?  string                Proxy URL used (if any)
 
 --=============================================================================
 -- Handler response (returned by route handlers)
@@ -40,19 +45,24 @@
 -- Fetch result envelope (passed to after_fetch)
 --=============================================================================
 
+---@class spyweb_http_error
+---@field error  string   Human-readable error message
+---@field kind   string   Error kind: "dns" | "timeout" | "proxy" | "tls" | "connect" | "size" | "http" | "unknown"
+---@field proxy? string   Proxy URL that failed (only on proxy errors)
+
 ---@class spyweb_fetch_result
----@field ok boolean                        Whether the request succeeded
----@field request { url: string, method?: string, headers?: table<string,string>, body?: string, proxy?: string }
----@field response spyweb_http_response|nil  The HTTP response (nil on error)
----@field error { message: string, kind: string }|nil  Error info (nil on success)
+---@field ok       boolean               Whether the request succeeded
+---@field request  { url: string, headers: table<string,string>, proxy?: string }
+---@field response spyweb_http_response|nil  HTTP response (present on both success and HTTP errors)
+---@field error    { message: string, kind: string }|nil  Error info (nil on success)
 
 --=============================================================================
 -- Items (returned by extract stages)
 --=============================================================================
 
 ---@class spyweb_item
----@field content string
----@field [string] any
+---@field fields  table<string,string>  Item fields (must match job config)
+---@field matches string[]              Matched keywords (read-only, populated by engine)
 
 --=============================================================================
 -- Helpers (injected from helpers.lua at startup)
@@ -74,6 +84,22 @@ function copy(t) end
 ---@param seen? table
 ---@return T
 function deep_copy(t, seen) end
+
+--=============================================================================
+-- Engine info (available in all contexts)
+--=============================================================================
+
+---@class spyweb_engine
+---@field os           string  "linux" | "macos" | "windows" | "unknown"
+---@field arch         string  "x86_64" | "aarch64" | "unknown"
+---@field headless     boolean  True when no display server is available
+---@field version      string  SpyWeb version (from Cargo.toml)
+---@field lua_version  string  "luau" | "lua54"
+---@field storage      string  "sqlite" | "redb"
+
+---@type spyweb_engine
+---@diagnostic disable-next-line: missing-fields
+engine = {}
 
 --=============================================================================
 -- Async system functions
@@ -160,7 +186,7 @@ function defer(fn) end
 ---Send an HTTP GET request. 10MB body limit. 30s timeout.
 ---@param url string
 ---@param headers? table<string,string>
----@return spyweb_http_response
+---@return spyweb_http_response?, spyweb_http_error?
 function http_get(url, headers) end
 
 ---Send an HTTP POST request. 10MB body limit. 30s timeout.
@@ -168,20 +194,27 @@ function http_get(url, headers) end
 ---@param url string
 ---@param body string
 ---@param headers? table<string,string>
----@return spyweb_http_response
+---@return spyweb_http_response?, spyweb_http_error?
 function http_post(url, body, headers) end
 
 ---Send a generic HTTP request.
----@param args { method?: string, url: string, body?: string, headers?: table<string,string> }
----@return spyweb_http_response
+---@param args { method?: string, url: string, body?: string, headers?: table<string,string>, proxy?: string, timeout?: number, max_body_size?: number }
+---@return spyweb_http_response?, spyweb_http_error?
 function http_request(args) end
 
 ---Send a multipart POST request for file uploads.
 ---@param url string
 ---@param fields table<string, string|{ content: string, filename?: string, type?: string }>
 ---@param headers? table<string,string>
----@return spyweb_http_response
+---@return spyweb_http_response?, spyweb_http_error?
 function http_multipart(url, fields, headers) end
+
+---Probe a TLS endpoint for certificate info. Returns (table, nil) on success,
+-- (nil, error) on failure.
+---@param host string
+---@param port? integer  Default 443
+---@return { subject: string, issuer: string, serial: string, not_before: string, not_after: string, days_left: integer, fingerprint: string }|nil, string|nil
+function tls_probe(host, port) end
 
 --=============================================================================
 -- Storage (key-value, persisted to the database)
@@ -242,6 +275,14 @@ function db_exec(sql, params) end
 -- Testing
 --=============================================================================
 
+---@class spyweb_test
+---@field assert_eq fun(left: any, right: any, msg?: string)
+---@field assert_ne fun(left: any, right: any, msg?: string)
+
+---@type spyweb_test
+---@diagnostic disable-next-line: missing-fields
+spyweb = {}
+
 ---Assert that two values are equal.
 ---@param left any
 ---@param right any
@@ -283,8 +324,9 @@ function spyweb.assert_ne(left, right, msg) end
 ---@field type fun(self: spyweb_page, selector: string, text: string, opts?: { real?: boolean }): boolean|nil, string|nil
 
 ---@class spyweb_browser_context
----@field attach fun(self: spyweb_browser_context, url?: string): spyweb_page
----@field close fun(self: spyweb_browser_context)
+---@field id      string                                Unique context ID
+---@field attach  fun(self: spyweb_browser_context, url?: string): spyweb_page
+---@field close   fun(self: spyweb_browser_context)
 
 ---@class spyweb_browser
 ---@field call fun(self: spyweb_browser, method: string, params: table): table
@@ -295,7 +337,7 @@ function spyweb.assert_ne(left, right, msg) end
 ---@field attach_session fun(self: spyweb_browser, target_id: string): table
 ---@field call_session fun(self: spyweb_browser, session_id: string, method: string, params: table): table
 ---@field wait_session_event fun(self: spyweb_browser, session_id: string, event: string, timeout_ms?: integer, predicate?: fun(params: table): boolean): table
----@field create_context fun(self: spyweb_browser): spyweb_browser_context
+---@field new_context fun(self: spyweb_browser): spyweb_browser_context
 
 ---@type table<string, fun(...):...>
 cdp = {}
@@ -323,23 +365,30 @@ function cdp.sleep(ms) end
 -- Pipeline lifecycle hooks (define these as global functions in hooks.lua)
 --=============================================================================
 
+---@class spyweb_fetch_request
+---@field url           string
+---@field method        string
+---@field headers       table<string,string>
+---@field timeout?      number    Per-request timeout in seconds (default 30)
+---@field proxy?        string    Per-request proxy URL
+---@field max_body_size? integer   Max response body in MB (integer, default 10)
+
 ---Override the fetch request before it is sent. Return a modified request or
 ---nil to use the default. NOTE: returning nil for override_fetch is an error
 ---(not a skip).
----@param request { url: string, headers: table<string,string>, method?: string, body?: string }
+---@param request spyweb_fetch_request
 ---@param ctx spyweb_context
----@return { url: string, headers: table<string,string>, method?: string, body?: string }?
+---@return spyweb_fetch_request?
 function before_fetch(request, ctx) end
 
 ---Completely replace the fetch stage. Must return a valid response table with
 ---`status` and `body` fields. Returning nil produces an error.
----@param request { url: string, headers: table<string,string>, method?: string, body?: string }
+---@param request spyweb_fetch_request
 ---@param ctx spyweb_context
 ---@return spyweb_http_response?
 function override_fetch(request, ctx) end
 
----Post-process the fetch result. Return nil to skip the rest of the
----pipeline.
+---Post-process the fetch result. Return nil to skip the rest of the pipeline.
 ---@param fetch_result spyweb_fetch_result
 ---@param ctx spyweb_context
 ---@return spyweb_http_response?
@@ -359,27 +408,27 @@ function override_extract(response, ctx) end
 ---@return spyweb_item[]?
 function after_extract(items, ctx) end
 
----Filter a single item. Return false to drop the item, true to keep it,
----or nil to continue without filtering.
+---Filter a single item. Return the item to keep it, or nil to drop it
+---before it reaches the database. Mutually exclusive with keyword filter.
 ---@param item spyweb_item
 ---@param ctx spyweb_context
----@return boolean?
+---@return spyweb_item|nil
 function filter_item(item, ctx) end
 
----Transform or filter items before storage. Must return items.
+---Last chance before DB insert. Return nil to skip storing and notifying.
 ---@param items spyweb_item[]
 ---@param ctx spyweb_context
----@return spyweb_item[]
+---@return spyweb_item[]|nil
 function before_store(items, ctx) end
 
 ---Called before sending notifications. Return nil or false to skip notify.
 ---@param items spyweb_item[]
 ---@param ctx spyweb_context
----@return boolean|nil
+---@return spyweb_item[]|nil
 function before_notify(items, ctx) end
 
 ---Called before sending the webhook. Return nil or false to skip webhook.
----@param payload table
+---@param payload { job_name: string, item_count: number, items: spyweb_item[] }
 ---@param ctx spyweb_context
 ---@return table|nil
 function before_webhook(payload, ctx) end
