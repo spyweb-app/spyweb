@@ -363,6 +363,32 @@ fn test_network_http_bindings() {
     assert!(log.contains(&"mp_response:200".to_string()));
     assert!(log.contains(&"error_status:500".to_string()));
 
+    // tls_probe assertions - verify actual TLS certificate info
+    assert!(
+        log.contains(&"tls_ok:true".to_string()),
+        "tls_probe must succeed"
+    );
+    assert!(
+        log.contains(&"tls_subject_ok:true".to_string()),
+        "subject must contain google"
+    );
+    assert!(
+        log.contains(&"tls_issuer_ok:true".to_string()),
+        "issuer must be non-empty CA"
+    );
+    assert!(
+        log.contains(&"tls_days_ok:true".to_string()),
+        "days_left must be positive number"
+    );
+    assert!(
+        log.contains(&"tls_fingerprint_ok:true".to_string()),
+        "fingerprint must start with XXH3:"
+    );
+    assert!(
+        log.contains(&"tls_serial_ok:true".to_string()),
+        "serial must be non-empty"
+    );
+
     let tested = env.read_global_bool(&job, "http_tested");
     assert_eq!(tested, Some(true));
 

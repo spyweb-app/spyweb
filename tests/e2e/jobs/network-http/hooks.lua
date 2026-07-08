@@ -42,6 +42,34 @@ function before_fetch(request, ctx)
 
     http_post(base .. "/webhook", json_encode({ event = "cycle_complete" }))
 
+    -- tls_probe test - verify actual cert info
+    local cert, err = tls_probe("www.google.com", 443)
+    if cert then
+        -- subject should contain google
+        local has_google = string.find(cert.subject:lower(), "google") ~= nil
+        table.insert(_G.log, "tls_subject_ok:" .. tostring(has_google))
+
+        -- issuer should be non-empty (a real CA)
+        local has_issuer = cert.issuer ~= nil and #cert.issuer > 0
+        table.insert(_G.log, "tls_issuer_ok:" .. tostring(has_issuer))
+
+        -- days_left should be a positive number
+        local has_days = type(cert.days_left) == "number" and cert.days_left > 0
+        table.insert(_G.log, "tls_days_ok:" .. tostring(has_days))
+
+        -- fingerprint should start with XXH3:
+        local has_fp = string.find(cert.fingerprint, "XXH3:") == 1
+        table.insert(_G.log, "tls_fingerprint_ok:" .. tostring(has_fp))
+
+        -- serial should be non-empty
+        local has_serial = cert.serial ~= nil and #cert.serial > 0
+        table.insert(_G.log, "tls_serial_ok:" .. tostring(has_serial))
+
+        table.insert(_G.log, "tls_ok:true")
+    else
+        table.insert(_G.log, "tls_error:" .. tostring(err))
+    end
+
     _G.http_tested = true
     return request
 end
