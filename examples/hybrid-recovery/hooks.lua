@@ -66,7 +66,7 @@ function before_fetch(request)
             visual_browser:close()
             visual_browser = nil
             store_set("recovery_state", "NORMAL")
-            notify({ title = "Recovery Timed Out", body = "No one solved the puzzle in time." })
+            notify("Recovery Timed Out", "No one solved the puzzle in time.")
             return nil
         end
 
@@ -141,11 +141,7 @@ function override_fetch(request)
         store_set("recovery_state", "RECOVERING")
         store_set("recovery_start", tostring(os.time()))
         
-        notify({
-            title = "Scraper Blocked!",
-            body = "A bot-block was detected. Please solve it manually to continue.",
-            timeout = 0
-        })
+        notify("Scraper Blocked!", "A bot-block was detected. Please solve it manually to continue.")
 
         return nil
     end
