@@ -108,13 +108,29 @@ jobs:
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Extract changelog
+        id: changelog
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          # Strip leading 'v' if present for changelog lookup
+          VER="${VERSION#v}"
+          # Extract section for this version (between ## [VERSION] and next ## [)
+          BODY=$(awk "/^## \\[$VER\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md)
+          if [ -z "$BODY" ]; then
+            BODY="Release $VERSION"
+          fi
+          # Use delimiter to preserve newlines in output
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create Tagged Release
         if: steps.check_prerelease.outputs.is_prerelease != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
           files: release-assets/spyweb-v*.tar.gz
-          generate_release_notes: true
+          body: ${{ steps.changelog.outputs.body }}
           draft: false
           prerelease: ${{ steps.check_prerelease.outputs.is_prerelease }}
 
