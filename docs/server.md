@@ -31,12 +31,12 @@ curl -X POST -d "test body" http://127.0.0.1:7979/api/v/echo
 
 ## How It Works
 
-Each HTTP request to `/api/v/{name}` triggers the following:
+Each HTTP request to `/api/v/{name}` (or `/api/public/{name}` for unauthenticated endpoints) triggers the following:
 
 1. SpyWeb reads `server/init.lua` from disk (automatic hot-reload - no restart needed)
 2. A fresh Lua VM is created for the request
 3. The Lua script is loaded, defining your route handlers
-4. SpyWeb looks up `get["name"]` or `post["name"]` - falls back to `all["name"]` if the method-specific table has no match
+4. For `/api/v/{name}`, SpyWeb looks up `get["name"]` → `post["name"]` → `all["name"]`. For `/api/public/{name}`, it looks up `public.get["name"]` → `public.post["name"]` → `public.all["name"]`
 5. The handler is called with `self` carrying the request context
 6. The return value is converted to an HTTP response
 7. The VM is dropped - no shared state between requests
@@ -44,6 +44,8 @@ Each HTTP request to `/api/v/{name}` triggers the following:
 ## Route Registration
 
 Routes are registered by defining functions on the pre-injected method tables using Lua's `:` syntax:
+
+**Private endpoints** (require `X-SpyWeb-Key` if `SPYWEB_API_KEY` is set):
 
 ```lua
 function get:users()
@@ -59,7 +61,23 @@ function all:ping()
 end
 ```
 
-The method tables `get`, `post`, `put`, `patch`, `delete`, and `all` are already injected into the Lua globals before your script runs - you don't need to create them.
+**Public endpoints** (always accessible without a key):
+
+```lua
+function public.get:status()
+    -- handles GET /api/public/status
+end
+
+function public.post:webhook()
+    -- handles POST /api/public/webhook
+end
+
+function public.all:catchall()
+    -- handles any method on /api/public/catchall
+end
+```
+
+The method tables `get`, `post`, `put`, `patch`, `delete`, `all`, `public.get`, `public.post`, `public.put`, `public.patch`, `public.delete`, and `public.all` are already injected into the Lua globals before your script runs - you don't need to create them.
 
 Functions defined outside method tables are private helpers - they are never exposed as endpoints:
 
@@ -77,12 +95,22 @@ end
 
 ## URL Structure
 
+Auth-protected endpoints:
+
 ```
 /api/v/{name}/{path_args...}
 ```
 
+Public (unauthenticated) endpoints:
+
+```
+/api/public/{name}/{path_args...}
+```
+
 - `{name}` - the handler name (looked up in method tables)
 - `{path_args...}` - optional trailing segments passed to `self.path_args`
+
+Each prefix resolves from **separate** handler tables — a handler defined under `get.*` is only reachable via `/api/v/`, and a handler defined under `public.get.*` is only reachable via `/api/public/`.
 
 Examples:
 
@@ -91,6 +119,8 @@ Examples:
 | `/api/v/users` | `get.users` | `{}` |
 | `/api/v/users/123` | `get.users` | `{"123"}` |
 | `/api/v/users/123/profile` | `get.users` | `{"123", "profile"}` |
+| `/api/public/status` | `public.get.status` | `{}` |
+| `/api/public/status/db` | `public.get.status` | `{"db"}` |
 
 ## Request Context (`self`)
 
@@ -100,7 +130,7 @@ Inside a `:` handler, `self` is a table containing the request data:
 |-------|------|-------------|
 | `self.body` | string or nil | Raw request body (POST, PUT, PATCH). nil for GET/HEAD |
 | `self.method` | string | HTTP method (`"GET"`, `"POST"`, etc.) |
-| `self.path` | string | Full request path (`/api/v/users/123`) |
+| `self.path` | string | Full request path (`/api/v/users/123` or `/api/public/users/123`) |
 | `self.path_args` | table | Array of trailing path segments (`{"123"}`) |
 | `self.query` | table | URL query parameters as key-value pairs |
 | `self.headers` | table | Request headers (lowercase keys) |
@@ -264,13 +294,31 @@ Deferred functions run in reverse order (last registered runs first). Each funct
 
 ## Authentication
 
-The API server reuses SpyWeb's existing authentication. If `SPYWEB_API_KEY` is set, all `/api/*` routes (including `/api/v/*`) require the `X-SpyWeb-Key` header:
+The API server reuses SpyWeb's existing authentication. If `SPYWEB_API_KEY` is set, all `/api/*` routes require the `X-SpyWeb-Key` header — except `/api/public/*` routes, which are always accessible without a key:
 
 ```bash
+# Requires key
 curl -H "X-SpyWeb-Key: your_key" http://127.0.0.1:7979/api/v/hello
+
+# Always public, no key needed
+curl http://127.0.0.1:7979/api/public/status
 ```
 
-Without the header, the server returns 401 Unauthorized.
+Without the header on a protected route, the server returns 401 Unauthorized.
+
+Public endpoints are defined under the `public.*` namespace in `init.lua` — they are never reachable via `/api/v/`:
+
+```lua
+-- Private (requires key)
+function get:status()
+    return { status = 200, body = "ok" }
+end
+
+-- Public (no key required)
+function public.get:health()
+    return { status = 200, body = "ok" }
+end
+```
 
 ## Environment Variables
 
@@ -278,6 +326,7 @@ Without the header, the server returns 401 Unauthorized.
 |----------|---------|-------------|
 | `SPYWEB_PORT` | `7979` | Server port |
 | `SPYWEB_API_KEY` | *none* | API authentication key |
+| `SPYWEB_DISABLE_SERVER` | *none* | Set to any value to skip starting the web server |
 
 ## Data Directory
 
@@ -372,7 +421,13 @@ end
 ### Health Check
 
 ```lua
+-- Private health check (/api/v/health)
 function all:health()
+    return { status = 200, body = "ok" }
+end
+
+-- Public health check (/api/public/health, no key required)
+function public.all:health()
     return { status = 200, body = "ok" }
 end
 ```
@@ -387,9 +442,11 @@ Check `server/error.log` for Lua syntax or runtime errors. Common causes:
 
 ### Endpoints return 404
 
-- Check the handler is defined in the correct method table (`get`, `post`, etc.)
+- Check the handler is defined in the correct method table for the URL prefix:
+  - `/api/v/{name}` → `get.{name}`, `post.{name}`, etc.
+  - `/api/public/{name}` → `public.get.{name}`, `public.post.{name}`, etc.
 - Check the handler name matches the URL segment exactly
-- The `all` table is only checked as a fallback after the method-specific table
+- The `all` (or `public.all`) table is only checked as a fallback after the method-specific table
 
 ### Body is empty or truncated
 

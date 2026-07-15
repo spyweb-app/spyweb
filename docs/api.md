@@ -4,7 +4,7 @@ SpyWeb runs a built-in web server on `127.0.0.1:7979` which serves both the dash
 
 ## Authentication
 
-If the `SPYWEB_API_KEY` environment variable is set, all `/api/*` endpoints require authentication. You must provide your key in the `X-SpyWeb-Key` header.
+If the `SPYWEB_API_KEY` environment variable is set, all `/api/*` endpoints require authentication (except `/api/public/*` routes, which are always accessible). You must provide your key in the `X-SpyWeb-Key` header.
 
 ```bash
 curl -H "X-SpyWeb-Key: your_secret_key" http://127.0.0.1:7979/api/jobs
@@ -20,7 +20,8 @@ If the environment variable is not set, the API remains open and no header is re
 | `GET /api/records?job_id=<id>` | JSON records for a job |
 | `GET /api/records?job_id=<id>&limit=50&after=<timestamp>` | Paginated records |
 | `GET /api/jobs` | List all configured jobs |
-| `/api/v/{name}` | Programmable API server (see [server.md](server.md)) |
+| `/api/v/{name}` | Programmable API server — requires auth (see [server.md](server.md)) |
+| `/api/public/{name}` | Programmable API server — always public, no auth required (see [server.md](server.md)) |
 
 
 ## Bring Your Own UI

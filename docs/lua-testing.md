@@ -185,9 +185,17 @@ function test_hello_endpoint()
     local resp = http_get("http://127.0.0.1:" .. SERVER_PORT .. "/api/v/hello")
     spyweb.assert_eq(resp.status, 200)
 end
+
+-- Test a public endpoint (no auth required)
+function test_public_endpoint()
+    local resp = http_get("http://127.0.0.1:" .. SERVER_PORT .. "/api/public/status")
+    spyweb.assert_eq(resp.status, 200)
+end
 ```
 
 The `SERVER_PORT` global tells tests where to reach the server. The server and all tests share the same temporary database.
+
+Both private (`get:name`, `post:name`) and public (`public.get:name`, `public.post:name`) route handlers can be unit-tested directly by calling them from Lua, or integration-tested over HTTP via `/api/v/` and `/api/public/` respectively.
 
 ## Failure Output
 
