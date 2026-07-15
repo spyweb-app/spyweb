@@ -470,3 +470,28 @@ delete = {}
 
 ---@type table<string, fun(self: spyweb_context): spyweb_handler_response|string|nil>
 all = {}
+
+--=============================================================================
+-- Public API route tables (unauthenticated, injected by the API server)
+--=============================================================================
+
+---@type table
+public = {}
+
+---@type table<string, fun(self: spyweb_context): spyweb_handler_response|string|nil>
+public.get = {}
+
+---@type table<string, fun(self: spyweb_context): spyweb_handler_response|string|nil>
+public.post = {}
+
+---@type table<string, fun(self: spyweb_context): spyweb_handler_response|string|nil>
+public.put = {}
+
+---@type table<string, fun(self: spyweb_context): spyweb_handler_response|string|nil>
+public.patch = {}
+
+---@type table<string, fun(self: spyweb_context): spyweb_handler_response|string|nil>
+public.delete = {}
+
+---@type table<string, fun(self: spyweb_context): spyweb_handler_response|string|nil>
+public.all = {}
