@@ -103,6 +103,8 @@ enum Commands {
     Start {
         #[arg(long)]
         port: Option<u16>,
+        #[arg(long = "no-server")]
+        no_server: bool,
     },
     Debug {
         job_name: String,
@@ -137,8 +139,8 @@ pub fn listen_command() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Check { command } => check::run_check(command),
-        Commands::Start { port } => {
-            if let Err(e) = crate::entry::start_app_with_port(port) {
+        Commands::Start { port, no_server } => {
+            if let Err(e) = crate::entry::start_app_with_port(port, no_server) {
                 crate::t_eprintln!("Application error: {}", e);
                 std::process::exit(1);
             }

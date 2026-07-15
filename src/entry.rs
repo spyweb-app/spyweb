@@ -13,10 +13,10 @@ use crate::services::server::{JobSummary, WebServer};
 use crate::services::watcher;
 
 pub fn start_app() -> Result<()> {
-    start_app_with_port(None)
+    start_app_with_port(None, false)
 }
 
-pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
+pub fn start_app_with_port(port_override: Option<u16>, disable_server: bool) -> Result<()> {
     if let Err(e) = ctrlc::set_handler(move || {
         crate::t_println!("\nShutting down gracefully...");
         crate::services::utils::shutdown_system();
@@ -53,7 +53,8 @@ pub fn start_app_with_port(port_override: Option<u16>) -> Result<()> {
         thread::spawn(move || smol::block_on(ex.run(s.recv())));
     }
 
-    {
+    let server_disabled = disable_server || std::env::var("SPYWEB_DISABLE_SERVER").is_ok();
+    if !server_disabled {
         let server_db = Arc::clone(&db);
         let server_active_jobs = Arc::clone(&active_job_ids);
         thread::spawn(move || {
