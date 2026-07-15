@@ -42,9 +42,167 @@ fn test_basic_route_returns_response() {
         "hello",
         vec![],
         &types::Request::fake("GET", "/hello"),
+        false,
     );
     assert_eq!(resp.status, 200);
     assert_eq!(resp.body_string(), "Hello from Lua!");
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_basic_public_route_returns_response() {
+    let dir = unique_test_dir("basic-public-route");
+    let db = setup_db(&dir);
+    let server = ApiServer::for_test(
+        db,
+        r#"
+            function public.get:hello()
+                return { status = 200, body = "Hello from public Lua!" }
+            end
+        "#,
+    );
+
+    let resp = server.handle(
+        "GET",
+        "hello",
+        vec![],
+        &types::Request::fake("GET", "/hello"),
+        true,
+    );
+    assert_eq!(resp.status, 200);
+    assert_eq!(resp.body_string(), "Hello from public Lua!");
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_private_handler_not_accessible_via_public() {
+    let dir = unique_test_dir("private-not-public");
+    let db = setup_db(&dir);
+    let server = ApiServer::for_test(
+        db,
+        r#"
+            get.secret = function(self)
+                return "secret"
+            end
+        "#,
+    );
+
+    // Private lookup works
+    let resp = server.handle(
+        "GET",
+        "secret",
+        vec![],
+        &types::Request::fake("GET", "/private/secret"),
+        false,
+    );
+    assert_eq!(resp.status, 200);
+
+    // Public lookup should NOT find it
+    let resp = server.handle(
+        "GET",
+        "secret",
+        vec![],
+        &types::Request::fake("GET", "/public/secret"),
+        true,
+    );
+    assert_eq!(resp.status, 404);
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_public_handler_not_accessible_via_private() {
+    let dir = unique_test_dir("public-not-private");
+    let db = setup_db(&dir);
+    let server = ApiServer::for_test(
+        db,
+        r#"
+            function public.get:status()
+                return "public status"
+            end
+        "#,
+    );
+
+    // Public lookup works
+    let resp = server.handle(
+        "GET",
+        "status",
+        vec![],
+        &types::Request::fake("GET", "/public/status"),
+        true,
+    );
+    assert_eq!(resp.status, 200);
+
+    // Private lookup should NOT find it
+    let resp = server.handle(
+        "GET",
+        "status",
+        vec![],
+        &types::Request::fake("GET", "/private/status"),
+        false,
+    );
+    assert_eq!(resp.status, 404);
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_public_all_fallback() {
+    let dir = unique_test_dir("public-all-fallback");
+    let db = setup_db(&dir);
+    let server = ApiServer::for_test(
+        db,
+        r#"
+            function public.all:catchall()
+                return "public catchall: " .. self.method
+            end
+        "#,
+    );
+
+    let resp = server.handle(
+        "POST",
+        "catchall",
+        vec![],
+        &types::Request::fake("POST", "/public/catchall"),
+        true,
+    );
+    assert_eq!(resp.status, 200);
+    assert_eq!(resp.body_string(), "public catchall: POST");
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_public_all_does_not_leak_to_private() {
+    let dir = unique_test_dir("public-all-no-leak");
+    let db = setup_db(&dir);
+    let server = ApiServer::for_test(
+        db,
+        r#"
+            function public.all:catchall()
+                return "public only"
+            end
+        "#,
+    );
+
+    let resp = server.handle(
+        "GET",
+        "catchall",
+        vec![],
+        &types::Request::fake("GET", "/private/catchall"),
+        false,
+    );
+    assert_eq!(
+        resp.status, 404,
+        "public.all should not be visible to private lookups"
+    );
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
@@ -68,6 +226,7 @@ fn test_routing_fallback_to_all() {
         "fallback",
         vec![],
         &types::Request::fake("POST", "/fallback"),
+        false,
     );
     assert_eq!(resp.status, 200);
     assert_eq!(resp.body_string(), "Fallback hit: POST");
@@ -94,6 +253,7 @@ fn test_404_for_missing_route() {
         "nonexistent",
         vec![],
         &types::Request::fake("GET", "/nonexistent"),
+        false,
     );
     assert_eq!(resp.status, 404);
     assert_eq!(resp.body_string(), "Not Found");
@@ -120,6 +280,7 @@ fn test_path_args_passthrough() {
         "check",
         vec!["42".into(), "abc".into()],
         &types::Request::fake("GET", "/check/42/abc"),
+        false,
     );
     assert_eq!(resp.status, 200);
     assert_eq!(resp.body_string(), "42-abc");
@@ -147,7 +308,7 @@ fn test_self_context_fields() {
         vec![("X-Custom".into(), "val1".into())],
         vec![],
     );
-    let resp = server.handle("GET", "ctx", vec![], &request);
+    let resp = server.handle("GET", "ctx", vec![], &request, false);
     assert_eq!(resp.status, 200);
     assert_eq!(resp.body_string(), "GET:bar:val1");
 
@@ -173,6 +334,7 @@ fn test_body_field_is_empty_string_on_get() {
         "check_body",
         vec![],
         &types::Request::fake("GET", "/check_body"),
+        false,
     );
     assert_eq!(resp.status, 200);
     assert_eq!(
@@ -199,7 +361,7 @@ fn test_path_does_not_include_query_string() {
     );
 
     let request = types::Request::fake_with("GET", "/check_path?foo=bar&baz=qux", vec![], vec![]);
-    let resp = server.handle("GET", "check_path", vec![], &request);
+    let resp = server.handle("GET", "check_path", vec![], &request, false);
     assert_eq!(resp.status, 200);
     assert_eq!(
         resp.body_string(),
@@ -237,6 +399,7 @@ fn test_lua_error_returns_500() {
         "crash",
         vec![],
         &types::Request::fake("GET", "/crash"),
+        false,
     );
     assert_eq!(resp.status, 500);
 
@@ -306,6 +469,7 @@ fn test_format_table_response_header_injection() {
         "inject",
         vec![],
         &types::Request::fake("GET", "/inject"),
+        false,
     );
     assert_eq!(resp.status, 200);
 
@@ -349,11 +513,18 @@ fn test_format_response_nil_and_string() {
         "nothing",
         vec![],
         &types::Request::fake("GET", "/nothing"),
+        false,
     );
     assert_eq!(resp.status, 200);
     assert_eq!(resp.body_string(), "");
 
-    let resp = server.handle("GET", "str", vec![], &types::Request::fake("GET", "/str"));
+    let resp = server.handle(
+        "GET",
+        "str",
+        vec![],
+        &types::Request::fake("GET", "/str"),
+        false,
+    );
     assert_eq!(resp.status, 200);
     assert_eq!(resp.body_string(), "just a string");
 
@@ -362,6 +533,7 @@ fn test_format_response_nil_and_string() {
         "invalid",
         vec![],
         &types::Request::fake("GET", "/invalid"),
+        false,
     );
     assert_eq!(resp.status, 500);
 
@@ -382,7 +554,13 @@ fn test_format_table_response_json_body() {
         "#,
     );
 
-    let resp = server.handle("GET", "json", vec![], &types::Request::fake("GET", "/json"));
+    let resp = server.handle(
+        "GET",
+        "json",
+        vec![],
+        &types::Request::fake("GET", "/json"),
+        false,
+    );
     assert_eq!(resp.status, 201);
 
     let ct = resp.headers.iter().find(|(k, _)| k == "Content-Type");
@@ -417,10 +595,22 @@ fn test_format_table_response_clamps_status() {
         "#,
     );
 
-    let resp = server.handle("GET", "low", vec![], &types::Request::fake("GET", "/low"));
+    let resp = server.handle(
+        "GET",
+        "low",
+        vec![],
+        &types::Request::fake("GET", "/low"),
+        false,
+    );
     assert!(resp.status >= 100, "status 50 should be clamped up");
 
-    let resp = server.handle("GET", "high", vec![], &types::Request::fake("GET", "/high"));
+    let resp = server.handle(
+        "GET",
+        "high",
+        vec![],
+        &types::Request::fake("GET", "/high"),
+        false,
+    );
     assert!(resp.status <= 599, "status 999 should be clamped down");
 
     let resp = server.handle(
@@ -428,6 +618,7 @@ fn test_format_table_response_clamps_status() {
         "negative",
         vec![],
         &types::Request::fake("GET", "/negative"),
+        false,
     );
     assert!(resp.status >= 100, "negative status should be clamped up");
 
@@ -456,6 +647,7 @@ fn test_all_method_registration() {
         "handle",
         vec![],
         &types::Request::fake("GET", "/handle"),
+        false,
     );
     assert_eq!(resp.body_string(), "GET");
 
@@ -464,6 +656,7 @@ fn test_all_method_registration() {
         "handle",
         vec![],
         &types::Request::fake("POST", "/handle"),
+        false,
     );
     assert_eq!(resp.body_string(), "POST");
 
@@ -472,6 +665,7 @@ fn test_all_method_registration() {
         "handle",
         vec![],
         &types::Request::fake("PUT", "/handle"),
+        false,
     );
     assert_eq!(resp.body_string(), "PUT");
 
@@ -480,6 +674,7 @@ fn test_all_method_registration() {
         "handle",
         vec![],
         &types::Request::fake("PATCH", "/handle"),
+        false,
     );
     assert_eq!(resp.body_string(), "PATCH");
 
@@ -488,6 +683,7 @@ fn test_all_method_registration() {
         "handle",
         vec![],
         &types::Request::fake("DELETE", "/handle"),
+        false,
     );
     assert_eq!(resp.body_string(), "DELETE");
 
@@ -496,6 +692,7 @@ fn test_all_method_registration() {
         "anything",
         vec![],
         &types::Request::fake("GET", "/anything"),
+        false,
     );
     assert_eq!(resp.body_string(), "ALL:GET");
 
@@ -504,6 +701,7 @@ fn test_all_method_registration() {
         "anything",
         vec![],
         &types::Request::fake("POST", "/anything"),
+        false,
     );
     assert_eq!(resp.body_string(), "ALL:POST");
 
@@ -537,6 +735,7 @@ fn test_run_deferred_executes_in_reverse_order() {
         "deferred",
         vec![],
         &types::Request::fake("GET", "/deferred"),
+        false,
     );
     assert_eq!(resp.status, 200);
 
@@ -567,6 +766,7 @@ fn test_extract_query_edge_cases() {
         "q",
         vec![],
         &types::Request::fake("GET", "/q?foo=bar&baz=qux"),
+        false,
     );
     let body = resp.body_string();
     assert!(body.contains("foo=bar"), "query params should be parsed");
@@ -577,6 +777,7 @@ fn test_extract_query_edge_cases() {
         "q",
         vec![],
         &types::Request::fake("GET", "/q?key=with+space"),
+        false,
     );
     let body = resp.body_string();
     assert!(body.contains("key=with space"), "+ should decode to space");
@@ -586,10 +787,17 @@ fn test_extract_query_edge_cases() {
         "q",
         vec![],
         &types::Request::fake("GET", "/q?empty="),
+        false,
     );
     assert_eq!(resp.status, 200);
 
-    let resp = server.handle("GET", "q", vec![], &types::Request::fake("GET", "/q?noeq"));
+    let resp = server.handle(
+        "GET",
+        "q",
+        vec![],
+        &types::Request::fake("GET", "/q?noeq"),
+        false,
+    );
     assert_eq!(resp.status, 200);
 
     let _ = fs::remove_file(dir.join("test.redb"));

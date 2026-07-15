@@ -254,7 +254,19 @@ fn start_server_for_tests(db: Arc<Db>) -> Result<u16> {
 
     let server = rouille::Server::new("127.0.0.1:0", move |rouille_req| {
         let req = types::from_rouille_request(rouille_req);
-        if req.url.starts_with("/api/v/") {
+        if req.url.starts_with("/api/public/") {
+            let path = req.url.strip_prefix("/api/public/").unwrap_or("");
+            let mut segments: Vec<String> = path
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+            if !segments.is_empty() {
+                let name = segments.remove(0);
+                let resp = api_server.handle(req.method.as_str(), &name, segments, &req, true);
+                return types::to_rouille_response(resp);
+            }
+        } else if req.url.starts_with("/api/v/") {
             let path = req.url.strip_prefix("/api/v/").unwrap_or("");
             let mut segments: Vec<String> = path
                 .split('/')
@@ -263,7 +275,7 @@ fn start_server_for_tests(db: Arc<Db>) -> Result<u16> {
                 .collect();
             if !segments.is_empty() {
                 let name = segments.remove(0);
-                let resp = api_server.handle(req.method.as_str(), &name, segments, &req);
+                let resp = api_server.handle(req.method.as_str(), &name, segments, &req, false);
                 return types::to_rouille_response(resp);
             }
         }
@@ -286,6 +298,13 @@ async fn run_single_server_test(dir: &Path, test_name: &str, port: u16, db: Arc<
         let globals = lua.globals();
         for m in &["get", "post", "put", "patch", "delete", "all"] {
             let _ = globals.set(*m, lua.create_table()?);
+        }
+        {
+            let public = lua.create_table()?;
+            for m in &["get", "post", "put", "patch", "delete", "all"] {
+                let _ = public.set(*m, lua.create_table()?);
+            }
+            let _ = globals.set("public", public);
         }
         load_lua_file(&lua, &init_path).await?;
     }

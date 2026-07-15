@@ -786,7 +786,13 @@ fn test_server_api_ping() {
         std::path::PathBuf::from("/dev/null"),
     );
 
-    let resp = server.handle("GET", "ping", vec![], &server_req("GET", "/api/v/ping"));
+    let resp = server.handle(
+        "GET",
+        "ping",
+        vec![],
+        &server_req("GET", "/api/v/ping"),
+        false,
+    );
     assert_eq!(resp.status, 200);
 }
 
@@ -806,6 +812,7 @@ fn test_server_api_post() {
         "data",
         vec![],
         &server_req_with_body("POST", "/api/v/data", r#"{"foo":"bar"}"#),
+        false,
     );
     assert_eq!(resp.status, 201);
     let body = read_body(&resp);
@@ -831,6 +838,7 @@ fn test_server_api_path_args() {
         "user",
         vec!["42".into()],
         &server_req("GET", "/api/v/user/42"),
+        false,
     );
     assert_eq!(resp.status, 200);
     let body = read_body(&resp);
@@ -853,7 +861,13 @@ fn test_server_api_all_methods() {
     );
 
     // GET
-    let r = server.handle("GET", "ping", vec![], &server_req("GET", "/api/v/ping"));
+    let r = server.handle(
+        "GET",
+        "ping",
+        vec![],
+        &server_req("GET", "/api/v/ping"),
+        false,
+    );
     assert_eq!(r.status, 200);
 
     // PUT
@@ -862,6 +876,7 @@ fn test_server_api_all_methods() {
         "replace",
         vec![],
         &server_req("PUT", "/api/v/replace"),
+        false,
     );
     assert_eq!(r.status, 200);
 
@@ -871,6 +886,7 @@ fn test_server_api_all_methods() {
         "partial",
         vec![],
         &server_req("PATCH", "/api/v/partial"),
+        false,
     );
     assert_eq!(r.status, 200);
 
@@ -880,6 +896,7 @@ fn test_server_api_all_methods() {
         "remove",
         vec![],
         &server_req("DELETE", "/api/v/remove"),
+        false,
     );
     assert_eq!(r.status, 204);
 
@@ -889,6 +906,7 @@ fn test_server_api_all_methods() {
         "catchall",
         vec![],
         &server_req("OPTIONS", "/api/v/catchall"),
+        false,
     );
     assert_eq!(r.status, 200);
 }
@@ -909,6 +927,7 @@ fn test_server_api_defer() {
         "deferred",
         vec![],
         &server_req("GET", "/api/v/deferred"),
+        false,
     );
     assert_eq!(resp.status, 200);
 
@@ -943,6 +962,7 @@ fn test_server_api_sync_bindings() {
         "json_encode_test",
         vec![],
         &server_req("GET", "/api/v/json_encode_test"),
+        false,
     );
     assert_eq!(resp.status, 200);
     let body = read_body(&resp);
@@ -956,6 +976,7 @@ fn test_server_api_sync_bindings() {
         "json_decode_test",
         vec![],
         &server_req("GET", "/api/v/json_decode_test"),
+        false,
     );
     assert_eq!(resp.status, 200);
     let body = read_body(&resp);
@@ -969,6 +990,7 @@ fn test_server_api_sync_bindings() {
         "env_get_test",
         vec![],
         &server_req("GET", "/api/v/env_get_test"),
+        false,
     );
     assert_eq!(resp.status, 200);
     let body = read_body(&resp);
@@ -984,6 +1006,7 @@ fn test_server_api_sync_bindings() {
         "dump_test",
         vec![],
         &server_req("GET", "/api/v/dump_test"),
+        false,
     );
     assert_eq!(resp.status, 200);
     let body = read_body(&resp);
@@ -996,6 +1019,7 @@ fn test_server_api_sync_bindings() {
         "copy_test",
         vec![],
         &server_req("GET", "/api/v/copy_test"),
+        false,
     );
     assert_eq!(resp.status, 200);
     let body = read_body(&resp);
@@ -1011,6 +1035,7 @@ fn test_server_api_sync_bindings() {
         "deep_copy_test",
         vec![],
         &server_req("GET", "/api/v/deep_copy_test"),
+        false,
     );
     assert_eq!(resp.status, 200);
     let body = read_body(&resp);

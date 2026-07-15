@@ -66,7 +66,8 @@ impl WebServer {
             let req = types::from_rouille_request(rouille_req);
 
             if req.url.starts_with("/api") {
-                if let Some(ref required_key) = auth_key
+                if !req.url.starts_with("/api/public/")
+                    && let Some(ref required_key) = auth_key
                     && !constant_time_eq(
                         req.header("X-SpyWeb-Key").unwrap_or_default().as_bytes(),
                         required_key.as_bytes(),
@@ -225,6 +226,32 @@ fn handle_api_request(
 ) -> Result<types::Response> {
     let url = &request.url;
 
+    if let Some(path) = url.strip_prefix("/api/public/") {
+        let mut segments: Vec<String> = path
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        if segments.is_empty() {
+            return Ok(types::Response::empty_404());
+        }
+        let name = segments.remove(0);
+        let source = match std::fs::read_to_string("server/init.lua") {
+            Ok(s) => s,
+            Err(_) => {
+                return Ok(
+                    types::Response::text("Server configuration not available").with_status(500)
+                );
+            }
+        };
+        let server = crate::lua::server::ApiServer::new(
+            db.clone(),
+            source,
+            std::path::PathBuf::from("server/error.log"),
+        );
+        return Ok(server.handle(request.method.as_str(), &name, segments, request, true));
+    }
+
     if let Some(path) = url.strip_prefix("/api/v/") {
         let mut segments: Vec<String> = path
             .split('/')
@@ -248,7 +275,7 @@ fn handle_api_request(
             source,
             std::path::PathBuf::from("server/error.log"),
         );
-        return Ok(server.handle(request.method.as_str(), &name, segments, request));
+        return Ok(server.handle(request.method.as_str(), &name, segments, request, false));
     }
 
     if url == "/api/records" {

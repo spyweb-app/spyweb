@@ -70,6 +70,7 @@ impl ApiServer {
         name: &str,
         path_args: Vec<String>,
         req: &types::Request,
+        is_public: bool,
     ) -> types::Response {
         let ctx_fields = LuaContext::from_api(req, method, path_args);
         let method = method.to_string();
@@ -107,7 +108,7 @@ impl ApiServer {
             }
 
             let self_table = build_context_table(&lua, &ctx_fields);
-            let func = match resolve_handler(&lua, &method, &name) {
+            let func = match resolve_handler(&lua, &method, &name, is_public) {
                 Ok(f) => f,
                 Err(r) => return r,
             };
@@ -206,6 +207,24 @@ async fn inject_method_tables(lua: &mlua::Lua, error_log_path: &std::path::Path)
             .await;
         }
     }
+
+    let public = lua.create_table().unwrap();
+    for m in &["get", "post", "put", "patch", "delete", "all"] {
+        if let Err(e) = public.set(*m, lua.create_table().unwrap()) {
+            log_server_error(
+                &format!("API server: failed to inject public.{} table: {}", m, e),
+                error_log_path,
+            )
+            .await;
+        }
+    }
+    if let Err(e) = lua.globals().set("public", public) {
+        log_server_error(
+            &format!("API server: failed to inject public table: {}", e),
+            error_log_path,
+        )
+        .await;
+    }
 }
 
 #[cfg(feature = "luau")]
@@ -246,20 +265,36 @@ fn resolve_handler(
     lua: &mlua::Lua,
     method: &str,
     name: &str,
+    is_public: bool,
 ) -> Result<mlua::Function, types::Response> {
     let method_lower = method.to_lowercase();
     let globals = lua.globals();
 
-    if let Ok(m_table) = globals.get::<mlua::Table>(method_lower.as_str())
-        && let Ok(f) = m_table.get::<mlua::Function>(name)
-    {
-        return Ok(f);
-    }
+    if is_public {
+        if let Ok(pub_table) = globals.get::<mlua::Table>("public") {
+            if let Ok(m_table) = pub_table.get::<mlua::Table>(method_lower.as_str())
+                && let Ok(f) = m_table.get::<mlua::Function>(name)
+            {
+                return Ok(f);
+            }
+            if let Ok(all_table) = pub_table.get::<mlua::Table>("all")
+                && let Ok(f) = all_table.get::<mlua::Function>(name)
+            {
+                return Ok(f);
+            }
+        }
+    } else {
+        if let Ok(m_table) = globals.get::<mlua::Table>(method_lower.as_str())
+            && let Ok(f) = m_table.get::<mlua::Function>(name)
+        {
+            return Ok(f);
+        }
 
-    if let Ok(all_table) = globals.get::<mlua::Table>("all")
-        && let Ok(f) = all_table.get::<mlua::Function>(name)
-    {
-        return Ok(f);
+        if let Ok(all_table) = globals.get::<mlua::Table>("all")
+            && let Ok(f) = all_table.get::<mlua::Function>(name)
+        {
+            return Ok(f);
+        }
     }
 
     Err(types::Response::text("Not Found").with_status(404))
@@ -383,7 +418,7 @@ async fn run_deferred(lua: &mlua::Lua, error_log_path: &std::path::Path) {
 
 async fn handle_error(name: &str, e: mlua::Error, error_log_path: PathBuf) -> types::Response {
     crate::t_eprintln!("API Server error in endpoint '{}': {}", name, e);
-    let msg = format!("Error in /api/v/{}: {}\n", name, e);
+    let msg = format!("Error in endpoint '{}': {}\n", name, e);
     let task = crate::services::io::IoTask {
         path: error_log_path,
         content: msg.into_bytes(),

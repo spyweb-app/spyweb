@@ -123,6 +123,36 @@ fn test_handle_api_request_404() {
 }
 
 #[test]
+fn test_handle_api_request_public_lua_server_missing_init() {
+    let db = test_db();
+    let jobs = Arc::new(std::sync::RwLock::new(vec![]));
+    let request = types::Request::fake("GET", "/api/public/status");
+    let resp = handle_api_request(&db, &jobs, &request).unwrap();
+    assert_eq!(resp.status, 500, "missing init.lua should return 500");
+}
+
+#[test]
+fn test_handle_api_request_public_with_query_string() {
+    let db = test_db();
+    let jobs = Arc::new(std::sync::RwLock::new(vec![]));
+    let request = types::Request::fake("GET", "/api/public/health?foo=bar");
+    let resp = handle_api_request(&db, &jobs, &request).unwrap();
+    assert_eq!(
+        resp.status, 500,
+        "/api/public/ with query string should still route to Lua server"
+    );
+}
+
+#[test]
+fn test_handle_api_request_public_404_on_missing_name() {
+    let db = test_db();
+    let jobs = Arc::new(std::sync::RwLock::new(vec![]));
+    let request = types::Request::fake("GET", "/api/public/");
+    let resp = handle_api_request(&db, &jobs, &request).unwrap();
+    assert_eq!(resp.status, 404, "empty public endpoint should 404");
+}
+
+#[test]
 fn test_handle_api_request_v_lua_server_missing_init() {
     let db = test_db();
     let jobs = Arc::new(std::sync::RwLock::new(vec![]));
