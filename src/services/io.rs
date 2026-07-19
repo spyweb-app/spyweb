@@ -340,7 +340,8 @@ pub(crate) fn validate_path(path: &Path) -> Result<()> {
 
     if check_path.exists() {
         let canonical = check_path.canonicalize()?;
-        if !canonical.starts_with(&current_dir) {
+        let canonical_cwd = current_dir.canonicalize()?;
+        if !canonical.starts_with(&canonical_cwd) {
             return Err(anyhow::anyhow!("Path escapes sandbox via symlink."));
         }
     }
