@@ -147,7 +147,7 @@ pub fn send_notification(title: &str, body: &str, timeout: u32) -> Result<()> {
         .timeout(Timeout::Milliseconds(timeout))
         .show()
     {
-        crate::t_println!("Skipped desktop notification (OS error): {}", e);
+        crate::t_warnln!("Skipped desktop notification (OS error): {}", e);
     }
     Ok(())
 }

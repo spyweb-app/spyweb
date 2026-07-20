@@ -22,7 +22,7 @@ pub fn start_app_with_port(port_override: Option<u16>, disable_server: bool) -> 
         crate::services::utils::shutdown_system();
         std::process::exit(0);
     }) {
-        crate::t_println!("Warning: Could not set Ctrl-C handler: {}", e);
+        crate::t_warnln!("Warning: Could not set Ctrl-C handler: {}", e);
     }
 
     let db = Arc::new(Db::open("data")?);

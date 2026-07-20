@@ -92,7 +92,7 @@ impl WebServer {
         })
         .map_err(|e| anyhow::anyhow!("Failed to start server on {}: {}", addr, e))?;
 
-        crate::t_println!(
+        println!(
             "Server listening on {}",
             crate::color::c_info(&format!("http://{}", addr))
         );

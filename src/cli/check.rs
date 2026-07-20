@@ -75,7 +75,7 @@ fn check_update() -> anyhow::Result<()> {
     let json = match fetch_json(UPDATE_ENDPOINT, &agent) {
         Some(v) => v,
         None => {
-            println!("  Could not check for updates: network error");
+            eprintln!("  Could not check for updates: network error");
             return Ok(());
         }
     };
@@ -90,7 +90,7 @@ fn check_update() -> anyhow::Result<()> {
     let channel_data = match json.get(channel) {
         Some(c) => c,
         None => {
-            println!(
+            eprintln!(
                 "  Could not check for updates: no data for channel '{}'",
                 channel
             );

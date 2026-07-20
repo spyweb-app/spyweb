@@ -103,8 +103,10 @@ enum Commands {
     Start {
         #[arg(long)]
         port: Option<u16>,
-        #[arg(long = "no-server")]
+        #[arg(short = 'n', long = "no-server")]
         no_server: bool,
+        #[arg(short = 'q', long, action = clap::ArgAction::Count)]
+        quiet: u8,
     },
     Debug {
         job_name: String,
@@ -134,12 +136,22 @@ enum Commands {
 
 pub fn listen_command() -> anyhow::Result<()> {
     spawn_terminal_if_needed();
+    crate::macros::init_log_level_from_env();
 
     let cli = Cli::parse();
 
     match cli.command {
         Commands::Check { command } => check::run_check(command),
-        Commands::Start { port, no_server } => {
+        Commands::Start {
+            port,
+            no_server,
+            quiet,
+        } => {
+            match quiet {
+                1 => crate::macros::set_log_level(crate::macros::LOG_LEVEL_WARN),
+                _ if quiet >= 2 => crate::macros::set_log_level(crate::macros::LOG_LEVEL_ERROR),
+                _ => {}
+            }
             if let Err(e) = crate::entry::start_app_with_port(port, no_server) {
                 crate::t_eprintln!("Application error: {}", e);
                 std::process::exit(1);

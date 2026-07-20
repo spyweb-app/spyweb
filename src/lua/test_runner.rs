@@ -82,7 +82,7 @@ async fn run_tests_async(
                     total_passed += 1;
                 }
                 Err(e) => {
-                    println!(" ... {}", crate::color::c_err("FAILED"));
+                    eprintln!(" ... {}", crate::color::c_err("FAILED"));
                     print_failure_block(&test_name, &e);
                     total_failed += 1;
                 }
@@ -121,7 +121,7 @@ async fn run_tests_async(
                         total_passed += 1;
                     }
                     Err(e) => {
-                        println!(" ... {}", crate::color::c_err("FAILED"));
+                        eprintln!(" ... {}", crate::color::c_err("FAILED"));
                         print_failure_block(&test_name, &e);
                         total_failed += 1;
                     }
@@ -167,11 +167,11 @@ fn print_test_header(job_name: &str, test_count: usize) {
 }
 
 fn print_failure_block(test_name: &str, err: &anyhow::Error) {
-    println!();
-    println!("failures:");
-    println!();
-    println!("---- {} stdout ----", test_name);
-    println!("{:?}", err);
+    eprintln!();
+    eprintln!("failures:");
+    eprintln!();
+    eprintln!("---- {} stdout ----", test_name);
+    eprintln!("{:?}", err);
 }
 
 pub async fn discover_tests(job_dir: &Path, job_name: &str) -> Result<Vec<String>> {
