@@ -18,7 +18,7 @@ pub fn watch_configs(tx: Sender<()>) -> Result<()> {
     let (notify_tx, notify_rx) = std::sync::mpsc::channel();
     let mut watcher = notify::recommended_watcher(notify_tx)?;
 
-    for path in [Path::new("jobs.toml"), Path::new("jobs")] {
+    /* for path in [Path::new("jobs.toml"), Path::new("jobs")] {
         if path.exists() {
             let recursive = if path.is_dir() {
                 RecursiveMode::Recursive
@@ -27,7 +27,9 @@ pub fn watch_configs(tx: Sender<()>) -> Result<()> {
             };
             watcher.watch(path, recursive)?;
         }
-    }
+    } */
+
+    watcher.watch(".", RecursiveMode::Recursive)?;
 
     for event in notify_rx {
         match event {
