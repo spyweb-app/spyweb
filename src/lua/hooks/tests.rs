@@ -19,6 +19,16 @@ fn unique_test_dir(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("spyweb-{name}-{}-{nanos}", std::process::id()))
 }
 
+fn single_thread_executor() -> (Arc<smol::Executor<'static>>, smol::channel::Sender<()>) {
+    let ex = Arc::new(smol::Executor::new());
+    let (tx, rx) = smol::channel::unbounded::<()>();
+    let executor = Arc::clone(&ex);
+    std::thread::spawn(move || {
+        let _ = smol::block_on(executor.run(rx.recv()));
+    });
+    (ex, tx)
+}
+
 #[test]
 fn source_uses_cdp_detects_cdp_usage() {
     assert!(source_uses_cdp("local page = cdp.connect('ws://example')"));
@@ -755,10 +765,12 @@ end
     });
 
     let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
 
     smol::block_on(async {
         // Run Group 3 URL Dispatch
-        crate::scraper::pipeline::run_urls_cycle(Arc::clone(&job), &db, &runner, 2).await;
+        crate::scraper::pipeline::run_urls_cycle(Arc::clone(&job), &db, &runner, 2, &ex, None)
+            .await;
 
         let hooks_ref = job.hooks.as_ref().unwrap();
         let lua_guard = hooks_ref.lua.lock().await;
@@ -1090,10 +1102,12 @@ end
     });
 
     let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
 
     smol::block_on(async {
         // Run workers. Panic on https://panic.com should be caught and logged
-        crate::scraper::pipeline::run_urls_cycle(Arc::clone(&job), &db, &runner, 2).await;
+        crate::scraper::pipeline::run_urls_cycle(Arc::clone(&job), &db, &runner, 2, &ex, None)
+            .await;
 
         let hooks_ref = job.hooks.as_ref().unwrap();
         let lua = hooks_ref.lua.lock().await;

@@ -21,6 +21,16 @@ fn unique_test_dir(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("spyweb-{name}-{}-{nanos}", std::process::id()))
 }
 
+fn single_thread_executor() -> (Arc<smol::Executor<'static>>, smol::channel::Sender<()>) {
+    let ex = Arc::new(smol::Executor::new());
+    let (tx, rx) = smol::channel::unbounded::<()>();
+    let executor = Arc::clone(&ex);
+    std::thread::spawn(move || {
+        let _ = smol::block_on(executor.run(rx.recv()));
+    });
+    (ex, tx)
+}
+
 // ---------------------------------------------------------------------------
 // pipeline.rs tests
 // ---------------------------------------------------------------------------
@@ -265,9 +275,10 @@ end
         dir: Some(dir.clone()),
     });
     let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
 
     smol::block_on(async {
-        run_urls_cycle(Arc::clone(&job), &db, &runner, 1).await;
+        run_urls_cycle(Arc::clone(&job), &db, &runner, 1, &ex, None).await;
 
         let job_ref = &*job;
         let hooks = job_ref.hooks.as_ref().unwrap();
@@ -343,9 +354,10 @@ end
         dir: Some(dir.clone()),
     });
     let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
 
     smol::block_on(async {
-        run_urls_cycle(Arc::clone(&job), &db, &runner, 2).await;
+        run_urls_cycle(Arc::clone(&job), &db, &runner, 2, &ex, None).await;
 
         let job_ref = &*job;
         let hooks = job_ref.hooks.as_ref().unwrap();
@@ -417,9 +429,10 @@ end
         dir: Some(dir.clone()),
     });
     let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
 
     smol::block_on(async {
-        run_multi_cycle(Arc::clone(&job), &db, &runner, 2).await;
+        run_multi_cycle(Arc::clone(&job), &db, &runner, 2, &ex, None).await;
 
         let job_ref = &*job;
         let hooks = job_ref.hooks.as_ref().unwrap();
@@ -428,6 +441,97 @@ end
         let count: u32 = globals.get("worker_count").unwrap();
         assert_eq!(count, 2);
     });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn worker_tasks_run_on_supplied_executor() {
+    let dir = unique_test_dir("worker-thread-probe");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(
+        &hook_path,
+        r#"
+function override_fetch(request)
+    return { status = 200, url = request.url, headers = {}, body = "<html></html>" }
+end
+
+function override_extract(response)
+    return {}
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, Arc::clone(&db), "test_job").unwrap();
+    let job = Arc::new(Job {
+        config: JobConfig {
+            name: "test job".into(),
+            url: "https://example.com".into(),
+            selector: ".item".into(),
+            fields: vec![Field::Shorthand("title".into())],
+            keywords: None,
+            search_fields: None,
+            webhook: None,
+            debug: false,
+            enabled: true,
+            interval: 60,
+            proxy: None,
+            notification: None,
+            headers: None,
+            hash_fields: None,
+            workers: Some(16),
+            urls: None,
+        },
+        hooks: Some(hooks),
+        has_hooks_file: true,
+        dir: Some(dir.clone()),
+    });
+    let runner = Arc::new(Runner::new());
+
+    let ex = Arc::new(smol::Executor::new());
+    let (stop_tx, stop_rx) = smol::channel::unbounded::<()>();
+    let (executor_thread_tx, executor_thread_rx) = std::sync::mpsc::channel();
+    let executor = Arc::clone(&ex);
+    let rx = stop_rx.clone();
+    std::thread::spawn(move || {
+        executor_thread_tx
+            .send(std::thread::current().id())
+            .unwrap();
+        let _ = smol::block_on(executor.run(rx.recv()));
+    });
+    let executor_thread = executor_thread_rx.recv().unwrap();
+
+    let probe: Arc<std::sync::Mutex<std::collections::HashSet<std::thread::ThreadId>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+
+    smol::block_on(async {
+        run_multi_cycle(
+            Arc::clone(&job),
+            &db,
+            &runner,
+            16,
+            &ex,
+            Some(Arc::clone(&probe)),
+        )
+        .await;
+    });
+    drop(stop_tx);
+
+    let threads = probe.lock().unwrap();
+    eprintln!("executor thread: {executor_thread:?}, worker threads: {threads:?}");
+    assert!(
+        !threads.is_empty(),
+        "workers did not record an execution thread"
+    );
+    assert!(
+        threads.iter().all(|thread| *thread == executor_thread),
+        "workers ran outside the supplied application executor: {threads:?}",
+    );
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_file(&hook_path);

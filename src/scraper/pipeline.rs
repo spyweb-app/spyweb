@@ -3,16 +3,39 @@ use crate::{
     scraper::runner::Runner, services::db::Db, services::notifier, services::webhook,
 };
 use anyhow::Result;
-use smol::Timer;
-use std::collections::VecDeque;
+use smol::{Executor, Timer};
+use std::collections::{HashSet, VecDeque};
+use std::future::Future;
 use std::sync::{Arc, Mutex};
+use std::thread::ThreadId;
 use std::time::Duration;
 
 type UrlQueue = Arc<Mutex<VecDeque<String>>>;
 
+pub(crate) type ThreadProbe = Option<Arc<Mutex<HashSet<ThreadId>>>>;
+
 const WORKER_STAGGER_MS: u64 = 200;
 
-pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
+fn spawn_worker<F>(
+    ex: &Arc<Executor<'static>>,
+    future: F,
+    thread_probe: &ThreadProbe,
+) -> smol::Task<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let probe = thread_probe.clone();
+    ex.spawn(async move {
+        if let Some(p) = probe.as_ref() {
+            p.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(std::thread::current().id());
+        }
+        future.await;
+    })
+}
+
+pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>, ex: &Arc<Executor<'static>>) {
     let interval = Duration::from_secs(job.config.interval as u64);
     let worker_count = job.config.worker_count();
     let has_urls = job.config.has_urls();
@@ -23,9 +46,9 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>) {
         let started = std::time::Instant::now();
 
         if has_urls {
-            run_urls_cycle(Arc::clone(&job), &db, &runner, worker_count).await;
+            run_urls_cycle(Arc::clone(&job), &db, &runner, worker_count, ex, None).await;
         } else if worker_count > 1 {
-            run_multi_cycle(Arc::clone(&job), &db, &runner, worker_count).await;
+            run_multi_cycle(Arc::clone(&job), &db, &runner, worker_count, ex, None).await;
         } else {
             let base_request = RequestConfig::from_job(&job.config);
             if let Err(e) = run_once(&job, &db, &runner, &base_request, 1).await {
@@ -53,6 +76,8 @@ pub(crate) async fn run_urls_cycle(
     db: &Arc<Db>,
     runner: &Arc<Runner>,
     worker_count: usize,
+    ex: &Arc<Executor<'static>>,
+    thread_probe: ThreadProbe,
 ) {
     let queue: UrlQueue = Arc::new(Mutex::new(
         job.config.urls.clone().unwrap().into_iter().collect(),
@@ -68,22 +93,26 @@ pub(crate) async fn run_urls_cycle(
         let db = Arc::clone(db);
         let runner = Arc::clone(runner);
         let queue = Arc::clone(&queue);
-        handles.push(smol::spawn(async move {
-            loop {
-                let url = { queue.lock().unwrap_or_else(|e| e.into_inner()).pop_front() };
-                let url = match url {
-                    Some(u) => u,
-                    None => return,
-                };
-                let request = RequestConfig {
-                    url,
-                    ..RequestConfig::from_job(&job.config)
-                };
-                if let Err(e) = run_once(&job, &db, &runner, &request, worker_id).await {
-                    crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
+        handles.push(spawn_worker(
+            ex,
+            async move {
+                loop {
+                    let url = { queue.lock().unwrap_or_else(|e| e.into_inner()).pop_front() };
+                    let url = match url {
+                        Some(u) => u,
+                        None => return,
+                    };
+                    let request = RequestConfig {
+                        url,
+                        ..RequestConfig::from_job(&job.config)
+                    };
+                    if let Err(e) = run_once(&job, &db, &runner, &request, worker_id).await {
+                        crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
+                    }
                 }
-            }
-        }));
+            },
+            &thread_probe,
+        ));
     }
 
     for handle in handles {
@@ -96,6 +125,8 @@ pub(crate) async fn run_multi_cycle(
     db: &Arc<Db>,
     runner: &Arc<Runner>,
     worker_count: usize,
+    ex: &Arc<Executor<'static>>,
+    thread_probe: ThreadProbe,
 ) {
     let base_request = RequestConfig::from_job(&job.config);
 
@@ -109,11 +140,15 @@ pub(crate) async fn run_multi_cycle(
         let db = Arc::clone(db);
         let runner = Arc::clone(runner);
         let request = base_request.clone();
-        handles.push(smol::spawn(async move {
-            if let Err(e) = run_once(&job, &db, &runner, &request, worker_id).await {
-                crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
-            }
-        }));
+        handles.push(spawn_worker(
+            ex,
+            async move {
+                if let Err(e) = run_once(&job, &db, &runner, &request, worker_id).await {
+                    crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
+                }
+            },
+            &thread_probe,
+        ));
     }
 
     for handle in handles {

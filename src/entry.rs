@@ -97,8 +97,10 @@ fn spawn_jobs(
         .map(|job| {
             let runner = Arc::clone(runner);
             let db = Arc::clone(db);
+            let ex = Arc::clone(ex);
+            let job_ex = Arc::clone(&ex);
             ex.spawn(async move {
-                pipeline::run_job_loop(job, db, runner).await;
+                pipeline::run_job_loop(job, db, runner, &job_ex).await;
             })
         })
         .collect()
