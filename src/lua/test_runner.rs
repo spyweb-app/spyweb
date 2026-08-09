@@ -29,7 +29,16 @@ async fn run_tests_async(
         list: loader::load_dir_jobs("jobs", dummy_db.clone())?,
     };
 
-    let filtered_jobs: Vec<&Job> = if let Some(ref name) = job_name_filter {
+    // "server" is a reserved selector that targets the programmable API server's
+    // test suite instead of a job directory.
+    let server_requested = job_name_filter
+        .as_deref()
+        .map(|name| name.trim().eq_ignore_ascii_case("server"))
+        .unwrap_or(false);
+
+    let filtered_jobs: Vec<&Job> = if server_requested {
+        vec![]
+    } else if let Some(name) = job_name_filter.as_deref() {
         match profiles::find_job(&jobs, name) {
             Some(job) => vec![job],
             None => vec![],
@@ -41,10 +50,13 @@ async fn run_tests_async(
     let server_dir = std::path::Path::new("server");
     let has_server_tests =
         server_dir.join("init.lua").exists() && server_dir.join("tests.lua").exists();
+    let run_server_tests = has_server_tests && (server_requested || job_name_filter.is_none());
 
-    if filtered_jobs.is_empty() && !has_server_tests {
-        if let Some(name) = job_name_filter {
-            println!("No jobs found matching '{}'", crate::color::c_err(&name));
+    if filtered_jobs.is_empty() && !run_server_tests {
+        if server_requested {
+            println!("No server tests found (server/tests.lua missing).");
+        } else if let Some(ref name) = job_name_filter {
+            println!("No jobs found matching '{}'", crate::color::c_err(name));
         } else {
             println!("No jobs found to test.");
         }
@@ -90,7 +102,7 @@ async fn run_tests_async(
         }
     }
 
-    if has_server_tests {
+    if run_server_tests {
         let server_tests = match discover_tests(server_dir, "__server").await {
             Ok(tests) => tests,
             Err(e) => {

@@ -29,7 +29,7 @@ pub fn watch_configs(tx: Sender<()>) -> Result<()> {
         }
     } */
 
-    watcher.watch(".", RecursiveMode::Recursive)?;
+    watcher.watch(Path::new("."), RecursiveMode::Recursive)?;
 
     for event in notify_rx {
         match event {
