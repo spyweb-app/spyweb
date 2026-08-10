@@ -40,8 +40,10 @@ fn create_tables(conn: &Connection) -> Result<()> {
 impl SqliteBackend {
     pub fn open(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
         create_tables(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
