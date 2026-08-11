@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-08-11
+
+### Added
+- **CLI:** Added `spyweb start -q`/`-qq` flags and `SPYWEB_LOG` env var (`info`/`warn`/`error`) to filter log output during operation.
+
+### Changed
+- **Watcher:** File watcher now monitors entire project root recursively instead of only `jobs.toml` and `jobs/`. Lua modules loaded via `require()` from outside `jobs/` (e.g. `lib/`) will now trigger hot-reload.
+- **Concurrency:** Job workers now run on the app's `SPYWEB_THREADS` executor instead of a separate fixed-thread pool. Worker scheduling and CPU-bound hook work now distribute across `SPYWEB_THREADS` threads.
+- **SQLite:** Configure a five-second busy timeout and foreign-key enforcement explicitly when opening the database.
+
+### Fixed
+- **Windows:** Fix false-positive "Path escapes sandbox via symlink" errors caused by `validate_path` comparing canonical paths with mismatched `\\?\` prefixes on Windows.
+- **Testing:** Fix server test leaking when running `spyweb test <job>`. `server` is now a reserved selector that targets the API server suite only.
+
 ## [1.5.3] - 2026-07-15
 
 ### Added
