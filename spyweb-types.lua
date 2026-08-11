@@ -50,10 +50,19 @@
 ---@field kind   string   Error kind: "dns" | "timeout" | "proxy" | "tls" | "connect" | "size" | "http" | "unknown"
 ---@field proxy? string   Proxy URL that failed (only on proxy errors)
 
+---@class spyweb_fetch_response
+---@field status   integer               HTTP status code
+---@field body     string                Response body
+---@field headers  table<string,string>  Response headers
+---@field url      string                Final URL after redirects
+---@field time_ms? integer               Request duration in ms (absent if unknown)
+---@field size?    integer               Response body size in bytes (absent if unknown)
+---@field proxy?   string                Proxy URL used (if any)
+
 ---@class spyweb_fetch_result
----@field ok       boolean               Whether the request succeeded
----@field request  { url: string, headers: table<string,string>, proxy?: string }
----@field response spyweb_http_response|nil  HTTP response (present on both success and HTTP errors)
+---@field ok       boolean                Whether the request succeeded
+---@field request  { url: string, method: string, headers: table<string,string>, timeout?: number, max_body_size?: integer, proxy?: string }
+---@field response spyweb_fetch_response|nil  HTTP response (present on both success and HTTP errors)
 ---@field error    { message: string, kind: string }|nil  Error info (nil on success)
 
 --=============================================================================
@@ -373,9 +382,8 @@ function cdp.sleep(ms) end
 ---@field proxy?        string    Per-request proxy URL
 ---@field max_body_size? integer   Max response body in MB (integer, default 10)
 
----Override the fetch request before it is sent. Return a modified request or
----nil to use the default. NOTE: returning nil for override_fetch is an error
----(not a skip).
+---Override the fetch request before it is sent. Return a modified request to
+---use it; returning nil or false aborts the entire pipeline cycle.
 ---@param request spyweb_fetch_request
 ---@param ctx spyweb_context
 ---@return spyweb_fetch_request?
@@ -385,7 +393,7 @@ function before_fetch(request, ctx) end
 ---`status` and `body` fields. Returning nil produces an error.
 ---@param request spyweb_fetch_request
 ---@param ctx spyweb_context
----@return spyweb_http_response?
+---@return spyweb_http_response
 function override_fetch(request, ctx) end
 
 ---Post-process the fetch result. Return nil to skip the rest of the pipeline.
