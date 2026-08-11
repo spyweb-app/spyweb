@@ -8,9 +8,12 @@ use crate::services::db::Db;
 
 #[derive(Subcommand)]
 pub enum ProfileCommands {
+    /// Show profile status (exists / in use) for a job or all jobs
+    #[command(alias = "list")]
     Check { job: Option<String> },
-    List { job: Option<String> },
+    /// Wipe the browser profile for a job or all jobs (clears cookies/cache, keeps the directory)
     Clear { target: String },
+    /// Delete the profile directory for a job or all jobs entirely
     Delete { target: String },
 }
 
@@ -91,7 +94,7 @@ pub fn handle_profile_command(cmd: ProfileCommands) -> anyhow::Result<()> {
     let jobs = load_jobs_for_profiles()?;
 
     match cmd {
-        ProfileCommands::Check { job } | ProfileCommands::List { job } => {
+        ProfileCommands::Check { job } => {
             match job.as_deref() {
                 None | Some("all") | Some("--all") => print_profile_check_all(&jobs)?,
                 Some(target) => print_profile_check(resolve_job(&jobs, target)?)?,

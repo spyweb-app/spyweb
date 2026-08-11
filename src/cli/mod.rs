@@ -87,7 +87,9 @@ fn spawn_terminal_if_needed() {
     name = "spyweb",
     version,
     about = "Tiny web monitoring/scraping engine with Lua scripting",
-    disable_version_flag = true
+    disable_version_flag = true,
+    long_about = "Tiny web monitoring/scraping engine with Lua scripting.\n\nRuns scheduled scraping/monitoring jobs defined in jobs.toml or jobs/*/config.toml, and serves a dashboard + JSON API at http://127.0.0.1:7979 (change with `spyweb start --port` or SPYWEB_PORT).",
+    after_help = "\nExamples:\n  spyweb start                       Run the engine and web server\n  spyweb start -nqq --port 9000      Scrape only, errors only, port 9000\n  spyweb check config                Validate config and Lua syntax\n  spyweb test                        Run all Lua tests\n  spyweb debug \"My Job\"              One-shot debug run of a job\n  spyweb update --check              Check for a new version\n  spyweb profile list                Show browser profile status"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -96,39 +98,83 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Health check: prints version, validates configuration, checks for updates.
+    ///
+    /// With no subcommand this runs version + config validation + update check and
+    /// always exits 0 (purely informational). Use `spyweb check config` to fail
+    /// with a non-zero exit code on config errors.
     Check {
         #[command(subcommand)]
         command: Option<check::CheckSub>,
     },
+    /// Start the monitoring engine and the dashboard/API web server.
+    #[command(
+        after_help = "Examples:\n  spyweb start\n  spyweb start --port 9000\n  spyweb start -nqq --port 9000\n\nEnvironment:\n  SPYWEB_PORT          Override the dashboard/API port (default 7979)\n  SPYWEB_DISABLE_SERVER  Same as --no-server\n  SPYWEB_LOG           Same as -q/-qq (values: info|warn|error)"
+    )]
     Start {
+        /// Port for the dashboard and JSON API server (default 7979)
         #[arg(long)]
         port: Option<u16>,
+        /// Run the engine without the HTTP server (scraping/monitoring only)
         #[arg(short = 'n', long = "no-server")]
         no_server: bool,
+        /// Reduce log output (`-q` warnings & errors only, `-qq` errors only; additional `-q`s act like `-qq`)
         #[arg(short = 'q', long, action = clap::ArgAction::Count)]
         quiet: u8,
     },
+    /// Run a single job once with debug output.
+    ///
+    /// Runs the job even if `enabled = false`, prints extracted items and pipeline
+    /// stages to the terminal, and saves response HTML + JSON artifacts in the job
+    /// directory. Skips store, notification, and webhook phases.
+    #[command(after_help = "Example:\n  spyweb debug \"My Job\"")]
     Debug {
+        /// Job name or id to debug
         job_name: String,
     },
+    /// Run Lua tests for jobs or the API server.
+    ///
+    /// Each test_* function runs in an isolated Lua VM with a temporary database.
+    #[command(
+        after_help = "Examples:\n  spyweb test               Run all tests across all jobs\n  spyweb test \"My Job\"        Run a specific job's tests\n  spyweb test \"My Job\" price  Only tests whose name contains 'price'\n  spyweb test server          Run the programmable API server test suite (auto-starts server)"
+    )]
     Test {
+        /// Job name to test, or `server` for the API server suite; all jobs when omitted
         job_name: Option<String>,
+        /// Only run tests whose function name contains this substring
         pattern: Option<String>,
     },
+    /// Manage Chrome user data directories (profiles) for CDP jobs.
+    ///
+    /// Inspect, wipe, or delete per-job browser profile directories used by CDP
+    /// automation.
     Profile {
         #[command(subcommand)]
         command: profile::ProfileCommands,
     },
+    /// Print the version and active engine.
     #[command(aliases = ["v"])]
     Version,
+    /// Write Lua LSP type definitions (spyweb-types.lua + .luarc.json) to the current directory.
     Types,
+    /// Self-update the spyweb binary.
+    ///
+    /// Downloads the latest release and swaps it in. By default the old binary is
+    /// kept as a backup.
+    #[command(
+        after_help = "Examples:\n  spyweb update             Check, download, and replace (old kept as spyweb-v{version})\n  spyweb update -c          Check for updates without downloading\n  spyweb update -k backup   Keep the old binary as spyweb-backup\n  spyweb update -o          Discard the old binary"
+    )]
     Update {
+        /// Only check for updates; print the download URL without installing
         #[arg(short = 'c', long)]
         check: bool,
+        /// Skip the up-to-date check and always download and replace
         #[arg(short = 'f', long)]
         force: bool,
-        #[arg(short = 'k', long)]
+        /// Keep the old binary as spyweb-{SUFFIX}, or spyweb-v{version} when no suffix is given
+        #[arg(short = 'k', long, value_name = "SUFFIX")]
         keep: Option<Option<String>>,
+        /// Discard the old binary instead of keeping a backup (cannot be combined with --keep)
         #[arg(short = 'o', long)]
         overwrite: bool,
     },

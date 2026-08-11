@@ -8,7 +8,9 @@ const UPDATE_ENDPOINT: &str = "https://spyweb.app/latest.json";
 
 #[derive(Subcommand)]
 pub enum CheckSub {
+    /// Validate jobs.toml / jobs/*/config.toml and check Lua syntax (exits 1 on errors)
     Config,
+    /// Check online for a newer version of spyweb
     Update,
 }
 
