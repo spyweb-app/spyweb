@@ -1,6 +1,6 @@
 [package]
 name = "spyweb"
-version = "1.5.4"
+version = "1.5.4-beta"
 edition = "2024"
 authors = ["SpyWeb <support@spyweb.app>"]
 description = "A lightweight, self-contained monitoring & scrapring engine with Lua customization support"
