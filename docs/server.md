@@ -22,6 +22,12 @@ end
 ./spyweb start
 ```
 
+You can customize the port with `--port`, disable the web server with `--no-server` (`-n`), and control log verbosity with `-q` (warnings+errors) or `-qq` (errors only):
+
+```bash
+./spyweb start --port 9000 -nq
+```
+
 3. Hit your endpoints:
 
 ```bash
@@ -327,6 +333,7 @@ end
 | `SPYWEB_PORT` | `7979` | Server port |
 | `SPYWEB_API_KEY` | *none* | API authentication key |
 | `SPYWEB_DISABLE_SERVER` | *none* | Set to any value to skip starting the web server |
+| `SPYWEB_LOG` | `info` | Log verbosity: `info` (all), `warn` (warnings+errors), `error` (errors only) |
 
 ## Data Directory
 

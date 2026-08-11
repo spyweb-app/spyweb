@@ -1,6 +1,6 @@
 # REST API
 
-SpyWeb runs a built-in web server on `127.0.0.1:7979` which serves both the dashboard UI and a JSON API for querying your scraped records.
+SpyWeb runs a built-in web server on `127.0.0.1:7979` (configurable with `--port` or `SPYWEB_PORT`) which serves both the dashboard UI and a JSON API for querying your scraped records. Use `spyweb start --no-server` (or `-n`) to run without the web server, and `-q`/`-qq` or `SPYWEB_LOG` to control log verbosity.
 
 ## Authentication
 

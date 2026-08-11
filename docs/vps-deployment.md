@@ -62,7 +62,11 @@ RestartSec=5
 # Environment=SPYWEB_PORT=8080
 
 # Optional: Disable the web server entirely (scraping only)
+# ExecStart=/root/spyweb/spyweb start --no-server
 # Environment=SPYWEB_DISABLE_SERVER=1
+
+# Optional: Log verbosity (info, warn, error)
+# Environment=SPYWEB_LOG=warn
 
 [Install]
 WantedBy=multi-user.target

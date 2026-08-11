@@ -1865,8 +1865,14 @@ body = "Title: {title}\nLink: {link}"</code></pre>
 
                             <h4 class="title is-5 mb-2">Authentication</h4>
                             <p>If the <code>SPYWEB_API_KEY</code> environment variable is set, all <code>/api/*</code>
-                                endpoints require the <code>X-SpyWeb-Key</code> header.</p>
+                                endpoints require the <code>X-SpyWeb-Key</code> header (except <code>/api/public/*</code>).</p>
                             <pre><code>curl -H "X-SpyWeb-Key: your_key" http://127.0.0.1:7979/api/jobs</code></pre>
+
+                            <h4 class="title is-5 mb-2">Server Configuration</h4>
+                            <p>The default port <code>7979</code> can be changed with <code>--port</code> or <code>SPYWEB_PORT</code>.
+                            Start without the web server via <code>--no-server</code> (short <code>-n</code>) or <code>SPYWEB_DISABLE_SERVER</code>.
+                            Control log verbosity with <code>-q</code> (warnings+errors), <code>-qq</code> (errors only), or <code>SPYWEB_LOG</code>.
+                            All flags can be combined: <code>./spyweb start --port 9000 -nq</code>.</p>
 
                             <h4 class="title is-5 mb-2">Endpoints</h4>
                             <table class="table is-fullwidth">
@@ -1896,7 +1902,11 @@ body = "Title: {title}\nLink: {link}"</code></pre>
                                     </tr>
                                     <tr>
                                         <td><code>/api/v/{name}</code></td>
-                                        <td>Programmable API server — define custom Lua routes via <code>server/init.lua</code> (<a href="server.md">docs</a>)</td>
+                                        <td>Programmable API server — requires auth (<a href="server.md">docs</a>)</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>/api/public/{name}</code></td>
+                                        <td>Programmable API server — no auth required (<a href="server.md">docs</a>)</td>
                                     </tr>
                                 </tbody>
                             </table>
