@@ -222,7 +222,7 @@ function http_multipart(url, fields, headers) end
 -- (nil, error) on failure.
 ---@param host string
 ---@param port? integer  Default 443
----@return { subject: string, issuer: string, serial: string, not_before: string, not_after: string, days_left: integer, fingerprint: string }|nil, string|nil
+---@return { subject: string, issuer: string, serial: string, not_before: string, not_after: string, days_left: integer, fingerprint: string }|nil, spyweb_http_error?
 function tls_probe(host, port) end
 
 --=============================================================================

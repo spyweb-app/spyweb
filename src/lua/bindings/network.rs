@@ -199,20 +199,24 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
                 let mut req = agent.post(&url);
                 if let Some(h) = headers.as_ref() {
                     for (k, v) in h {
+                        if k.eq_ignore_ascii_case("content-type") {
+                            continue;
+                        }
                         req = req.header(k, v);
                     }
                 }
 
+                let start = std::time::Instant::now();
                 let mut response = req
                     .send(form)
                     .map_err(|e| format!("http_multipart failed: {e}"))?;
                 let status = response.status().as_u16();
                 let headers = http::collect_headers(response.headers());
                 let body = http::read_response_body(response.body_mut(), http::MAX_RESPONSE_BODY)?;
-                let elapsed = std::time::Instant::now().elapsed().as_millis() as u64;
+                let elapsed = start.elapsed().as_millis() as u64;
                 let size = body.len() as u64;
                 let raw = RawResponse {
-                    url: url.clone(),
+                    url,
                     status,
                     headers,
                     body,
@@ -239,12 +243,12 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
 
     // tls_probe(host, port?) -> table | (nil, error)
     let tls_probe =
-        lua.create_async_function(|_lua, (host, port): (String, Option<u16>)| async move {
+        lua.create_async_function(|ilua, (host, port): (String, Option<u16>)| async move {
             let port = port.unwrap_or(443);
             let result = smol::unblock(move || tls::do_tls_probe(&host, port)).await;
             match result {
                 Ok(info) => {
-                    let table = _lua.create_table()?;
+                    let table = ilua.create_table()?;
                     table.set("subject", info.subject)?;
                     table.set("issuer", info.issuer)?;
                     table.set("serial", info.serial)?;
@@ -252,9 +256,9 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
                     table.set("not_after", info.not_after)?;
                     table.set("days_left", info.days_left)?;
                     table.set("fingerprint", info.fingerprint)?;
-                    Ok((Value::Table(table), Value::Nil))
+                    Ok((Some(Value::Table(table)), None))
                 }
-                Err(msg) => Ok((Value::Nil, Value::String(_lua.create_string(&msg)?))),
+                Err(msg) => make_error(&ilua, msg, None).map_err(mlua::Error::runtime),
             }
         })?;
     lua.globals().set("tls_probe", tls_probe)?;
