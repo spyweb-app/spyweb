@@ -497,7 +497,11 @@ impl JobHooks {
         run_deferred(&lua, ctx, "before_webhook");
         match ret? {
             mlua::Value::Nil | mlua::Value::Boolean(false) => Ok(None),
-            mlua::Value::Table(t) => Ok(Some(conversions::lua_to_json(&mlua::Value::Table(t))?)),
+            mlua::Value::Table(t) => Ok(Some(conversions::lua_to_json(
+                &lua,
+                &mlua::Value::Table(t),
+                None,
+            )?)),
             _ => Ok(Some(payload.clone())),
         }
     }

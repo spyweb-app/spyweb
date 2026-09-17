@@ -845,3 +845,66 @@ fn test_run_deferred_re_entrant() {
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_dir(&dir);
 }
+
+#[test]
+fn test_json_empty_array_in_server_response() {
+    let dir = unique_test_dir("json-empty-array");
+    let db = setup_db(&dir);
+    let server = ApiServer::for_test(
+        db,
+        r#"
+            get.json_test = function(self)
+                return {
+                    status = 200,
+                    body = {
+                        items = JSON_EMPTY_ARRAY,
+                        empty_object = {},
+                        empty_array = JSON_EMPTY_ARRAY,
+                    },
+                }
+            end
+
+            get.cycle_test = function(self)
+                local t = {}
+                t.self = t
+                return { status = 200, body = t }
+            end
+        "#,
+    );
+
+    let resp = server.handle(
+        "GET",
+        "json_test",
+        vec![],
+        &types::Request::fake("GET", "/json_test"),
+        false,
+    );
+    assert_eq!(resp.status, 200);
+    let ct = resp.headers.iter().find(|(k, _)| k == "Content-Type");
+    assert!(ct.is_some(), "response should have Content-Type header");
+    assert_eq!(ct.unwrap().1, "application/json");
+    let body: serde_json::Value = serde_json::from_str(&resp.body_string()).unwrap();
+    assert!(body["items"].is_array(), "items should be array");
+    assert_eq!(body["items"].as_array().unwrap().len(), 0);
+    assert!(
+        body["empty_object"].is_object(),
+        "empty_object should be object"
+    );
+    assert!(
+        body["empty_array"].is_array(),
+        "empty_array should be array"
+    );
+    assert_eq!(body["empty_array"].as_array().unwrap().len(), 0);
+
+    let resp = server.handle(
+        "GET",
+        "cycle_test",
+        vec![],
+        &types::Request::fake("GET", "/cycle_test"),
+        false,
+    );
+    assert!(resp.body_string().is_empty());
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_dir(&dir);
+}

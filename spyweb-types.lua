@@ -166,9 +166,15 @@ function require(name) end
 --=============================================================================
 
 ---Encode a Lua value to a JSON string.
+---Pass array=true to treat genuinely empty tables as [].
 ---@param value any
+---@param array? boolean
 ---@return string
-function json_encode(value) end
+function json_encode(value, array) end
+
+---Sentinel value: force an empty JSON array.
+---Do not mutate this table or replace its global binding.
+JSON_EMPTY_ARRAY = {}
 
 ---Decode a JSON string to a Lua value. 10MB input limit.
 ---Returns (value, nil) on success, (nil, error) on failure.

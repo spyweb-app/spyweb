@@ -298,6 +298,8 @@ fn test_items_roundtrip_with_reordering_and_filtering() {
 #[test]
 fn test_json_conversion() {
     let lua = Lua::new();
+    register_json_empty_array(&lua).unwrap();
+
     let json_val = serde_json::json!({
         "string": "hello",
         "number": 42,
@@ -307,7 +309,40 @@ fn test_json_conversion() {
     });
 
     let lua_val = json_to_lua(&lua, &json_val).unwrap();
-    let final_json = lua_to_json(&lua_val).unwrap();
+    let final_json = lua_to_json(&lua, &lua_val, None).unwrap();
 
     assert_eq!(json_val, final_json);
+
+    // Empty table roundtrip: lua_to_json still defaults to {}
+    let empty_obj = serde_json::json!({});
+    let lua_val = json_to_lua(&lua, &empty_obj).unwrap();
+    let final_json = lua_to_json(&lua, &lua_val, None).unwrap();
+    assert_eq!(final_json, empty_obj);
+
+    // Internal sentinel detection: registered sentinel roundtrips as []
+    let sentinel: mlua::Table = lua.globals().get("JSON_EMPTY_ARRAY").unwrap();
+    let result = lua_to_json(&lua, &mlua::Value::Table(sentinel), None).unwrap();
+    assert_eq!(result, serde_json::json!([]));
+
+    // Spoofed metatable does NOT produce []
+    let spoofed = lua.create_table().unwrap();
+    let meta = lua.create_table().unwrap();
+    meta.set("__name", "JSON_EMPTY_ARRAY").unwrap();
+    spoofed.set_metatable(Some(meta)).unwrap();
+    let result = lua_to_json(&lua, &mlua::Value::Table(spoofed), None).unwrap();
+    assert_eq!(result, serde_json::json!({}));
+
+    // Unsupported value returns error
+    let result = lua_to_json(
+        &lua,
+        &mlua::Value::Function(lua.create_function(|_, ()| Ok(())).unwrap()),
+        None,
+    );
+    assert!(result.is_err());
+
+    // Cycle returns error
+    let t = lua.create_table().unwrap();
+    t.set("self", t.clone()).unwrap();
+    let result = lua_to_json(&lua, &mlua::Value::Table(t), None);
+    assert!(result.is_err());
 }

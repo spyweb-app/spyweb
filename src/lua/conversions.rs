@@ -1,7 +1,7 @@
 use anyhow::Result;
 use indexmap::IndexMap;
 use mlua::{Lua, LuaSerdeExt, Table, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::scraper::extractor::ExtractedItem;
@@ -321,39 +321,113 @@ pub fn json_to_lua(lua: &Lua, value: &serde_json::Value) -> Result<Value> {
     lua.to_value(value).map_err(|e| anyhow::anyhow!(e))
 }
 
-pub fn lua_to_json(value: &Value) -> Result<serde_json::Value> {
+const JSON_EMPTY_ARRAY_REGISTRY_KEY: &str = "spyweb.json_empty_array.sentinel";
+
+pub fn register_json_empty_array(lua: &Lua) -> Result<()> {
+    if lua
+        .named_registry_value::<mlua::Table>(JSON_EMPTY_ARRAY_REGISTRY_KEY)
+        .is_ok()
+    {
+        return Ok(());
+    }
+    let sentinel = lua.create_table()?;
+    let meta = lua.create_table()?;
+    meta.set("__name", "JSON_EMPTY_ARRAY")?;
+    sentinel.set_metatable(Some(meta))?;
+    lua.set_named_registry_value(JSON_EMPTY_ARRAY_REGISTRY_KEY, sentinel.clone())?;
+    lua.globals().set("JSON_EMPTY_ARRAY", sentinel)?;
+    Ok(())
+}
+
+pub fn lua_to_json(lua: &Lua, value: &Value, array: Option<bool>) -> Result<serde_json::Value> {
+    let flag = array.unwrap_or(false);
+    let sentinel: Table = lua.named_registry_value(JSON_EMPTY_ARRAY_REGISTRY_KEY)?;
+    let mut visited = HashSet::new();
+    lua_to_json_inner(value, flag, &sentinel, &mut visited)
+}
+
+fn lua_to_json_inner(
+    value: &Value,
+    array: bool,
+    sentinel: &Table,
+    visited: &mut HashSet<usize>,
+) -> Result<serde_json::Value> {
     match value {
         Value::Nil => Ok(serde_json::Value::Null),
-        Value::Boolean(b) => Ok(serde_json::Value::Bool(*b)),
-        Value::Integer(i) => Ok(serde_json::json!(*i)),
-        Value::Number(f) => Ok(serde_json::json!(*f)),
-        Value::String(s) => Ok(serde_json::Value::String(s.to_str()?.to_string())),
-        Value::Table(t) => {
-            let len = t.len()? as usize;
-            let raw_len = t.raw_len();
+        Value::Boolean(v) => Ok(serde_json::Value::Bool(*v)),
+        Value::Integer(v) => Ok(serde_json::json!(*v)),
+        Value::Number(v) => Ok(serde_json::json!(*v)),
+        Value::String(v) => Ok(serde_json::Value::String(v.to_str()?.to_string())),
+        Value::Table(table) => {
+            if table.to_pointer() == sentinel.to_pointer() {
+                return Ok(serde_json::Value::Array(vec![]));
+            }
 
-            if raw_len > 0 && len == raw_len {
-                let mut arr = Vec::with_capacity(len);
-                for i in 1..=len {
-                    let v: Value = t.get(i)?;
-                    arr.push(lua_to_json(&v)?);
-                }
-                Ok(serde_json::Value::Array(arr))
+            let pointer = table.to_pointer() as usize;
+            if !visited.insert(pointer) {
+                return Err(anyhow::anyhow!("recursive table detected"));
+            }
+
+            let pairs: Vec<(Value, Value)> = table
+                .pairs::<Value, Value>()
+                .collect::<mlua::Result<Vec<_>>>()?;
+
+            let is_sequence = !pairs.is_empty()
+                && pairs.len() == table.raw_len()
+                && pairs.iter().all(|(key, _)| {
+                    matches!(key, Value::Integer(i) if *i >= 1 && (*i as usize) <= pairs.len())
+                })
+                && {
+                    let mut indexes = pairs
+                        .iter()
+                        .filter_map(|(key, _)| match key {
+                            Value::Integer(i) => Some(*i as usize),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    indexes.sort_unstable();
+                    indexes == (1..=pairs.len()).collect::<Vec<_>>()
+                };
+
+            let result = if is_sequence {
+                let mut ordered = pairs;
+                ordered.sort_by_key(|(key, _)| match key {
+                    Value::Integer(i) => *i,
+                    _ => unreachable!(),
+                });
+                serde_json::Value::Array(
+                    ordered
+                        .iter()
+                        .map(|(_, value)| lua_to_json_inner(value, array, sentinel, visited))
+                        .collect::<Result<Vec<_>>>()?,
+                )
+            } else if pairs.is_empty() && array {
+                serde_json::Value::Array(vec![])
             } else {
-                let mut map = serde_json::Map::new();
-                for pair in t.pairs::<Value, Value>() {
-                    let (k, v) = pair?;
-                    let key = match &k {
+                let mut object = serde_json::Map::new();
+                for (key, value) in &pairs {
+                    let key = match key {
                         Value::String(s) => s.to_str()?.to_string(),
                         Value::Integer(i) => i.to_string(),
-                        Value::Number(f) => f.to_string(),
-                        _ => continue,
+                        Value::Number(n) => n.to_string(),
+                        _ => {
+                            return Err(anyhow::anyhow!(
+                                "cannot serialize Lua table key of type {}",
+                                key.type_name()
+                            ));
+                        }
                     };
-                    map.insert(key, lua_to_json(&v)?);
+                    object.insert(key, lua_to_json_inner(value, array, sentinel, visited)?);
                 }
-                Ok(serde_json::Value::Object(map))
-            }
+                serde_json::Value::Object(object)
+            };
+
+            visited.remove(&pointer);
+            Ok(result)
         }
-        _ => Ok(serde_json::Value::Null),
+        _ => Err(anyhow::anyhow!(
+            "cannot serialize Lua value of type {}",
+            value.type_name()
+        )),
     }
 }

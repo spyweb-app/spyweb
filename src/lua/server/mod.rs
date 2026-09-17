@@ -1,3 +1,4 @@
+use crate::lua::conversions::lua_to_json;
 use crate::services::db::Db;
 use crate::services::server::types;
 use std::path::PathBuf;
@@ -330,8 +331,9 @@ fn format_table_response(lua: &mlua::Lua, t: &mlua::Table) -> types::Response {
             body_bytes = s.as_bytes().to_vec();
         }
         mlua::Value::Table(tbl) => {
-            let val = mlua::Value::Table(tbl);
-            if let Ok(json) = serde_json::to_string(&val) {
+            if let Ok(json_value) = lua_to_json(lua, &mlua::Value::Table(tbl), None)
+                && let Ok(json) = serde_json::to_string(&json_value)
+            {
                 body_bytes = json.into_bytes();
                 content_type = Some("application/json".to_string());
             }

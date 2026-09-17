@@ -1488,3 +1488,140 @@ fn test_http_bindings_max_body_size_not_set_allows_10mb() {
         assert!(ok, "default 10MB limit should accept a 2MB response");
     });
 }
+
+#[test]
+fn test_json_empty_array() {
+    let lua = Lua::new();
+    register_http_and_fs(&lua, None, "test").unwrap();
+
+    // Default: empty table → {}
+    let r: String = lua.load(r#"return json_encode({})"#).eval().unwrap();
+    assert_eq!(r, "{}");
+
+    // Sentinel → []
+    let r: String = lua
+        .load(r#"return json_encode(JSON_EMPTY_ARRAY)"#)
+        .eval()
+        .unwrap();
+    assert_eq!(r, "[]");
+
+    // Sentinel in nested table
+    let r: String = lua
+        .load(r#"return json_encode({ items = JSON_EMPTY_ARRAY })"#)
+        .eval()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&r).unwrap();
+    assert!(parsed["items"].is_array());
+    assert_eq!(parsed["items"].as_array().unwrap().len(), 0);
+
+    // array=true blanket
+    let r: String = lua
+        .load(r#"return json_encode({ items = {} }, true)"#)
+        .eval()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&r).unwrap();
+    assert!(parsed["items"].is_array());
+
+    // array=false default
+    let r: String = lua
+        .load(r#"return json_encode({ items = {} }, false)"#)
+        .eval()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&r).unwrap();
+    assert!(parsed["items"].is_object());
+
+    // Sentinel overrides array=false
+    let r: String = lua
+        .load(r#"return json_encode({ items = JSON_EMPTY_ARRAY }, false)"#)
+        .eval()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&r).unwrap();
+    assert!(parsed["items"].is_array());
+
+    // Existing keys not affected
+    let r: String = lua
+        .load(r#"return json_encode({ name = "x", count = 3 })"#)
+        .eval()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&r).unwrap();
+    assert_eq!(parsed["name"], "x");
+    assert_eq!(parsed["count"], 3);
+
+    // Mixed table: all supported fields preserved as object (lossless)
+    let r: String = lua
+        .load(r#"return json_encode({ 1, 2, extra = "x" })"#)
+        .eval()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&r).unwrap();
+    assert!(parsed.is_object());
+    assert_eq!(parsed["1"], 1);
+    assert_eq!(parsed["2"], 2);
+    assert_eq!(parsed["extra"], "x");
+
+    // Sparse numeric table → object with numeric string keys
+    let r: String = lua
+        .load(r#"return json_encode({ [1] = "a", [3] = "c" })"#)
+        .eval()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&r).unwrap();
+    assert!(parsed.is_object());
+    assert_eq!(parsed["1"], "a");
+    assert_eq!(parsed["3"], "c");
+
+    // Cycle detection: should error, not stack overflow
+    let result = lua
+        .load(
+            r#"
+        local t = {}
+        t.self = t
+        return json_encode(t)
+    "#,
+        )
+        .eval::<mlua::Value>();
+    assert!(
+        result.is_err(),
+        "cycle should produce an error, not stack overflow"
+    );
+
+    // Unsupported value type: should error, not produce null
+    let result = lua
+        .load(r#"return json_encode(print)"#)
+        .eval::<mlua::Value>();
+    assert!(
+        result.is_err(),
+        "function should produce an error, not null"
+    );
+
+    // Spoofed metatable: should NOT be treated as sentinel
+    let result: String = lua
+        .load(
+            r#"
+        local t = setmetatable({}, { __name = "JSON_EMPTY_ARRAY" })
+        return json_encode(t)
+    "#,
+        )
+        .eval()
+        .unwrap();
+    assert_eq!(result, "{}");
+
+    // Reuse sentinel in multiple locations
+    let r: String = lua
+        .load(r#"return json_encode({ a = JSON_EMPTY_ARRAY, b = JSON_EMPTY_ARRAY })"#)
+        .eval()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&r).unwrap();
+    assert!(parsed["a"].is_array());
+    assert!(parsed["b"].is_array());
+
+    // Non-sentinel table with custom metatable
+    let result: String = lua
+        .load(
+            r#"
+        local t = setmetatable({}, { __name = "CustomMeta" })
+        return json_encode(t)
+    "#,
+        )
+        .eval()
+        .unwrap();
+    assert_eq!(result, "{}");
+}
