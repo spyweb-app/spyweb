@@ -1,6 +1,6 @@
 use crate::services::db::Db;
 use crate::services::db::sqlite::SqlValue;
-use mlua::{Lua, Value};
+use mlua::{Lua, Table, Value};
 use std::sync::Arc;
 
 pub fn register(lua: &Lua, db: Arc<Db>) -> anyhow::Result<()> {
@@ -22,6 +22,30 @@ fn lua_value_to_sql(val: &Value) -> rusqlite::types::Value {
     }
 }
 
+fn table_to_sql_params(params: &Table) -> mlua::Result<Vec<rusqlite::types::Value>> {
+    let mut max_key: i64 = 0;
+    for pair in params.clone().pairs::<i64, Value>() {
+        let (k, _) = pair?;
+        if k >= 1 && k > max_key {
+            max_key = k;
+        }
+    }
+
+    let mut out = Vec::with_capacity(max_key as usize);
+    for i in 1..=max_key {
+        let v: Value = params.get(i)?;
+        out.push(lua_value_to_sql(&v));
+    }
+    Ok(out)
+}
+
+fn params_to_sql(params: Option<Table>) -> mlua::Result<Vec<rusqlite::types::Value>> {
+    match params {
+        Some(table) => table_to_sql_params(&table),
+        None => Ok(Vec::new()),
+    }
+}
+
 fn sql_value_to_lua(lua: &Lua, val: &SqlValue) -> mlua::Result<Value> {
     match val {
         SqlValue::Null => Ok(Value::Nil),
@@ -34,14 +58,10 @@ fn sql_value_to_lua(lua: &Lua, val: &SqlValue) -> mlua::Result<Value> {
 fn register_query(lua: &Lua, db: Arc<Db>) -> anyhow::Result<()> {
     lua.globals().set(
         "db_query",
-        lua.create_async_function(move |lua, (sql, params): (String, Option<Vec<Value>>)| {
+        lua.create_async_function(move |lua, (sql, params): (String, Option<Table>)| {
             let db = Arc::clone(&db);
             async move {
-                let params: Vec<rusqlite::types::Value> = params
-                    .unwrap_or_default()
-                    .iter()
-                    .map(lua_value_to_sql)
-                    .collect();
+                let params = params_to_sql(params)?;
 
                 let result = smol::unblock(move || db.db_query(&sql, &params)).await;
 
@@ -68,14 +88,10 @@ fn register_query(lua: &Lua, db: Arc<Db>) -> anyhow::Result<()> {
 fn register_exec(lua: &Lua, db: Arc<Db>) -> anyhow::Result<()> {
     lua.globals().set(
         "db_exec",
-        lua.create_async_function(move |_, (sql, params): (String, Option<Vec<Value>>)| {
+        lua.create_async_function(move |_, (sql, params): (String, Option<Table>)| {
             let db = Arc::clone(&db);
             async move {
-                let params: Vec<rusqlite::types::Value> = params
-                    .unwrap_or_default()
-                    .iter()
-                    .map(lua_value_to_sql)
-                    .collect();
+                let params = params_to_sql(params)?;
 
                 let result = smol::unblock(move || db.db_exec(&sql, &params)).await;
 

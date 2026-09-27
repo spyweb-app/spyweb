@@ -261,13 +261,10 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
     register_json_empty_array(lua).map_err(mlua::Error::external)?;
     lua.globals().set(
         "json_encode",
-        lua.create_function(
-            |lua, (val, array): (mlua::Value, Option<bool>)| {
-                let json =
-                    lua_to_json(lua, &val, array).map_err(mlua::Error::external)?;
-                serde_json::to_string(&json).map_err(mlua::Error::external)
-            },
-        )?,
+        lua.create_function(|lua, (val, array): (mlua::Value, Option<bool>)| {
+            let json = lua_to_json(lua, &val, array).map_err(mlua::Error::external)?;
+            serde_json::to_string(&json).map_err(mlua::Error::external)
+        })?,
     )?;
 
     lua.globals().set(

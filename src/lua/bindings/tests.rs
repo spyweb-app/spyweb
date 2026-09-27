@@ -893,6 +893,118 @@ fn test_db_exec_bad_sql_from_lua() {
     });
 }
 
+#[cfg(feature = "sqlite")]
+#[test]
+fn test_db_params_nil_holes_bind_as_null() {
+    let tdb = TestDb::new("lua_sql_nil_holes");
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register(&lua, tdb.db(), "test").unwrap();
+
+        lua.load(
+            r#"
+            db_exec([[
+                CREATE TABLE IF NOT EXISTS nulls (
+                    a INTEGER, b INTEGER, c INTEGER, d INTEGER, e INTEGER
+                )
+            ]])
+            -- interior nil: {1, nil, 3, 4, 5} must bind 5 params with Null at index 2
+            db_exec(
+                "INSERT INTO nulls (a, b, c, d, e) VALUES (?, ?, ?, ?, ?)",
+                { 1, nil, 3, 4, 5 }
+            )
+            -- leading nil: {nil, 2, 3, 4, 5}
+            db_exec(
+                "INSERT INTO nulls (a, b, c, d, e) VALUES (?, ?, ?, ?, ?)",
+                { nil, 2, 3, 4, 5 }
+            )
+        "#,
+        )
+        .exec_async()
+        .await
+        .unwrap();
+
+        // interior nil: a=1, b=NULL, c=3, d=4, e=5
+        let interior: mlua::Table = lua
+            .load(r#"return db_query("SELECT a, b, c, d, e FROM nulls WHERE a = 1")"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(interior.raw_len(), 1);
+        let row: mlua::Table = interior.get(1).unwrap();
+        assert_eq!(row.get::<i64>("a").unwrap(), 1);
+        assert!(row.get::<Option<i64>>("b").unwrap().is_none());
+        assert_eq!(row.get::<i64>("c").unwrap(), 3);
+        assert_eq!(row.get::<i64>("d").unwrap(), 4);
+        assert_eq!(row.get::<i64>("e").unwrap(), 5);
+
+        // leading nil: a=NULL, b=2, c=3, d=4, e=5
+        let leading: mlua::Table = lua
+            .load(r#"return db_query("SELECT a, b, c, d, e FROM nulls WHERE b = 2")"#)
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(leading.raw_len(), 1);
+        let row: mlua::Table = leading.get(1).unwrap();
+        assert!(row.get::<Option<i64>>("a").unwrap().is_none());
+        assert_eq!(row.get::<i64>("b").unwrap(), 2);
+        assert_eq!(row.get::<i64>("c").unwrap(), 3);
+        assert_eq!(row.get::<i64>("d").unwrap(), 4);
+        assert_eq!(row.get::<i64>("e").unwrap(), 5);
+    });
+}
+
+#[cfg(feature = "sqlite")]
+#[test]
+fn test_db_query_nil_hole_params() {
+    let tdb = TestDb::new("lua_sql_query_nil_holes");
+
+    smol::block_on(async {
+        let lua = Lua::new();
+        register(&lua, tdb.db(), "test").unwrap();
+
+        lua.load(
+            r#"
+            db_exec([[
+                CREATE TABLE IF NOT EXISTS items (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT,
+                    score INTEGER
+                )
+            ]])
+            db_exec(
+                "INSERT INTO items (id, name, score) VALUES (?, ?, ?)",
+                { 1, "alpha", 10 }
+            )
+        "#,
+        )
+        .exec_async()
+        .await
+        .unwrap();
+
+        // WHERE id = ? AND name = ? AND score = ? with hole on name
+        let rows: mlua::Table = lua
+            .load(
+                r#"return db_query("SELECT id FROM items WHERE id = ? AND name IS ? AND score = ?", { 1, nil, 10 })"#,
+            )
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(rows.raw_len(), 0);
+
+        // hole-free still works
+        let rows: mlua::Table = lua
+            .load(
+                r#"return db_query("SELECT id FROM items WHERE id = ? AND name = ? AND score = ?", { 1, "alpha", 10 })"#,
+            )
+            .eval_async()
+            .await
+            .unwrap();
+        assert_eq!(rows.raw_len(), 1);
+    });
+}
+
 #[test]
 fn test_fs_read_binding() {
     let current_dir = std::env::current_dir().unwrap();
