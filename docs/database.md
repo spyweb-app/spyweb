@@ -74,6 +74,20 @@ for _, row in ipairs(rows) do
 end
 ```
 
+**Params and `nil`:** `params` is a positional array for `?` placeholders. `nil` holes in the **leading or middle** of the table bind as SQL `NULL`:
+
+```lua
+-- b is NULL
+db_exec("INSERT INTO t (a, b, c) VALUES (?, ?, ?)", { 1, nil, 3 })
+```
+
+Lua tables do **not** store a trailing `nil`. `{ 1, 2, nil }` is the same as `{ 1, 2 }` — do not end the params table with `nil`. For a trailing SQL `NULL`, put `NULL` in the statement text, or ensure a non-nil value comes after that slot:
+
+```lua
+-- OK: NULL is in the SQL, not a trailing table nil
+db_exec("INSERT INTO t (a, b, c) VALUES (?, ?, NULL)", { 1, 2 })
+```
+
 #### `db_exec(sql, params)`
 Executes any SQL statement and returns the number of rows affected.
 ```lua
@@ -86,6 +100,8 @@ function on_finished()
     db_exec("INSERT OR REPLACE INTO markers (id, val) VALUES (?, ?)", { "last_page", 10 })
 end
 ```
+
+Same `nil` rules as `db_query`: leading/interior `nil` → SQL `NULL`; do not end the table with `nil`.
 
 ### Advanced Example: Shared Task Queue
 One of the most powerful uses of the SQLite backend is creating your own **Task Queue** to coordinate multiple workers where you want multiple workers to process a list until it is finished.

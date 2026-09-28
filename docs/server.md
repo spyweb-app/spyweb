@@ -267,11 +267,13 @@ The server VM has access to the same globals as scraper hooks:
 | `db_query(sql, [params])` | Execute a SELECT query |
 | `db_exec(sql, [params])` | Execute INSERT/UPDATE/DELETE |
 
+`params` is a positional array for `?` placeholders. Leading/interior `nil` binds as SQL `NULL`. Do not end the table with `nil` (Lua does not store trailing nil) — use a SQL literal `NULL` or put a non-nil value after that slot.
+
 ### Utilities
 
 | Function | Description |
 |----------|-------------|
-| `json_encode(value)` | Encode Lua value to JSON string |
+| `json_encode(value, array?)` | Encode Lua value to JSON string. Pass `array=true` to treat empty tables as `[]`. |
 | `json_decode(string)` | Decode JSON string to Lua value, returns (value, err) (10MB input limit) |
 | `env_get(key)` | Read an environment variable |
 | `defer(fn)` | Register an async cleanup function (runs after response) |

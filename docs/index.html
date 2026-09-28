@@ -98,6 +98,7 @@
                                 <li><a href="#db_exec">db_exec</a></li>
                                 <li><a href="#json_encode">json_encode</a></li>
                                 <li><a href="#json_decode">json_decode</a></li>
+                                <li><a href="#json_empty_array">JSON_EMPTY_ARRAY</a></li>
                                 <li><a href="#defer">defer</a></li>
                                 <li><a href="#copy">copy</a></li>
                                 <li><a href="#deep_copy">deep_copy</a></li>
@@ -1265,7 +1266,7 @@ if not res then
 end</code></pre>
 
                             <h3 class="title is-4" id="tls_probe"><code>tls_probe(host, [port])</code> <span class="tag is-small is-dark">async</span></h3>
-                            <p>Connects to a host and retrieves its TLS certificate information. Returns <code>(cert_table, nil)</code> on success or <code>(nil, error_string)</code> on failure. Self-signed certificates are allowed (useful for monitoring internal services). Default port is 443.</p>
+                            <p>Connects to a host and retrieves its TLS certificate information. Returns <code>(cert_table, nil)</code> on success or <code>(nil, error_table)</code> on failure (<code>error</code> message + <code>kind</code>). Self-signed certificates are allowed (useful for monitoring internal services). Default port is 443.</p>
                             <pre><code class="language-lua">local cert, err = tls_probe("example.com")
 if cert then
     log("Subject: " .. cert.subject)
@@ -1276,7 +1277,7 @@ if cert then
         notify("Cert Expiring", cert.subject .. " expires in " .. cert.days_left .. " days")
     end
 else
-    log("TLS probe failed: " .. err)
+    log("TLS probe failed: " .. err.error)
 end</code></pre>
                             <table class="table is-fullwidth">
                                 <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
@@ -1313,27 +1314,44 @@ log("Running " .. engine.version .. " on " .. engine.os .. "/" .. engine.arch)</
 
                             <h3 class="title is-4" id="db_query"><code>db_query(sql, [params])</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Executes a <code>SELECT</code> query on the SQLite database. Available only on the <strong>SQL (SQLite)</strong> build variant. Returns an array of row-tables with column-value pairs. Integer/Real/Text/Null SQL types map to Lua number/string/nil. On the <strong>KV (redb)</strong> variant, calling this returns a clear error directing you to download the SQLite build.</p>
+                            <p><code>params</code> is a positional array for <code>?</code> placeholders. Leading/interior <code>nil</code> holes bind as SQL <code>NULL</code>. Do not end the table with <code>nil</code> — Lua does not store trailing nil; use a SQL literal <code>NULL</code> or put a non-nil value after that slot.</p>
                             <pre><code class="language-lua">local rows = db_query("SELECT json FROM records WHERE job_id = ? LIMIT 5", { "my-job" })
 for _, row in ipairs(rows) do
     local data = json_decode(row.json)
     log("Title: " .. data.title)
-end</code></pre>
+end
+
+-- Leading/interior nil → SQL NULL
+db_query("SELECT id FROM t WHERE a = ? AND b IS ? AND c = ?", { 1, nil, 3 })</code></pre>
 
                             <h3 class="title is-4" id="db_exec"><code>db_exec(sql, [params])</code> <span class="tag is-small is-dark">async</span></h3>
                             <p>Executes an <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, or DDL statement on the SQLite database. Available only on the <strong>SQL (SQLite)</strong> build variant. Returns the number of rows affected. On the <strong>KV (redb)</strong> variant, calling this returns a clear error directing you to download the SQLite build.</p>
-                            <pre><code class="language-lua">db_exec("INSERT OR REPLACE INTO markers (id, val) VALUES (?, ?)", { "page", 5 })</code></pre>
+                            <p>Same <code>nil</code> rules as <code>db_query</code>: leading/interior <code>nil</code> → SQL <code>NULL</code>; do not end the params table with <code>nil</code>.</p>
+                            <pre><code class="language-lua">db_exec("INSERT OR REPLACE INTO markers (id, val) VALUES (?, ?)", { "page", 5 })
+db_exec("INSERT INTO t (a, b, c) VALUES (?, ?, NULL)", { 1, 2 })  -- trailing NULL in SQL text</code></pre>
 
-                            <h3 class="title is-4" id="json_encode"><code>json_encode(table)</code> <span class="tag is-small is-dark">sync</span></h3>
+                            <h3 class="title is-4" id="json_encode"><code>json_encode(value, array?)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Converts a Lua table or value into a JSON string. Handles nested tables, arrays,
                                 booleans, and nulls automatically using the built-in high-performance JSON
-                                engine.
+                                engine. Empty tables <code>{}</code> serialize as <code>{}</code> by default.
                             </p>
+                            <p>Pass <code>array=true</code> to treat all genuinely empty tables as <code>[]</code>.
+                                Alternatively, use the <code>JSON_EMPTY_ARRAY</code> sentinel for explicit control.</p>
                             <pre><code class="language-lua">local payload = {
     url = "https://example.com",
     options = { waitUntil = "networkidle2" }
 }
 local body = json_encode(payload)
-local resp = http_post("https://api.rendering-service.com/render", body, {["Content-Type"]="application/json"})</code></pre>
+
+-- Empty tables become {} by default
+json_encode({})                    -- "{}"
+
+-- Use JSON_EMPTY_ARRAY to force []
+json_encode(JSON_EMPTY_ARRAY)      -- "[]"
+json_encode({ items = JSON_EMPTY_ARRAY })  -- '{"items":[]}'
+
+-- Or use array=true blanket override
+json_encode({ items = {} }, true)  -- '{"items":[]}'</code></pre>
 
                             <h3 class="title is-4" id="json_decode"><code>json_decode(string)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Parses a JSON string into a native Lua value. Returns <code>(value, nil)</code>
@@ -1344,6 +1362,31 @@ if not data then
     return
 end
 log("Status is: " .. data.status)</code></pre>
+
+                            <h3 class="title is-4" id="json_empty_array"><code>JSON_EMPTY_ARRAY</code> <span class="tag is-small is-dark">global</span></h3>
+                            <p>A sentinel value that serializes as <code>[]</code> in JSON output. Use it
+                                when you need an empty array instead of the default empty object <code>{}</code>.
+                                Assign it to any table key to force an empty JSON array.</p>
+                            <div class="notification is-warning is-light py-2 px-4 mb-3" style="font-size:0.9rem">
+                                <strong>⚠️ Do not mutate:</strong> Adding keys to <code>JSON_EMPTY_ARRAY</code>
+                                will change its serialization behavior. Treat it as immutable.
+                            </div>
+                            <pre><code class="language-lua">-- Without sentinel: empty table becomes {}
+json_encode({ items = {} })             -- '{"items":{}}'
+
+-- With sentinel: force empty array
+json_encode({ items = JSON_EMPTY_ARRAY })  -- '{"items":[]}'
+
+-- Works in server responses too
+get.data = function(self)
+    return {
+        status = 200,
+        body = {
+            items = JSON_EMPTY_ARRAY,
+            meta = {}  -- this stays as {}
+        },
+    }
+end</code></pre>
 
                             <h3 class="title is-4" id="defer"><code>defer(fn)</code> <span class="tag is-small is-dark">sync</span></h3>
                             <p>Registers a cleanup function to run <strong>immediately after the top-level Hook

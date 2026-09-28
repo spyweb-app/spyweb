@@ -225,7 +225,7 @@ function http_request(args) end
 function http_multipart(url, fields, headers) end
 
 ---Probe a TLS endpoint for certificate info. Returns (table, nil) on success,
--- (nil, error) on failure.
+-- (nil, error table) on failure.
 ---@param host string
 ---@param port? integer  Default 443
 ---@return { subject: string, issuer: string, serial: string, not_before: string, not_after: string, days_left: integer, fingerprint: string }|nil, spyweb_http_error?
@@ -275,12 +275,18 @@ function global_store_delete(key) end
 --=============================================================================
 
 ---Execute a SELECT query. Returns an array of row tables.
+---Positional params: nil holes (leading/interior) bind as SQL NULL.
+---Trailing nil is not stored in Lua tables — put a non-nil value after it
+---or use a SQL literal NULL instead of ending the table with nil.
 ---@param sql string
----@param params? any[]  Positional query parameters
+---@param params? any[]  Positional query parameters (nil holes → SQL NULL)
 ---@return table[]       Array of { column = value, ... }
 function db_query(sql, params) end
 
 ---Execute an INSERT/UPDATE/DELETE. Returns number of rows changed.
+---Positional params: nil holes (leading/interior) bind as SQL NULL.
+---Trailing nil is not stored in Lua tables — put a non-nil value after it
+---or use a SQL literal NULL instead of ending the table with nil.
 ---@param sql string
 ---@param params? any[]
 ---@return integer

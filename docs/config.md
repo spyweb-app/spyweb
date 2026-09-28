@@ -213,7 +213,7 @@ All globals listed below are available inside any hook function.
 | `global_store_get(key)` | ✅ | Get global (cross-job) storage value |
 | `global_store_incr(key, default, delta)` | ✅ | Atomically increment a global counter |
 | `global_store_delete(key)` | ✅ | Delete a global storage key |
-| `json_encode(val)` | ❌ | Encode a Lua value to JSON string |
+| `json_encode(val, array?)` | ❌ | Encode a Lua value to JSON string |
 | `json_decode(str)` | ❌ | Decode a JSON string to Lua value (10MB input limit) |
 | `env_get(key)` | ❌ | Read an environment variable |
 | `defer(fn)` | ❌ | Register hook-scoped cleanup callback |
