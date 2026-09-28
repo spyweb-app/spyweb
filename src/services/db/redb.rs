@@ -28,6 +28,11 @@ impl RedbBackend {
         Ok(Self { db })
     }
 
+    pub fn close(self) -> Result<()> {
+        drop(self.db);
+        Ok(())
+    }
+
     pub fn get_records_for_job_paginated(
         &self,
         job_id: &str,
@@ -213,6 +218,26 @@ mod tests {
             self.db = None;
             let _ = fs::remove_file(&self.path);
         }
+    }
+
+    #[test]
+    fn test_close_writes_state_and_reopens_cleanly() {
+        let mut tdb = TestDb::new("redb_test_close");
+        tdb.db().lua_set("k", "v").unwrap();
+
+        let path = tdb.path.clone();
+        let backend = tdb.db.take().unwrap();
+        backend.close().unwrap();
+
+        // Read-only open requires a valid allocator state table - it fails
+        // with RepairAborted when the process didn't shut down cleanly.
+        let _ro = redb::ReadOnlyDatabase::open(&path)
+            .expect("close must leave a valid allocator state (no repair needed)");
+        drop(_ro);
+
+        let reopened = RedbBackend::open(&path).unwrap();
+        assert_eq!(reopened.lua_get("k").unwrap().unwrap(), "v");
+        drop(reopened);
     }
 
     #[test]

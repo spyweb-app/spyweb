@@ -10,6 +10,7 @@ use crate::scraper::pipeline;
 use crate::scraper::runner::Runner;
 use crate::services::db::Db;
 use crate::services::server::{JobSummary, WebServer};
+use crate::services::utils::{Phase, register_shutdown_hook, shutdown_system};
 use crate::services::watcher;
 
 pub fn start_app() -> Result<()> {
@@ -19,7 +20,7 @@ pub fn start_app() -> Result<()> {
 pub fn start_app_with_port(port_override: Option<u16>, disable_server: bool) -> Result<()> {
     if let Err(e) = ctrlc::set_handler(move || {
         crate::t_println!("\nShutting down gracefully...");
-        crate::services::utils::shutdown_system();
+        shutdown_system();
         std::process::exit(0);
     }) {
         crate::t_warnln!("Warning: Could not set Ctrl-C handler: {}", e);
@@ -27,6 +28,21 @@ pub fn start_app_with_port(port_override: Option<u16>, disable_server: bool) -> 
 
     let db = Arc::new(Db::open("data")?);
     let jobs = loader::load_all_jobs("jobs.toml", "jobs", Arc::clone(&db))?;
+
+    register_shutdown_hook(Phase::Post, {
+        let db = Arc::clone(&db);
+        move || {
+            if let Err(e) = db.close() {
+                crate::t_eprintln!("database close failed: {}", e);
+            }
+        }
+    });
+
+    let (stop_tx, stop_rx) = smol::channel::unbounded::<()>();
+    register_shutdown_hook(Phase::Pre, move || {
+        let _ = stop_tx.send_blocking(()); // Err = job_manager already gone
+    });
+
     let active_job_ids = Arc::new(std::sync::RwLock::new(
         jobs.list
             .iter()
@@ -77,7 +93,16 @@ pub fn start_app_with_port(port_override: Option<u16>, disable_server: bool) -> 
     let ex_manager: Arc<Executor<'static>> = Arc::clone(&ex);
     let manager_active_jobs = Arc::clone(&active_job_ids);
     ex.spawn(async move {
-        job_manager(ex_manager, runner, db, jobs, reload_rx, manager_active_jobs).await;
+        job_manager(
+            ex_manager,
+            runner,
+            db,
+            jobs,
+            reload_rx,
+            stop_rx,
+            manager_active_jobs,
+        )
+        .await;
     })
     .detach();
 
@@ -112,13 +137,27 @@ async fn job_manager(
     db: Arc<Db>,
     initial_jobs: Jobs,
     reload_rx: smol::channel::Receiver<()>,
+    stop_rx: smol::channel::Receiver<()>,
     active_job_ids: Arc<std::sync::RwLock<Vec<JobSummary>>>,
 ) {
+    enum Signal {
+        Reload,
+        Stop,
+    }
+
     let mut handles = spawn_jobs(&ex, &runner, &db, initial_jobs);
 
     loop {
-        if reload_rx.recv().await.is_err() {
-            break;
+        // Reload keeps the loop alive; Stop (or either channel closing)
+        // falls out and drops `handles`, cancelling every job task.
+        let signal = smol::future::or(
+            async { reload_rx.recv().await.ok().map(|_| Signal::Reload) },
+            async { stop_rx.recv().await.ok().map(|_| Signal::Stop) },
+        )
+        .await;
+        match signal {
+            Some(Signal::Reload) => {}
+            Some(Signal::Stop) | None => break,
         }
 
         Timer::after(Duration::from_millis(200)).await;
@@ -194,6 +233,70 @@ mod tests {
         let path_str = path.to_str().unwrap();
         let db = Db::open(path_str).unwrap();
         (dir, db)
+    }
+
+    #[test]
+    fn test_job_manager_reload_then_stop() {
+        let (_dir, db) = make_temp_db();
+        let ex = Arc::new(Executor::new());
+        let runner = Arc::new(Runner::new());
+        let (reload_tx, reload_rx) = smol::channel::unbounded::<()>();
+        let (stop_tx, stop_rx) = smol::channel::unbounded::<()>();
+        let active_job_ids = Arc::new(std::sync::RwLock::new(Vec::new()));
+        let jobs = Jobs { list: vec![] };
+
+        let mgr = job_manager(
+            ex,
+            runner,
+            Arc::new(db),
+            jobs,
+            reload_rx,
+            stop_rx,
+            active_job_ids,
+        );
+
+        smol::block_on(async {
+            // Reload must not terminate the manager...
+            reload_tx.send(()).await.unwrap();
+            // ...but Stop must (either channel closing counts too).
+            stop_tx.send(()).await.unwrap();
+
+            smol::future::or(mgr, async {
+                Timer::after(Duration::from_secs(5)).await;
+                panic!("job_manager did not stop after stop signal");
+            })
+            .await;
+        });
+    }
+
+    #[test]
+    fn test_job_manager_stops_when_channels_close() {
+        let (_dir, db) = make_temp_db();
+        let ex = Arc::new(Executor::new());
+        let runner = Arc::new(Runner::new());
+        let (reload_tx, reload_rx) = smol::channel::unbounded::<()>();
+        let (_stop_tx, stop_rx) = smol::channel::unbounded::<()>();
+        let active_job_ids = Arc::new(std::sync::RwLock::new(Vec::new()));
+        let jobs = Jobs { list: vec![] };
+
+        let mgr = job_manager(
+            ex,
+            runner,
+            Arc::new(db),
+            jobs,
+            reload_rx,
+            stop_rx,
+            active_job_ids,
+        );
+        drop(reload_tx); // dropped sender → recv errors → break (old behavior)
+
+        smol::block_on(async {
+            smol::future::or(mgr, async {
+                Timer::after(Duration::from_secs(5)).await;
+                panic!("job_manager did not stop after channel close");
+            })
+            .await;
+        });
     }
 
     #[test]

@@ -50,6 +50,19 @@ impl SqliteBackend {
         })
     }
 
+    pub fn close(self) -> Result<()> {
+        let conn = self
+            .conn
+            .into_inner()
+            .map_err(|e| anyhow::anyhow!("sqlite connection mutex poisoned: {}", e))?;
+        if let Err(e) = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)") {
+            crate::t_eprintln!("WAL checkpoint failed during shutdown: {}", e);
+        }
+        conn.close()
+            .map_err(|(_, e)| anyhow::anyhow!("failed to close sqlite connection: {}", e))?;
+        Ok(())
+    }
+
     pub fn get_records_for_job_paginated(
         &self,
         job_id: &str,
@@ -293,7 +306,31 @@ mod tests {
         fn drop(&mut self) {
             self.db = None;
             let _ = fs::remove_file(&self.path);
+            let _ = fs::remove_file(format!("{}-wal", self.path));
+            let _ = fs::remove_file(format!("{}-shm", self.path));
         }
+    }
+
+    #[test]
+    fn test_close_checkpoints_wal_and_removes_files() {
+        let mut tdb = TestDb::new("sqlite_test_close");
+        tdb.db().lua_set("k", "v").unwrap();
+
+        let wal = format!("{}-wal", tdb.path);
+        let shm = format!("{}-shm", tdb.path);
+        assert!(fs::metadata(&wal).is_ok(), "-wal must exist after a write");
+        assert!(fs::metadata(&shm).is_ok(), "-shm must exist after a write");
+
+        let backend = tdb.db.take().unwrap();
+        backend.close().unwrap();
+
+        assert!(fs::metadata(&wal).is_err(), "-wal must be removed on close");
+        assert!(fs::metadata(&shm).is_err(), "-shm must be removed on close");
+
+        // Data survived the checkpoint: reopen and read it back.
+        let reopened = SqliteBackend::open(&tdb.path).unwrap();
+        assert_eq!(reopened.lua_get("k").unwrap().unwrap(), "v");
+        drop(reopened);
     }
 
     #[test]
