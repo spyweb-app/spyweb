@@ -129,24 +129,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
-          files: release-assets/spyweb-v*.tar.gz
-          body: ${{ steps.changelog.outputs.body }}
-          draft: false
-          prerelease: ${{ steps.check_prerelease.outputs.is_prerelease }}
-
-      - name: Create/Update Latest Release
-        if: steps.check_prerelease.outputs.is_prerelease != 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: "Latest Release"
-          body: "Always points to the most recent build of SpyWeb."
           files: |
             release-assets/spyweb-linux-*.tar.gz
             release-assets/spyweb-macos-*.tar.gz
             release-assets/spyweb-windows-*.tar.gz
+          body: ${{ steps.changelog.outputs.body }}
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.check_prerelease.outputs.is_prerelease }}
           make_latest: true
 
       - name: Create/Update Beta Release
