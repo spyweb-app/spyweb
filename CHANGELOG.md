@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-09-28
+
+### Added
+- **JSON:** Add `JSON_EMPTY_ARRAY` and optional `array?` parameter to `json_encode`. Use `JSON_EMPTY_ARRAY` to force `[]`, or pass `true` on second param to treat all empty tables as arrays.
+
+### Changed
+- **Windows:** Statically link the MSVC C runtime. windows binary no longer require Visual C++.
+- **TLS:** Change `tls_probe` returning errors as plain strings to `{error, kind}` like all other network functions.
+- **http_multipart:** Ignore content-type header modification coming from lua
+- **Shutdown:** Added pre/post shutdown hooks; services stop in order: job runner → browser & I/O → DB → exit. `SIGTERM`/`SIGHUP` now trigger it too.
+
+### Fixed
+- **HTTP:** Fix `http_multipart` always reporting ~0ms for `time_ms`.
+- **SQLite Lua bindings:** `db_query`/`db_exec` now bind nil holes in param tables as SQL `NULL` instead of erroring. Trailing nil can't be recovered from a Lua table, put a non-nil value after it or use a SQL literal `NULL`.
+
 ## [1.5.4] - 2026-08-11
 
 ### Added
