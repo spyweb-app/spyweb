@@ -32,7 +32,7 @@
 #### Built with SpyWeb
 > **[UPTYME](https://github.com/spyweb-app/uptyme)** - a full production app running entirely on the SpyWeb engine: self-hosted website/API uptime monitoring with alerts, public status pages, and multi-location consensus. Vue/TypeScript dashboard.
 >
-> **[Live demo](https://uptyme.spyweb.app/)** (API key: `im-a-secure-key`)
+> **[Live demo](https://uptyme.spyweb.app/)** (API key: `demo`)
 
 #### Simple Jobs
 ```toml
@@ -70,7 +70,7 @@ See the [Job Configuration](https://docs.spyweb.app/job-configuration/toml-confi
 Download the latest archive from the [Release Page](https://github.com/spyweb-app/spyweb/releases/latest) and extract it. Two variants are available - **KV** (redb, default) and **SQL** (SQLite, queryable). See [Getting Started](https://docs.spyweb.app/getting-started/) for details and [File Structure](https://docs.spyweb.app/file-structure/) for what every file does.
 
 Or download via terminal:
- >To get the SQL version, append `-sql` to the download URL (e.g. `https://dl.spyweb.app/linux-sql`).
+ > To get the SQL version, append `-sql` to the download URL (e.g. `https://dl.spyweb.app/linux-sql`).
 
 ```bash
 # Linux
@@ -106,7 +106,7 @@ spyweb/
 SpyWeb ships as two separate binaries to provide the best experience for your environment:
 
 ### 1. Terminal Version (`spyweb`)
-best for headless servers, VPS, and cloud environments. Runs in the terminal and outputs real-time logs for monitoring and debugging.
+Best for headless servers, VPS, and cloud environments. Runs in the terminal and outputs real-time logs for monitoring and debugging.
 ```bash
 ./spyweb start
 ```
