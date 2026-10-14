@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::types::{Job, JobConfig};
+use crate::config::types::{Job, JobConfig, JobOptions};
 use crate::scraper::extractor::ExtractedItem;
 use crate::scraper::request::{FetchAttempt, RequestConfig, RequestResult};
 use crate::scraper::runner::Runner;
@@ -741,23 +741,17 @@ end
             url: "https://initial.com".into(),
             selector: ".item".into(),
             fields: vec![],
-            workers: Some(2),
-            urls: Some(vec![
-                "https://url-1.com".into(),
-                "https://url-2.com".into(),
-                "https://url-3.com".into(),
-                "https://url-4.com".into(),
-            ]),
-            keywords: None,
-            search_fields: None,
-            webhook: None,
-            debug: false,
-            enabled: true,
-            interval: 60,
-            proxy: None,
-            notification: None,
-            headers: None,
-            hash_fields: None,
+            options: JobOptions {
+                workers: Some(2),
+                urls: Some(vec![
+                    "https://url-1.com".into(),
+                    "https://url-2.com".into(),
+                    "https://url-3.com".into(),
+                    "https://url-4.com".into(),
+                ]),
+                interval: 60,
+                ..Default::default()
+            },
         },
         hooks: Some(hooks),
         has_hooks_file: true,
@@ -1079,22 +1073,16 @@ end
             url: "https://initial.com".into(),
             selector: ".item".into(),
             fields: vec![],
-            workers: Some(2),
-            urls: Some(vec![
-                "https://url-1.com".into(),
-                "https://panic.com".into(),
-                "https://url-3.com".into(),
-            ]),
-            keywords: None,
-            search_fields: None,
-            webhook: None,
-            debug: false,
-            enabled: true,
-            interval: 60,
-            proxy: None,
-            notification: None,
-            headers: None,
-            hash_fields: None,
+            options: JobOptions {
+                workers: Some(2),
+                urls: Some(vec![
+                    "https://url-1.com".into(),
+                    "https://panic.com".into(),
+                    "https://url-3.com".into(),
+                ]),
+                interval: 60,
+                ..Default::default()
+            },
         },
         hooks: Some(hooks),
         has_hooks_file: true,

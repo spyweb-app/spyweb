@@ -1,7 +1,7 @@
 use std::fs;
 use std::sync::Arc;
 
-use crate::config::types::{Field, Job, JobConfig};
+use crate::config::types::{Field, Job, JobConfig, JobOptions};
 use crate::config::{loader, validate};
 
 fn mock_job(hash_fields: Option<Vec<&str>>) -> JobConfig {
@@ -18,18 +18,21 @@ fn mock_job(hash_fields: Option<Vec<&str>>) -> JobConfig {
             Field::Shorthand("price:.price".to_string()),
             Field::Shorthand("date".to_string()),
         ],
-        keywords: None,
-        search_fields: None,
-        webhook: None,
-        debug: false,
-        enabled: true,
-        interval: 60,
-        proxy: None,
-        notification: None,
-        headers: None,
-        hash_fields: hash_fields.map(|fields| fields.into_iter().map(ToOwned::to_owned).collect()),
-        workers: None,
-        urls: None,
+        options: JobOptions {
+            keywords: None,
+            search_fields: None,
+            webhook: None,
+            debug: false,
+            enabled: true,
+            interval: 60,
+            proxy: None,
+            notification: None,
+            headers: None,
+            hash_fields: hash_fields
+                .map(|fields| fields.into_iter().map(ToOwned::to_owned).collect()),
+            workers: None,
+            urls: None,
+        },
     }
 }
 
@@ -97,7 +100,7 @@ fn rejects_empty_fields_and_zero_interval() {
     );
 
     let mut job = mock_job(None);
-    job.interval = 0;
+    job.options.interval = 0;
     assert_eq!(
         validate::validate_job_config(&job).unwrap_err().to_string(),
         "Invalid job config for 'test-job': interval must be > 0"
@@ -116,7 +119,7 @@ fn rejects_invalid_urls() {
     );
 
     let mut job = mock_job(None);
-    job.webhook = Some(crate::config::types::Webhook {
+    job.options.webhook = Some(crate::config::types::Webhook {
         enabled: true,
         url: "bad-webhook".to_string(),
         headers: None,
@@ -129,7 +132,7 @@ fn rejects_invalid_urls() {
     );
 
     let mut job = mock_job(None);
-    job.proxy = Some(crate::config::types::Proxy {
+    job.options.proxy = Some(crate::config::types::Proxy {
         enabled: true,
         rotate: crate::config::types::Rotate::Random,
         urls: vec!["bad-proxy".to_string()],
@@ -183,7 +186,7 @@ fn rejects_invalid_field_definitions_and_search_fields() {
     );
 
     let mut job = mock_job(None);
-    job.search_fields = Some(vec!["title".to_string(), "missing".to_string()]);
+    job.options.search_fields = Some(vec!["title".to_string(), "missing".to_string()]);
     let err = validate::validate_job_config(&job).unwrap_err().to_string();
     assert!(err.contains("Invalid search_fields for job 'test-job'"));
     assert!(err.contains("missing"));
@@ -232,7 +235,7 @@ fields = ["title:.title"]
     let jobs = loader::load_dir_jobs(dir.path().to_str().unwrap(), db).unwrap();
 
     assert_eq!(jobs.len(), 1);
-    assert!(!jobs[0].config.enabled);
+    assert!(!jobs[0].config.options.enabled);
     assert!(jobs[0].hooks.is_none());
     assert!(jobs[0].has_hooks_file);
 }

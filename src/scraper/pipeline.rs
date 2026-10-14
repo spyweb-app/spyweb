@@ -36,7 +36,7 @@ where
 }
 
 pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>, ex: &Arc<Executor<'static>>) {
-    let interval = Duration::from_secs(job.config.interval as u64);
+    let interval = Duration::from_secs(job.config.options.interval as u64);
     let worker_count = job.config.worker_count();
     let has_urls = job.config.has_urls();
     let job = Arc::new(job);
@@ -65,7 +65,7 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>, ex: &Arc<E
             "Job [{}] finished in {}, sleeping for {}",
             color::c_job(&job.config.name),
             color::c_info(&crate::services::utils::format_duration(pipeline_elapsed)),
-            color::c_info(&format!("{}s", job.config.interval))
+            color::c_info(&format!("{}s", job.config.options.interval))
         );
         Timer::after(interval).await;
     }
@@ -80,7 +80,13 @@ pub(crate) async fn run_urls_cycle(
     thread_probe: ThreadProbe,
 ) {
     let queue: UrlQueue = Arc::new(Mutex::new(
-        job.config.urls.clone().unwrap().into_iter().collect(),
+        job.config
+            .options
+            .urls
+            .clone()
+            .unwrap()
+            .into_iter()
+            .collect(),
     ));
 
     let mut handles = Vec::with_capacity(worker_count);
@@ -322,8 +328,8 @@ pub(crate) async fn run_once_inner(
                 if let Some(mut kept) = h.filter_item(item, ctx).await? {
                     kept.matches = crate::scraper::extractor::matching_keywords(
                         &kept.fields,
-                        job.config.keywords.as_deref(),
-                        job.config.search_fields.as_deref(),
+                        job.config.options.keywords.as_deref(),
+                        job.config.options.search_fields.as_deref(),
                     );
                     filtered.push(kept);
                 }

@@ -1059,9 +1059,10 @@ fn test_config_toml_options() {
     let job = env.load_job("config-toml");
 
     // Verify config was parsed correctly
-    assert!(job.config.debug, "debug should be true");
+    assert!(job.config.options.debug, "debug should be true");
     assert_eq!(
         job.config
+            .options
             .headers
             .as_ref()
             .and_then(|h| h.get("X-Test-Header")),
@@ -1069,32 +1070,33 @@ fn test_config_toml_options() {
         "headers should contain X-Test-Header"
     );
     assert_eq!(
-        job.config.keywords,
+        job.config.options.keywords,
         Some(vec!["target".to_string()]),
         "keywords should be set"
     );
     assert_eq!(
-        job.config.search_fields,
+        job.config.options.search_fields,
         Some(vec!["title".to_string(), "desc".to_string()]),
         "search_fields should be set"
     );
     assert_eq!(
-        job.config.hash_fields,
+        job.config.options.hash_fields,
         Some(vec!["title".to_string()]),
         "hash_fields should be set"
     );
     assert_eq!(
-        job.config.webhook.as_ref().map(|w| w.enabled),
+        job.config.options.webhook.as_ref().map(|w| w.enabled),
         Some(false),
         "webhook.enabled should be false"
     );
     assert_eq!(
-        job.config.notification.as_ref().map(|n| n.enabled),
+        job.config.options.notification.as_ref().map(|n| n.enabled),
         Some(true),
         "notification.enabled should be true"
     );
     assert_eq!(
         job.config
+            .options
             .notification
             .as_ref()
             .and_then(|n| n.title.as_deref()),
@@ -1102,12 +1104,13 @@ fn test_config_toml_options() {
         "notification.title should be set"
     );
     assert_eq!(
-        job.config.proxy.as_ref().map(|p| p.enabled),
+        job.config.options.proxy.as_ref().map(|p| p.enabled),
         Some(true),
         "proxy.enabled should be true"
     );
     assert_eq!(
         job.config
+            .options
             .proxy
             .as_ref()
             .map(|p| p.urls.first().map(|s| s.as_str())),

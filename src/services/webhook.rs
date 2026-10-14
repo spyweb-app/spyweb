@@ -6,7 +6,7 @@ pub async fn trigger_webhook(
     job: &crate::config::types::JobConfig,
     payload: serde_json::Value,
 ) -> Result<bool> {
-    let Some(ref webhook_config) = job.webhook else {
+    let Some(ref webhook_config) = job.options.webhook else {
         return Ok(false);
     };
 

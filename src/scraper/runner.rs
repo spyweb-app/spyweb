@@ -34,7 +34,7 @@ impl Runner {
     pub fn run_jobs(&self, jobs: &Jobs) -> Vec<Result<JobRunResult>> {
         jobs.list
             .iter()
-            .filter(|job| job.config.enabled)
+            .filter(|job| job.config.options.enabled)
             .map(|job| self.run_job(&job.config, job.dir.as_deref()))
             .collect()
     }
@@ -77,8 +77,8 @@ impl Runner {
     }
 
     pub fn keyword_filter(&self, job: &JobConfig, items: Vec<ExtractedItem>) -> Vec<ExtractedItem> {
-        let keywords = job.keywords.as_deref();
-        let search_fields = job.search_fields.as_deref();
+        let keywords = job.options.keywords.as_deref();
+        let search_fields = job.options.search_fields.as_deref();
 
         if keywords.is_none_or(|kw| kw.is_empty()) {
             return items;
@@ -134,7 +134,7 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
             )
         })?;
 
-    job.config.debug = true;
+    job.config.options.debug = true;
 
     println!("Debug run for job: {}", crate::color::c_job(job_name));
 
@@ -313,8 +313,8 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
                     if let Some(mut i) = h.filter_item(item, ctx).await? {
                         i.matches = crate::scraper::extractor::matching_keywords(
                             &i.fields,
-                            job.config.keywords.as_deref(),
-                            job.config.search_fields.as_deref(),
+                            job.config.options.keywords.as_deref(),
+                            job.config.options.search_fields.as_deref(),
                         );
                         filtered.push(i);
                     }

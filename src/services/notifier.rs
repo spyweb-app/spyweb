@@ -166,7 +166,7 @@ fn send_config_notification(
 }
 
 pub fn trigger_notification(job: &JobConfig, items: &[ExtractedItem]) -> Result<bool> {
-    let Some(ref notif_config) = job.notification else {
+    let Some(ref notif_config) = job.options.notification else {
         return Ok(false);
     };
 

@@ -75,8 +75,8 @@ pub(super) fn extract(
         let fragment = Html::parse_fragment(&item_html);
         let fragment_root = fragment.root_element();
         let mut fields = HashMap::new();
-        let mut field_match_html = job.debug.then(HashMap::new);
-        let mut field_parsers = job.debug.then(HashMap::new);
+        let mut field_match_html = job.options.debug.then(HashMap::new);
+        let mut field_parsers = job.options.debug.then(HashMap::new);
 
         for spec in field_specs {
             let mut parser_type = "raw";
@@ -107,23 +107,24 @@ pub(super) fn extract(
 
         if !has_match(
             &fields,
-            job.keywords.as_deref(),
-            job.search_fields.as_deref(),
+            job.options.keywords.as_deref(),
+            job.options.search_fields.as_deref(),
         ) {
             continue;
         }
 
         let matches = matching_keywords(
             &fields,
-            job.keywords.as_deref(),
-            job.search_fields.as_deref(),
+            job.options.keywords.as_deref(),
+            job.options.search_fields.as_deref(),
         );
 
         items.push(ExtractedItem {
             fields,
-            parser: job.debug.then(|| "raw".to_string()),
+            parser: job.options.debug.then(|| "raw".to_string()),
             field_parsers,
             parent_html: job
+                .options
                 .debug
                 .then(|| raw_document.node_html(item_index).to_owned()),
             field_match_html,

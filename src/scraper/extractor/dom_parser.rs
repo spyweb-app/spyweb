@@ -23,8 +23,8 @@ pub(super) fn extract(
         selector_matches += 1;
 
         let mut fields = std::collections::HashMap::new();
-        let mut field_match_html = job.debug.then(std::collections::HashMap::new);
-        let mut field_parsers = job.debug.then(std::collections::HashMap::new);
+        let mut field_match_html = job.options.debug.then(std::collections::HashMap::new);
+        let mut field_parsers = job.options.debug.then(std::collections::HashMap::new);
 
         for spec in field_specs {
             let matched = if spec.selector.is_empty() {
@@ -57,22 +57,22 @@ pub(super) fn extract(
 
         if !has_match(
             &fields,
-            job.keywords.as_deref(),
-            job.search_fields.as_deref(),
+            job.options.keywords.as_deref(),
+            job.options.search_fields.as_deref(),
         ) {
             continue;
         }
 
         let matches = matching_keywords(
             &fields,
-            job.keywords.as_deref(),
-            job.search_fields.as_deref(),
+            job.options.keywords.as_deref(),
+            job.options.search_fields.as_deref(),
         );
         items.push(ExtractedItem {
             fields,
-            parser: job.debug.then(|| "dom".to_string()),
+            parser: job.options.debug.then(|| "dom".to_string()),
             field_parsers,
-            parent_html: job.debug.then(|| safe_element_html(element)),
+            parent_html: job.options.debug.then(|| safe_element_html(element)),
             field_match_html,
             matches,
         });
@@ -87,6 +87,7 @@ pub(super) fn extract(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::types::JobOptions;
 
     #[test]
     fn test_dom_self_selection() {
@@ -96,18 +97,20 @@ mod tests {
             url: "https://example.com".into(),
             selector: ".job-link".into(),
             fields: vec![],
-            keywords: None,
-            search_fields: None,
-            webhook: None,
-            debug: false,
-            enabled: true,
-            interval: 300,
-            proxy: None,
-            notification: None,
-            headers: None,
-            hash_fields: None,
-            workers: None,
-            urls: None,
+            options: JobOptions {
+                keywords: None,
+                search_fields: None,
+                webhook: None,
+                debug: false,
+                enabled: true,
+                interval: 300,
+                proxy: None,
+                notification: None,
+                headers: None,
+                hash_fields: None,
+                workers: None,
+                urls: None,
+            },
         };
 
         let field_specs = vec![
@@ -138,18 +141,20 @@ mod tests {
             url: "https://example.com".into(),
             selector: ".card".into(),
             fields: vec![],
-            keywords: None,
-            search_fields: None,
-            webhook: None,
-            debug: false,
-            enabled: true,
-            interval: 300,
-            proxy: None,
-            notification: None,
-            headers: None,
-            hash_fields: None,
-            workers: None,
-            urls: None,
+            options: JobOptions {
+                keywords: None,
+                search_fields: None,
+                webhook: None,
+                debug: false,
+                enabled: true,
+                interval: 300,
+                proxy: None,
+                notification: None,
+                headers: None,
+                hash_fields: None,
+                workers: None,
+                urls: None,
+            },
         };
 
         let field_specs = vec![FieldSpec {

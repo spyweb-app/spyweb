@@ -66,7 +66,7 @@ fn load_config_from_dir(path: &str, db: Arc<Db>) -> Result<Vec<Job>> {
         validate::validate_job_config(&config)?;
         let hook_path = dir.join("hooks.lua");
         let has_hooks_file = hook_path.exists();
-        let hooks = if config.enabled && has_hooks_file {
+        let hooks = if config.options.enabled && has_hooks_file {
             match JobHooks::load(&hook_path, Arc::clone(&db), &config.id()) {
                 Ok(h) => Some(h),
                 Err(e) => {

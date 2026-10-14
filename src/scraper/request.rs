@@ -60,7 +60,7 @@ impl RequestConfig {
 
         headers.insert("Connection".to_string(), "close".to_string());
 
-        if let Some(job_headers) = &job.headers {
+        if let Some(job_headers) = &job.options.headers {
             for (name, value) in job_headers {
                 headers.shift_remove(name.as_str());
                 headers.insert(name.clone(), value.clone());
@@ -167,7 +167,7 @@ impl RequestHandler {
             request = request.header(*name, *value);
         }
 
-        if let Some(headers) = &job.headers {
+        if let Some(headers) = &job.options.headers {
             for (name, value) in headers {
                 request = request.header(name, value);
             }
@@ -328,7 +328,7 @@ impl RequestHandler {
     }
 
     pub(crate) fn select_proxy(&self, job: &JobConfig) -> Option<String> {
-        let proxy = job.proxy.as_ref()?;
+        let proxy = job.options.proxy.as_ref()?;
         if !proxy.enabled || proxy.urls.is_empty() {
             return None;
         }

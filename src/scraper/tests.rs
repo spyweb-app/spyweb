@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::config::types::{Field, Job, JobConfig, Proxy as JobProxy, Rotate};
+use crate::config::types::{Field, Job, JobConfig, JobOptions, Proxy as JobProxy, Rotate};
 use crate::lua::hooks::JobHooks;
 use crate::scraper::pipeline::{run_multi_cycle, run_once, run_once_inner, run_urls_cycle};
 use crate::scraper::request::{
@@ -67,18 +67,10 @@ end
             url: "https://example.com".into(),
             selector: ".item".into(),
             fields: vec![Field::Shorthand("title".into())],
-            keywords: None,
-            search_fields: None,
-            webhook: None,
-            debug: false,
-            enabled: true,
-            interval: 60,
-            proxy: None,
-            notification: None,
-            headers: None,
-            hash_fields: None,
-            workers: None,
-            urls: None,
+            options: JobOptions {
+                interval: 60,
+                ..Default::default()
+            },
         },
         hooks: Some(hooks),
         has_hooks_file: true,
@@ -187,18 +179,10 @@ end
             url: "https://example.com".into(),
             selector: ".item".into(),
             fields: vec![Field::Shorthand("title".into())],
-            keywords: None,
-            search_fields: None,
-            webhook: None,
-            debug: false,
-            enabled: true,
-            interval: 60,
-            proxy: None,
-            notification: None,
-            headers: None,
-            hash_fields: None,
-            workers: None,
-            urls: None,
+            options: JobOptions {
+                interval: 60,
+                ..Default::default()
+            },
         },
         hooks: Some(hooks),
         has_hooks_file: true,
@@ -253,22 +237,15 @@ end
             url: "https://example.com".into(),
             selector: ".item".into(),
             fields: vec![Field::Shorthand("title".into())],
-            keywords: None,
-            search_fields: None,
-            webhook: None,
-            debug: false,
-            enabled: true,
-            interval: 60,
-            proxy: None,
-            notification: None,
-            headers: None,
-            hash_fields: None,
-            workers: None,
-            urls: Some(vec![
-                "https://example.com/1".into(),
-                "https://example.com/2".into(),
-                "https://example.com/3".into(),
-            ]),
+            options: JobOptions {
+                interval: 60,
+                urls: Some(vec![
+                    "https://example.com/1".into(),
+                    "https://example.com/2".into(),
+                    "https://example.com/3".into(),
+                ]),
+                ..Default::default()
+            },
         },
         hooks: Some(hooks),
         has_hooks_file: true,
@@ -331,23 +308,16 @@ end
             url: "https://example.com".into(),
             selector: ".item".into(),
             fields: vec![Field::Shorthand("title".into())],
-            keywords: None,
-            search_fields: None,
-            webhook: None,
-            debug: false,
-            enabled: true,
-            interval: 60,
-            proxy: None,
-            notification: None,
-            headers: None,
-            hash_fields: None,
-            workers: None,
-            urls: Some(vec![
-                "https://example.com/a".into(),
-                "https://example.com/b".into(),
-                "https://example.com/c".into(),
-                "https://example.com/d".into(),
-            ]),
+            options: JobOptions {
+                interval: 60,
+                urls: Some(vec![
+                    "https://example.com/a".into(),
+                    "https://example.com/b".into(),
+                    "https://example.com/c".into(),
+                    "https://example.com/d".into(),
+                ]),
+                ..Default::default()
+            },
         },
         hooks: Some(hooks),
         has_hooks_file: true,
@@ -411,18 +381,11 @@ end
             url: "https://example.com".into(),
             selector: ".item".into(),
             fields: vec![Field::Shorthand("title".into())],
-            keywords: None,
-            search_fields: None,
-            webhook: None,
-            debug: false,
-            enabled: true,
-            interval: 60,
-            proxy: None,
-            notification: None,
-            headers: None,
-            hash_fields: None,
-            workers: Some(2),
-            urls: None,
+            options: JobOptions {
+                interval: 60,
+                workers: Some(2),
+                ..Default::default()
+            },
         },
         hooks: Some(hooks),
         has_hooks_file: true,
@@ -474,18 +437,11 @@ end
             url: "https://example.com".into(),
             selector: ".item".into(),
             fields: vec![Field::Shorthand("title".into())],
-            keywords: None,
-            search_fields: None,
-            webhook: None,
-            debug: false,
-            enabled: true,
-            interval: 60,
-            proxy: None,
-            notification: None,
-            headers: None,
-            hash_fields: None,
-            workers: Some(16),
-            urls: None,
+            options: JobOptions {
+                interval: 60,
+                workers: Some(16),
+                ..Default::default()
+            },
         },
         hooks: Some(hooks),
         has_hooks_file: true,
@@ -555,23 +511,19 @@ fn runner_job(enabled: bool, keywords: Option<Vec<&str>>) -> JobConfig {
                 att: "href".into(),
             },
         ],
-        keywords: keywords
-            .map(|keywords| keywords.into_iter().map(str::to_string).collect::<Vec<_>>()),
-        search_fields: None,
-        webhook: None,
-        enabled,
-        interval: 60,
-        debug: false,
-        proxy: Some(crate::config::types::Proxy {
-            enabled: false,
-            rotate: Rotate::RoundRobin,
-            urls: vec![],
-        }),
-        notification: None,
-        headers: None,
-        hash_fields: None,
-        workers: None,
-        urls: None,
+        options: JobOptions {
+            keywords: keywords
+                .map(|keywords| keywords.into_iter().map(str::to_string).collect::<Vec<_>>()),
+            enabled,
+            interval: 60,
+            debug: false,
+            proxy: Some(crate::config::types::Proxy {
+                enabled: false,
+                rotate: Rotate::RoundRobin,
+                urls: vec![],
+            }),
+            ..Default::default()
+        },
     }
 }
 
@@ -634,22 +586,16 @@ fn job_with_proxy(rotate: Rotate, urls: Vec<&str>) -> JobConfig {
         url: "https://example.com".into(),
         selector: ".item".into(),
         fields: vec![Field::Shorthand("title".into())],
-        debug: false,
-        keywords: None,
-        search_fields: None,
-        webhook: None,
-        enabled: true,
-        interval: 60,
-        proxy: Some(JobProxy {
-            enabled: true,
-            rotate,
-            urls: urls.into_iter().map(str::to_string).collect(),
-        }),
-        notification: None,
-        headers: None,
-        hash_fields: None,
-        workers: None,
-        urls: None,
+        options: JobOptions {
+            debug: false,
+            interval: 60,
+            proxy: Some(JobProxy {
+                enabled: true,
+                rotate,
+                urls: urls.into_iter().map(str::to_string).collect(),
+            }),
+            ..Default::default()
+        },
     }
 }
 
@@ -699,7 +645,7 @@ fn disabled_or_empty_proxy_configuration_is_ignored() {
     let mut job = job_with_proxy(Rotate::RoundRobin, vec![]);
     assert_eq!(handler.select_proxy(&job), None);
 
-    job.proxy = Some(JobProxy {
+    job.options.proxy = Some(JobProxy {
         enabled: false,
         rotate: Rotate::RoundRobin,
         urls: vec!["http://proxy-1:8080".into()],

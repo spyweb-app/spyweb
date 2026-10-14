@@ -232,7 +232,12 @@ fn config_check() -> anyhow::Result<()> {
     }
 
     // Enabled first, then disabled; alphabetically within each group
-    entries.sort_by(|a, b| b.0.enabled.cmp(&a.0.enabled).then(a.0.name.cmp(&b.0.name)));
+    entries.sort_by(|a, b| {
+        b.0.options
+            .enabled
+            .cmp(&a.0.options.enabled)
+            .then(a.0.name.cmp(&b.0.name))
+    });
 
     // Print header
     println!(
@@ -273,7 +278,7 @@ fn config_check() -> anyhow::Result<()> {
             }
         }
 
-        let status = if config.enabled {
+        let status = if config.options.enabled {
             crate::color::c_ok("enabled")
         } else {
             crate::color::c_dim("disabled")

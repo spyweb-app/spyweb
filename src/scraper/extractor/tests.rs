@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::types::Proxy;
+use crate::config::types::{JobOptions, Proxy};
 
 #[test]
 fn test_parse_shorthand_empty_selector() {
@@ -18,25 +18,27 @@ fn job(selector: &str, fields: Vec<Field>, keywords: Option<Vec<&str>>) -> JobCo
     JobConfig {
         name: "test".into(),
         url: "https://example.com".into(),
-        debug: false,
         selector: selector.into(),
         fields,
-        keywords: keywords
-            .map(|keywords| keywords.into_iter().map(str::to_string).collect::<Vec<_>>()),
-        search_fields: None,
-        webhook: None,
-        enabled: true,
-        interval: 60,
-        proxy: Some(Proxy {
-            enabled: false,
-            rotate: crate::config::types::Rotate::RoundRobin,
-            urls: vec![],
-        }),
-        notification: None,
-        headers: None,
-        hash_fields: None,
-        workers: None,
-        urls: None,
+        options: JobOptions {
+            keywords: keywords
+                .map(|keywords| keywords.into_iter().map(str::to_string).collect::<Vec<_>>()),
+            search_fields: None,
+            webhook: None,
+            enabled: true,
+            interval: 60,
+            debug: false,
+            proxy: Some(Proxy {
+                enabled: false,
+                rotate: crate::config::types::Rotate::RoundRobin,
+                urls: vec![],
+            }),
+            notification: None,
+            headers: None,
+            hash_fields: None,
+            workers: None,
+            urls: None,
+        },
     }
 }
 
@@ -291,7 +293,7 @@ fn includes_debug_html_only_when_debug_is_enabled() {
         None,
     );
 
-    job.debug = true;
+    job.options.debug = true;
 
     let extraction = extractor.extract(&job, None, UGLY_HTML).unwrap();
     let items = extraction.items;

@@ -17,7 +17,8 @@ impl Record {
 }
 
 fn normalized_hash_fields(job: &JobConfig) -> Vec<String> {
-    job.hash_fields
+    job.options
+        .hash_fields
         .as_ref()
         .map(|fields| {
             fields

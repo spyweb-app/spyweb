@@ -17,6 +17,7 @@ pub(crate) fn validate_lua_syntax(
 
 fn normalized_hash_fields(config: &JobConfig) -> Vec<String> {
     config
+        .options
         .hash_fields
         .as_ref()
         .map(|fields| {
@@ -32,6 +33,7 @@ fn normalized_hash_fields(config: &JobConfig) -> Vec<String> {
 
 fn normalized_search_fields(config: &JobConfig) -> Vec<String> {
     config
+        .options
         .search_fields
         .as_ref()
         .map(|fields| {
@@ -118,14 +120,14 @@ pub(crate) fn validate_job_config(config: &JobConfig) -> Result<()> {
         );
     }
 
-    if config.interval == 0 {
+    if config.options.interval == 0 {
         bail!(
             "Invalid job config for '{}': interval must be > 0",
             config.name
         );
     }
 
-    if let Some(workers) = config.workers
+    if let Some(workers) = config.options.workers
         && workers == 0
     {
         bail!(
@@ -136,17 +138,17 @@ pub(crate) fn validate_job_config(config: &JobConfig) -> Result<()> {
 
     validate_url(&config.url, "url", &config.name)?;
 
-    if let Some(urls) = &config.urls {
+    if let Some(urls) = &config.options.urls {
         validate_url_list(urls, "urls", &config.name)?;
     }
 
-    if let Some(webhook) = &config.webhook
+    if let Some(webhook) = &config.options.webhook
         && webhook.enabled
     {
         validate_url(&webhook.url, "webhook.url", &config.name)?;
     }
 
-    if let Some(proxy) = &config.proxy
+    if let Some(proxy) = &config.options.proxy
         && proxy.enabled
     {
         if proxy.urls.is_empty() {

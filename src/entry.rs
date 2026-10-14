@@ -49,7 +49,7 @@ pub fn start_app_with_port(port_override: Option<u16>, disable_server: bool) -> 
             .map(|j| JobSummary {
                 id: j.config.id(),
                 name: j.config.name.clone(),
-                enabled: j.config.enabled,
+                enabled: j.config.options.enabled,
             })
             .collect::<Vec<JobSummary>>(),
     ));
@@ -118,7 +118,7 @@ fn spawn_jobs(
 ) -> Vec<smol::Task<()>> {
     jobs.list
         .into_iter()
-        .filter(|job| job.config.enabled)
+        .filter(|job| job.config.options.enabled)
         .map(|job| {
             let runner = Arc::clone(runner);
             let db = Arc::clone(db);
@@ -177,7 +177,7 @@ async fn job_manager(
                         .map(|j| JobSummary {
                             id: j.config.id(),
                             name: j.config.name.clone(),
-                            enabled: j.config.enabled,
+                            enabled: j.config.options.enabled,
                         })
                         .collect();
                 }
@@ -208,18 +208,11 @@ mod tests {
                 url: "http://example.com".to_string(),
                 selector: "div.item".to_string(),
                 fields: vec![],
-                keywords: None,
-                search_fields: None,
-                webhook: None,
-                debug: false,
-                enabled,
-                interval: 60,
-                proxy: None,
-                notification: None,
-                headers: None,
-                hash_fields: None,
-                workers: None,
-                urls: None,
+                options: crate::config::types::JobOptions {
+                    enabled,
+                    interval: 60,
+                    ..Default::default()
+                },
             },
             hooks: None,
             has_hooks_file: false,

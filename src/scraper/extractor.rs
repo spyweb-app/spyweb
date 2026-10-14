@@ -54,14 +54,14 @@ impl Extractor {
         dir: Option<&Path>,
         html: &str,
     ) -> Result<ExtractionResult> {
-        if config.debug {
+        if config.options.debug {
             save_response_body(html, config, dir)?;
         }
 
         let field_specs = compile_fields(&config.fields)?;
         let result = extract_with_raw_fallback(config, html, &field_specs)?;
 
-        if config.debug {
+        if config.options.debug {
             save_extracted_items(&result.items, config, dir)?;
         }
 

@@ -19,11 +19,7 @@ pub struct Job {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct JobConfig {
-    pub name: String,
-    pub url: String,
-    pub selector: String,
-    pub fields: Vec<Field>,
+pub struct JobOptions {
     pub keywords: Option<Vec<String>>,
     pub search_fields: Option<Vec<String>>,
     pub webhook: Option<Webhook>,
@@ -48,6 +44,36 @@ pub struct JobConfig {
     pub workers: Option<usize>,
     #[serde(default)]
     pub urls: Option<Vec<String>>,
+}
+
+impl Default for JobOptions {
+    fn default() -> Self {
+        Self {
+            keywords: None,
+            search_fields: None,
+            webhook: None,
+            debug: false,
+            enabled: defaults::enabled(),
+            interval: defaults::interval(),
+            proxy: None,
+            notification: defaults::notification(),
+            headers: None,
+            hash_fields: None,
+            workers: None,
+            urls: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct JobConfig {
+    pub name: String,
+    pub url: String,
+    pub selector: String,
+    pub fields: Vec<Field>,
+
+    #[serde(flatten)]
+    pub options: JobOptions,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -127,11 +153,14 @@ impl JobConfig {
     }
 
     pub fn worker_count(&self) -> usize {
-        self.workers.unwrap_or(1)
+        self.options.workers.unwrap_or(1)
     }
 
     pub fn has_urls(&self) -> bool {
-        self.urls.as_ref().is_some_and(|urls| !urls.is_empty())
+        self.options
+            .urls
+            .as_ref()
+            .is_some_and(|urls| !urls.is_empty())
     }
 
     pub fn field_names(&self) -> Vec<String> {
