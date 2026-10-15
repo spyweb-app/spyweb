@@ -83,50 +83,460 @@ pub(crate) async fn compute_cycle_batch(job: &Job) -> Option<Vec<String>> {
     }
 }
 
-// Run exactly one job iteration: resolve batch → dispatch → `on_finished`.
-pub(crate) async fn run_one_cycle(
-    job: &Arc<Job>,
+pub struct JobCtx<'a> {
+    job: &'a Job,
+    db: &'a Arc<Db>,
+    runner: &'a Arc<Runner>,
+}
+
+impl<'a> JobCtx<'a> {
+    pub fn new(job: &'a Job, db: &'a Arc<Db>, runner: &'a Arc<Runner>) -> Self {
+        Self { job, db, runner }
+    }
+
+    // One request lifecycle: ctx → telemetry → stages → finalize → on_success/on_error/on_finally → cleanup.
+    pub async fn run_once(&self, base_request: &RequestConfig, worker_id: usize) -> Result<()> {
+        let job = self.job;
+        let ctx = match job.hooks.as_ref() {
+            Some(h) => Some(h.new_cycle_context(worker_id).await?),
+            None => None,
+        };
+        let tel = TelemetryHandle::new(job.hooks.as_ref(), ctx.as_ref());
+        let started = std::time::Instant::now();
+        tel.init().await?;
+        let result = self.stages(base_request, &tel).await;
+        tel.finalize(started.elapsed()).await;
+
+        if let (Some(h), Some(ctx)) = (job.hooks.as_ref(), ctx.as_ref()) {
+            match &result {
+                Ok(()) => h.run_on_success(ctx).await,
+                Err(e) => h.run_on_error(ctx, e).await,
+            }
+            h.run_on_finally(ctx).await;
+        }
+
+        tel.cleanup().await;
+        result
+    }
+
+    // Stage pipeline: prepare → fetch → extract → filter → store → emit.
+    // Each `None` return == a stage skipping the rest of the cycle (`Ok(())`).
+    pub(crate) async fn stages(
+        &self,
+        base_request: &RequestConfig,
+        tel: &TelemetryHandle<'_>,
+    ) -> Result<()> {
+        let request = match tel.hooks() {
+            Some(h) => {
+                let Some(ctx) = tel.ctx() else { return Ok(()) };
+                match h.before_fetch(base_request.clone(), ctx).await? {
+                    None => return Ok(()),
+                    Some(r) => r,
+                }
+            }
+            None => base_request.clone(),
+        };
+
+        let fetch_attempt = match tel.hooks().filter(|h| h.has_override_fetch()) {
+            Some(h) => {
+                let Some(ctx) = tel.ctx() else { return Ok(()) };
+                h.override_fetch(request.clone(), ctx).await?
+            }
+            None => {
+                let token = tel.start().await;
+                let attempt = smol::unblock({
+                    let runner = Arc::clone(self.runner);
+                    let config = self.job.config.clone();
+                    let request = request.clone();
+                    move || runner.fetch(&config, &request)
+                })
+                .await;
+                if let (Some(h), Some(ctx)) = (tel.hooks(), tel.ctx()) {
+                    h.set_last_fetch(ctx, &attempt).await?;
+                }
+                let (status, error) = match &attempt.result {
+                    Ok(_) => ("success", None),
+                    Err(err) => ("error", Some(err.clone())),
+                };
+                tel.record("fetch", token, status, error).await;
+                attempt
+            }
+        };
+
+        let response = match tel.hooks() {
+            Some(h) => {
+                let Some(ctx) = tel.ctx() else { return Ok(()) };
+                match h.after_fetch(fetch_attempt, ctx).await? {
+                    None => return Ok(()),
+                    Some(r) => r,
+                }
+            }
+            None => fetch_attempt.result.map_err(anyhow::Error::msg)?,
+        };
+
+        let status_code = response.status;
+
+        if status_code >= 400 {
+            crate::t_warnln!(
+                "Job {} fetch returned status {}",
+                color::c_job(&self.job.config.name),
+                color::c_warn(&status_code.to_string())
+            );
+        }
+
+        let extraction = match tel.hooks().filter(|h| h.has_override_extract()) {
+            Some(h) => {
+                let Some(ctx) = tel.ctx() else { return Ok(()) };
+                let items = h.override_extract(&response, ctx).await?;
+                let count = items.len();
+                crate::scraper::extractor::ExtractionResult {
+                    items,
+                    selector_matches: count,
+                }
+            }
+            None => {
+                tel.stage(
+                    "extract",
+                    smol::unblock({
+                        let runner = Arc::clone(self.runner);
+                        let config = self.job.config.clone();
+                        let dir = self.job.dir.clone();
+                        move || runner.extract(&config, dir.as_deref(), &response)
+                    }),
+                )
+                .await?
+            }
+        };
+
+        if let (Some(h), Some(ctx)) = (tel.hooks(), tel.ctx()) {
+            h.set_selector_matches(ctx, extraction.selector_matches)
+                .await?;
+        }
+
+        let items = match tel.hooks() {
+            Some(h) => {
+                let Some(ctx) = tel.ctx() else { return Ok(()) };
+                h.after_extract(extraction.items, ctx).await?
+            }
+            None => extraction.items,
+        };
+
+        if items.is_empty() {
+            if status_code == 200 {
+                if extraction.selector_matches == 0 {
+                    if tel.hooks().is_some_and(|h| h.has_override_extract()) {
+                        crate::t_println!(
+                            "Job [{}]: override_extract returned 0 items",
+                            color::c_job(&self.job.config.name),
+                        );
+                    } else {
+                        crate::t_warnln!(
+                            "Job [{}]: Selector '{}' matched 0 elements. The site may have changed or you have wrong selector",
+                            color::c_job(&self.job.config.name),
+                            self.job.config.selector
+                        );
+                    }
+                } else {
+                    crate::t_println!(
+                        "Job [{}]: {} items found by selector, but none matched your keywords",
+                        color::c_job(&self.job.config.name),
+                        extraction.selector_matches
+                    );
+                }
+            }
+            return Ok(());
+        }
+
+        let token = tel.start().await;
+        let items = match tel.hooks() {
+            Some(h) if h.has_filter_item() => {
+                let Some(ctx) = tel.ctx() else { return Ok(()) };
+                let mut filtered = Vec::new();
+                for item in items {
+                    if let Some(mut kept) = h.filter_item(item, ctx).await? {
+                        kept.matches = crate::scraper::extractor::matching_keywords(
+                            &kept.fields,
+                            self.job.config.options.keywords.as_deref(),
+                            self.job.config.options.search_fields.as_deref(),
+                        );
+                        filtered.push(kept);
+                    }
+                }
+                filtered
+            }
+            _ => self.runner.keyword_filter(&self.job.config, items),
+        };
+        let error = match (tel.hooks(), tel.ctx()) {
+            (Some(h), Some(ctx)) => h.take_filter_error(ctx).await,
+            _ => None,
+        };
+        let status = if error.is_some() { "error" } else { "success" };
+        tel.record("filter", token, status, error).await;
+
+        let items = match tel.hooks() {
+            Some(h) => {
+                let Some(ctx) = tel.ctx() else { return Ok(()) };
+                match h.before_store(items, ctx).await? {
+                    None => return Ok(()),
+                    Some(i) => i,
+                }
+            }
+            None => items,
+        };
+
+        let new_items = tel
+            .stage(
+                "store",
+                smol::unblock({
+                    let db = Arc::clone(self.db);
+                    let config = self.job.config.clone();
+                    move || db.batch_check_and_insert(&config, items)
+                }),
+            )
+            .await?;
+
+        if new_items.is_empty() {
+            if status_code == 200 {
+                crate::t_println!(
+                    "Job [{}] no new items found",
+                    color::c_job(&self.job.config.name)
+                );
+            }
+
+            return Ok(());
+        }
+
+        crate::t_println!(
+            "Found {} for {}",
+            color::c_ok(&format!("{} new items", new_items.len())),
+            color::c_job(&self.job.config.name)
+        );
+
+        let notify_items = match tel.hooks() {
+            Some(h) => {
+                let Some(ctx) = tel.ctx() else { return Ok(()) };
+                h.before_notify(new_items.clone(), ctx).await?
+            }
+            None => Some(new_items.clone()),
+        };
+
+        if let Some(items) = notify_items {
+            tel.stage(
+                "notify",
+                smol::unblock({
+                    let config = self.job.config.clone();
+                    let items = items.clone();
+                    move || notifier::trigger_notification(&config, &items)
+                }),
+            )
+            .await?;
+        }
+
+        let payload = webhook::build_default_payload(&self.job.config.name, &new_items);
+        let payload = match tel.hooks() {
+            Some(h) => {
+                let Some(ctx) = tel.ctx() else { return Ok(()) };
+                match h.before_webhook(payload, ctx).await? {
+                    None => return Ok(()),
+                    Some(p) => p,
+                }
+            }
+            None => payload,
+        };
+
+        tel.stage(
+            "webhook",
+            webhook::trigger_webhook(&self.job.config, payload),
+        )
+        .await?;
+
+        Ok(())
+    }
+}
+
+// All scheduling decisions for one cycle, mode derived from batch presence (empty batch = zero work).
+pub(crate) enum Work {
+    Queue(Vec<String>),
+    Multi,
+    Inline(RequestConfig),
+    Idle,
+}
+
+impl Work {
+    pub(crate) async fn plan(job: &Job, worker_count: usize) -> Work {
+        match compute_cycle_batch(job).await {
+            Some(b) if !b.is_empty() => Work::Queue(b),
+            Some(_) => Work::Idle,
+            _ if worker_count > 1 => Work::Multi,
+            None => Work::Inline(RequestConfig::from_job(&job.config)),
+        }
+    }
+}
+
+enum ErrStyle {
+    Inline,
+    Worker,
+}
+
+async fn run_recorded(
+    job: &Job,
     db: &Arc<Db>,
     runner: &Arc<Runner>,
-    worker_count: usize,
-    ex: &Arc<Executor<'static>>,
+    request: RequestConfig,
+    worker_id: usize,
+    stats: &CycleStats,
+    style: ErrStyle,
 ) {
-    let stats = Arc::new(CycleStats::new());
-    match compute_cycle_batch(job).await {
-        Some(batch) if !batch.is_empty() => {
-            run_urls_cycle(
-                Arc::clone(job),
-                db,
-                runner,
-                worker_count,
-                ex,
-                None,
-                batch,
-                &stats,
-            )
-            .await;
-        }
-        Some(_) => {
-            // Explicit empty batch from on_start: zero work this cycle.
-        }
-        None => {
-            if worker_count > 1 {
-                run_multi_cycle(Arc::clone(job), db, runner, worker_count, ex, None, &stats).await;
-            } else {
-                let base_request = RequestConfig::from_job(&job.config);
-                match run_once(job, db, runner, &base_request, 1).await {
-                    Ok(()) => stats.record(true),
-                    Err(e) => {
-                        stats.record(false);
-                        crate::t_eprintln!("Job '{}' error: {}", color::c_job(&job.config.name), e);
-                    }
+    let ctx = JobCtx::new(job, db, runner);
+    match ctx.run_once(&request, worker_id).await {
+        Ok(()) => stats.record(true),
+        Err(e) => {
+            stats.record(false);
+            match style {
+                ErrStyle::Inline => {
+                    crate::t_eprintln!("Job '{}' error: {}", color::c_job(&job.config.name), e);
+                }
+                ErrStyle::Worker => {
+                    crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
                 }
             }
         }
     }
+}
 
-    if let Some(hooks) = job.hooks.as_ref() {
-        hooks.run_on_finished(&stats).await;
+// One cycle's dispatch mechanics: plan → workers → stats. 
+pub(crate) struct CycleRunner<'a> {
+    job: &'a Arc<Job>,
+    db: &'a Arc<Db>,
+    runner: &'a Arc<Runner>,
+    ex: &'a Arc<Executor<'static>>,
+    worker_count: usize,
+    thread_probe: ThreadProbe,
+}
+
+impl<'a> CycleRunner<'a> {
+    pub(crate) fn new(
+        job: &'a Arc<Job>,
+        db: &'a Arc<Db>,
+        runner: &'a Arc<Runner>,
+        ex: &'a Arc<Executor<'static>>,
+        worker_count: usize,
+    ) -> Self {
+        Self {
+            job,
+            db,
+            runner,
+            ex,
+            worker_count,
+            thread_probe: None,
+        }
+    }
+
+    /// Test seam: record which executor threads workers run on.
+    #[cfg(test)]
+    pub(crate) fn with_probe(mut self, probe: ThreadProbe) -> Self {
+        self.thread_probe = probe;
+        self
+    }
+
+    /// Run exactly one job iteration: plan → dispatch → `on_finished`.
+    pub(crate) async fn run_iteration(&self) -> Arc<CycleStats> {
+        let work = Work::plan(self.job, self.worker_count).await;
+        let stats = self.dispatch(work).await;
+
+        if let Some(hooks) = self.job.hooks.as_ref() {
+            hooks.run_on_finished(&stats).await;
+        }
+
+        stats
+    }
+
+    // Total match on `Work`; stats always created here so `run_on_finished` fires (with zeros) on every path, including Idle.
+    pub(crate) async fn dispatch(&self, work: Work) -> Arc<CycleStats> {
+        let stats = Arc::new(CycleStats::new());
+        match work {
+            Work::Idle => {}
+            Work::Inline(request) => {
+                run_recorded(
+                    self.job,
+                    self.db,
+                    self.runner,
+                    request,
+                    1,
+                    &stats,
+                    ErrStyle::Inline,
+                )
+                .await;
+            }
+            Work::Queue(batch) => {
+                let queue: UrlQueue = Arc::new(Mutex::new(batch.into()));
+                self.spawn_workers(Some(queue), &stats).await;
+            }
+            Work::Multi => {
+                self.spawn_workers(None, &stats).await;
+            }
+        }
+        stats
+    }
+
+    // Shared stagger → spawn → join body for `Queue` and `Multi`.
+    async fn spawn_workers(&self, queue: Option<UrlQueue>, stats: &Arc<CycleStats>) {
+        let mut handles = Vec::with_capacity(self.worker_count);
+        for i in 1..=self.worker_count {
+            if i > 1 {
+                Timer::after(Duration::from_millis(WORKER_STAGGER_MS)).await;
+            }
+            let worker_id = i;
+            let job = Arc::clone(self.job);
+            let db = Arc::clone(self.db);
+            let runner = Arc::clone(self.runner);
+            let queue = queue.clone();
+            let stats = Arc::clone(stats);
+            handles.push(spawn_worker(
+                self.ex,
+                async move {
+                    match queue {
+                        Some(queue) => loop {
+                            let url =
+                                { queue.lock().unwrap_or_else(|e| e.into_inner()).pop_front() };
+                            let Some(url) = url else { return };
+                            let request = RequestConfig {
+                                url,
+                                ..RequestConfig::from_job(&job.config)
+                            };
+                            run_recorded(
+                                &job,
+                                &db,
+                                &runner,
+                                request,
+                                worker_id,
+                                &stats,
+                                ErrStyle::Worker,
+                            )
+                            .await;
+                        },
+                        None => {
+                            let request = RequestConfig::from_job(&job.config);
+                            run_recorded(
+                                &job,
+                                &db,
+                                &runner,
+                                request,
+                                worker_id,
+                                &stats,
+                                ErrStyle::Worker,
+                            )
+                            .await;
+                        }
+                    }
+                },
+                &self.thread_probe,
+            ));
+        }
+
+        for handle in handles {
+            handle.await;
+        }
     }
 }
 
@@ -134,12 +544,13 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>, ex: &Arc<E
     let interval = Duration::from_secs(job.config.options.interval as u64);
     let worker_count = job.config.worker_count();
     let job = Arc::new(job);
+    let cycle = CycleRunner::new(&job, &db, &runner, ex, worker_count);
 
     loop {
         crate::t_println!("Running job: {}", color::c_job(&job.config.name));
         let started = std::time::Instant::now();
 
-        run_one_cycle(&job, &db, &runner, worker_count, ex).await;
+        cycle.run_iteration().await;
 
         let pipeline_elapsed = started.elapsed();
         crate::t_println!(
@@ -150,361 +561,4 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>, ex: &Arc<E
         );
         Timer::after(interval).await;
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn run_urls_cycle(
-    job: Arc<Job>,
-    db: &Arc<Db>,
-    runner: &Arc<Runner>,
-    worker_count: usize,
-    ex: &Arc<Executor<'static>>,
-    thread_probe: ThreadProbe,
-    batch: Vec<String>,
-    stats: &Arc<CycleStats>,
-) {
-    let queue: UrlQueue = Arc::new(Mutex::new(batch.into()));
-
-    let mut handles = Vec::with_capacity(worker_count);
-    for i in 1..=worker_count {
-        if i > 1 {
-            Timer::after(Duration::from_millis(WORKER_STAGGER_MS)).await;
-        }
-        let worker_id = i;
-        let job = Arc::clone(&job);
-        let db = Arc::clone(db);
-        let runner = Arc::clone(runner);
-        let queue = Arc::clone(&queue);
-        let stats = Arc::clone(stats);
-        handles.push(spawn_worker(
-            ex,
-            async move {
-                loop {
-                    let url = { queue.lock().unwrap_or_else(|e| e.into_inner()).pop_front() };
-                    let url = match url {
-                        Some(u) => u,
-                        None => return,
-                    };
-                    let request = RequestConfig {
-                        url,
-                        ..RequestConfig::from_job(&job.config)
-                    };
-                    match run_once(&job, &db, &runner, &request, worker_id).await {
-                        Ok(()) => stats.record(true),
-                        Err(e) => {
-                            stats.record(false);
-                            crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
-                        }
-                    }
-                }
-            },
-            &thread_probe,
-        ));
-    }
-
-    for handle in handles {
-        handle.await;
-    }
-}
-
-pub(crate) async fn run_multi_cycle(
-    job: Arc<Job>,
-    db: &Arc<Db>,
-    runner: &Arc<Runner>,
-    worker_count: usize,
-    ex: &Arc<Executor<'static>>,
-    thread_probe: ThreadProbe,
-    stats: &Arc<CycleStats>,
-) {
-    let base_request = RequestConfig::from_job(&job.config);
-
-    let mut handles = Vec::with_capacity(worker_count);
-    for i in 1..=worker_count {
-        if i > 1 {
-            Timer::after(Duration::from_millis(WORKER_STAGGER_MS)).await;
-        }
-        let worker_id = i;
-        let job = Arc::clone(&job);
-        let db = Arc::clone(db);
-        let runner = Arc::clone(runner);
-        let request = base_request.clone();
-        let stats = Arc::clone(stats);
-        handles.push(spawn_worker(
-            ex,
-            async move {
-                match run_once(&job, &db, &runner, &request, worker_id).await {
-                    Ok(()) => stats.record(true),
-                    Err(e) => {
-                        stats.record(false);
-                        crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
-                    }
-                }
-            },
-            &thread_probe,
-        ));
-    }
-
-    for handle in handles {
-        handle.await;
-    }
-}
-
-pub async fn run_once(
-    job: &Job,
-    db: &Arc<Db>,
-    runner: &Arc<Runner>,
-    base_request: &RequestConfig,
-    worker_id: usize,
-) -> Result<()> {
-    let ctx = match job.hooks.as_ref() {
-        Some(h) => Some(h.new_cycle_context(worker_id).await?),
-        None => None,
-    };
-    let tel = TelemetryHandle::new(job.hooks.as_ref(), ctx.as_ref());
-    let started = std::time::Instant::now();
-    tel.init().await?;
-    let result = run_once_inner(job, db, runner, base_request, &tel).await;
-    tel.finalize(started.elapsed()).await;
-
-    if let (Some(h), Some(ctx)) = (job.hooks.as_ref(), ctx.as_ref()) {
-        match &result {
-            Ok(()) => h.run_on_success(ctx).await,
-            Err(e) => h.run_on_error(ctx, e).await,
-        }
-        h.run_on_finally(ctx).await;
-    }
-
-    tel.cleanup().await;
-    result
-}
-
-pub(crate) async fn run_once_inner(
-    job: &Job,
-    db: &Arc<Db>,
-    runner: &Arc<Runner>,
-    base_request: &RequestConfig,
-    tel: &TelemetryHandle<'_>,
-) -> Result<()> {
-    let request = match tel.hooks() {
-        Some(h) => {
-            let Some(ctx) = tel.ctx() else { return Ok(()) };
-            match h.before_fetch(base_request.clone(), ctx).await? {
-                None => return Ok(()),
-                Some(r) => r,
-            }
-        }
-        None => base_request.clone(),
-    };
-
-    let fetch_attempt = match tel.hooks().filter(|h| h.has_override_fetch()) {
-        Some(h) => {
-            let Some(ctx) = tel.ctx() else { return Ok(()) };
-            h.override_fetch(request.clone(), ctx).await?
-        }
-        None => {
-            let token = tel.start().await;
-            let attempt = smol::unblock({
-                let runner = Arc::clone(runner);
-                let config = job.config.clone();
-                let request = request.clone();
-                move || runner.fetch(&config, &request)
-            })
-            .await;
-            if let (Some(h), Some(ctx)) = (tel.hooks(), tel.ctx()) {
-                h.set_last_fetch(ctx, &attempt).await?;
-            }
-            let (status, error) = match &attempt.result {
-                Ok(_) => ("success", None),
-                Err(err) => ("error", Some(err.clone())),
-            };
-            tel.record("fetch", token, status, error).await;
-            attempt
-        }
-    };
-
-    let response = match tel.hooks() {
-        Some(h) => {
-            let Some(ctx) = tel.ctx() else { return Ok(()) };
-            match h.after_fetch(fetch_attempt, ctx).await? {
-                None => return Ok(()),
-                Some(r) => r,
-            }
-        }
-        None => fetch_attempt.result.map_err(anyhow::Error::msg)?,
-    };
-
-    let status_code = response.status;
-
-    if status_code >= 400 {
-        crate::t_warnln!(
-            "Job {} fetch returned status {}",
-            color::c_job(&job.config.name),
-            color::c_warn(&status_code.to_string())
-        );
-    }
-
-    let extraction = match tel.hooks().filter(|h| h.has_override_extract()) {
-        Some(h) => {
-            let Some(ctx) = tel.ctx() else { return Ok(()) };
-            let items = h.override_extract(&response, ctx).await?;
-            let count = items.len();
-            crate::scraper::extractor::ExtractionResult {
-                items,
-                selector_matches: count,
-            }
-        }
-        None => {
-            tel.stage(
-                "extract",
-                smol::unblock({
-                    let runner = Arc::clone(runner);
-                    let config = job.config.clone();
-                    let dir = job.dir.clone();
-                    move || runner.extract(&config, dir.as_deref(), &response)
-                }),
-            )
-            .await?
-        }
-    };
-
-    if let (Some(h), Some(ctx)) = (tel.hooks(), tel.ctx()) {
-        h.set_selector_matches(ctx, extraction.selector_matches)
-            .await?;
-    }
-
-    let items = match tel.hooks() {
-        Some(h) => {
-            let Some(ctx) = tel.ctx() else { return Ok(()) };
-            h.after_extract(extraction.items, ctx).await?
-        }
-        None => extraction.items,
-    };
-
-    if items.is_empty() {
-        if status_code == 200 {
-            if extraction.selector_matches == 0 {
-                if tel.hooks().is_some_and(|h| h.has_override_extract()) {
-                    crate::t_println!(
-                        "Job [{}]: override_extract returned 0 items",
-                        color::c_job(&job.config.name),
-                    );
-                } else {
-                    crate::t_warnln!(
-                        "Job [{}]: Selector '{}' matched 0 elements. The site may have changed or you have wrong selector",
-                        color::c_job(&job.config.name),
-                        job.config.selector
-                    );
-                }
-            } else {
-                crate::t_println!(
-                    "Job [{}]: {} items found by selector, but none matched your keywords",
-                    color::c_job(&job.config.name),
-                    extraction.selector_matches
-                );
-            }
-        }
-        return Ok(());
-    }
-
-    let token = tel.start().await;
-    let items = match tel.hooks() {
-        Some(h) if h.has_filter_item() => {
-            let Some(ctx) = tel.ctx() else { return Ok(()) };
-            let mut filtered = Vec::new();
-            for item in items {
-                if let Some(mut kept) = h.filter_item(item, ctx).await? {
-                    kept.matches = crate::scraper::extractor::matching_keywords(
-                        &kept.fields,
-                        job.config.options.keywords.as_deref(),
-                        job.config.options.search_fields.as_deref(),
-                    );
-                    filtered.push(kept);
-                }
-            }
-            filtered
-        }
-        _ => runner.keyword_filter(&job.config, items),
-    };
-    let error = match (tel.hooks(), tel.ctx()) {
-        (Some(h), Some(ctx)) => h.take_filter_error(ctx).await,
-        _ => None,
-    };
-    let status = if error.is_some() { "error" } else { "success" };
-    tel.record("filter", token, status, error).await;
-
-    let items = match tel.hooks() {
-        Some(h) => {
-            let Some(ctx) = tel.ctx() else { return Ok(()) };
-            match h.before_store(items, ctx).await? {
-                None => return Ok(()),
-                Some(i) => i,
-            }
-        }
-        None => items,
-    };
-
-    let new_items = tel
-        .stage(
-            "store",
-            smol::unblock({
-                let db = Arc::clone(db);
-                let config = job.config.clone();
-                move || db.batch_check_and_insert(&config, items)
-            }),
-        )
-        .await?;
-
-    if new_items.is_empty() {
-        if status_code == 200 {
-            crate::t_println!(
-                "Job [{}] no new items found",
-                color::c_job(&job.config.name)
-            );
-        }
-
-        return Ok(());
-    }
-
-    crate::t_println!(
-        "Found {} for {}",
-        color::c_ok(&format!("{} new items", new_items.len())),
-        color::c_job(&job.config.name)
-    );
-
-    let notify_items = match tel.hooks() {
-        Some(h) => {
-            let Some(ctx) = tel.ctx() else { return Ok(()) };
-            h.before_notify(new_items.clone(), ctx).await?
-        }
-        None => Some(new_items.clone()),
-    };
-
-    if let Some(items) = notify_items {
-        tel.stage(
-            "notify",
-            smol::unblock({
-                let config = job.config.clone();
-                let items = items.clone();
-                move || notifier::trigger_notification(&config, &items)
-            }),
-        )
-        .await?;
-    }
-
-    let payload = webhook::build_default_payload(&job.config.name, &new_items);
-    let payload = match tel.hooks() {
-        Some(h) => {
-            let Some(ctx) = tel.ctx() else { return Ok(()) };
-            match h.before_webhook(payload, ctx).await? {
-                None => return Ok(()),
-                Some(p) => p,
-            }
-        }
-        None => payload,
-    };
-
-    tel.stage("webhook", webhook::trigger_webhook(&job.config, payload))
-        .await?;
-
-    Ok(())
 }

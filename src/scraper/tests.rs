@@ -5,10 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::types::{Field, Job, JobConfig, JobOptions, Proxy as JobProxy, Rotate};
 use crate::lua::hooks::JobHooks;
-use crate::scraper::pipeline::{
-    CycleStats, compute_cycle_batch, run_multi_cycle, run_once, run_once_inner, run_one_cycle,
-    run_urls_cycle,
-};
+use crate::scraper::pipeline::{CycleRunner, JobCtx, Work, compute_cycle_batch};
 use crate::scraper::request::{
     RequestConfig, RequestHandler, RequestResult, flatten_headers, format_error_chain,
     read_body_bounded,
@@ -92,7 +89,8 @@ end
             .unwrap();
         let tel = crate::lua::hooks::TelemetryHandle::new(job.hooks.as_ref(), Some(&ctx));
         tel.init().await.unwrap();
-        run_once_inner(&job, &db, &runner, &base_request, &tel)
+        JobCtx::new(&job, &db, &runner)
+            .stages(&base_request, &tel)
             .await
             .unwrap();
         tel.finalize(std::time::Duration::from_millis(1)).await;
@@ -195,7 +193,8 @@ end
 
     smol::block_on(async {
         let base_request = RequestConfig::from_job(&job.config);
-        run_once(&job, &db, &runner, &base_request, 0)
+        JobCtx::new(&job, &db, &runner)
+            .run_once(&base_request, 0)
             .await
             .unwrap();
     });
@@ -258,17 +257,9 @@ end
     let (ex, _keep_alive) = single_thread_executor();
 
     smol::block_on(async {
-        run_urls_cycle(
-            Arc::clone(&job),
-            &db,
-            &runner,
-            1,
-            &ex,
-            None,
-            job.config.options.urls.clone().unwrap(),
-            &Arc::new(CycleStats::new()),
-        )
-        .await;
+        CycleRunner::new(&job, &db, &runner, &ex, 1)
+            .dispatch(Work::Queue(job.config.options.urls.clone().unwrap()))
+            .await;
 
         let job_ref = &*job;
         let hooks = job_ref.hooks.as_ref().unwrap();
@@ -340,17 +331,9 @@ end
     let (ex, _keep_alive) = single_thread_executor();
 
     smol::block_on(async {
-        run_urls_cycle(
-            Arc::clone(&job),
-            &db,
-            &runner,
-            2,
-            &ex,
-            None,
-            job.config.options.urls.clone().unwrap(),
-            &Arc::new(CycleStats::new()),
-        )
-        .await;
+        CycleRunner::new(&job, &db, &runner, &ex, 2)
+            .dispatch(Work::Queue(job.config.options.urls.clone().unwrap()))
+            .await;
 
         let job_ref = &*job;
         let hooks = job_ref.hooks.as_ref().unwrap();
@@ -418,16 +401,9 @@ end
     let (ex, _keep_alive) = single_thread_executor();
 
     smol::block_on(async {
-        run_multi_cycle(
-            Arc::clone(&job),
-            &db,
-            &runner,
-            2,
-            &ex,
-            None,
-            &Arc::new(CycleStats::new()),
-        )
-        .await;
+        CycleRunner::new(&job, &db, &runner, &ex, 2)
+            .dispatch(Work::Multi)
+            .await;
 
         let job_ref = &*job;
         let hooks = job_ref.hooks.as_ref().unwrap();
@@ -498,16 +474,10 @@ end
         Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
 
     smol::block_on(async {
-        run_multi_cycle(
-            Arc::clone(&job),
-            &db,
-            &runner,
-            16,
-            &ex,
-            Some(Arc::clone(&probe)),
-            &Arc::new(CycleStats::new()),
-        )
-        .await;
+        CycleRunner::new(&job, &db, &runner, &ex, 16)
+            .with_probe(Some(Arc::clone(&probe)))
+            .dispatch(Work::Multi)
+            .await;
     });
     drop(stop_tx);
 
@@ -935,17 +905,9 @@ end
     smol::block_on(async {
         let batch = compute_cycle_batch(&job).await.unwrap();
         assert_eq!(batch.len(), 3);
-        run_urls_cycle(
-            Arc::clone(&job),
-            &db,
-            &runner,
-            1,
-            &ex,
-            None,
-            batch,
-            &Arc::new(CycleStats::new()),
-        )
-        .await;
+        CycleRunner::new(&job, &db, &runner, &ex, 1)
+            .dispatch(Work::Queue(batch))
+            .await;
 
         let hooks = job.hooks.as_ref().unwrap();
         let lua = hooks.lua.lock().await;
@@ -1000,17 +962,9 @@ end
 
     smol::block_on(async {
         let batch = compute_cycle_batch(&job).await.unwrap();
-        run_urls_cycle(
-            Arc::clone(&job),
-            &db,
-            &runner,
-            2,
-            &ex,
-            None,
-            batch,
-            &Arc::new(CycleStats::new()),
-        )
-        .await;
+        CycleRunner::new(&job, &db, &runner, &ex, 2)
+            .dispatch(Work::Queue(batch))
+            .await;
 
         let hooks = job.hooks.as_ref().unwrap();
         let lua = hooks.lua.lock().await;
@@ -1024,7 +978,7 @@ end
     let _ = fs::remove_dir_all(&dir);
 }
 
-// --- run_one_cycle scheduler lifecycle (Phase 1+2) ---
+// --- run_iteration scheduler lifecycle (Phase 1+2) ---
 
 const LIFECYCLE_HOOKS: &str = r#"
 _G.lifecycle = {}
@@ -1069,7 +1023,9 @@ fn run_cycle_lifecycle(job: &Arc<Job>, db: &Arc<Db>) -> LifecycleRun {
     let (ex, _keep_alive) = single_thread_executor();
     let worker_count = job.config.worker_count();
     smol::block_on(async {
-        run_one_cycle(job, db, &runner, worker_count, &ex).await;
+        CycleRunner::new(job, db, &runner, &ex, worker_count)
+            .run_iteration()
+            .await;
         let hooks = job.hooks.as_ref().unwrap();
         let lua = hooks.lua.lock().await;
         let log = lua.globals().get::<Vec<String>>("lifecycle").unwrap();
@@ -1103,7 +1059,7 @@ fn assert_lifecycle_order(log: &[String], expected_fetches: usize) {
 }
 
 #[test]
-fn run_one_cycle_single_worker_on_start_first_on_finished_last() {
+fn run_iteration_single_worker_on_start_first_on_finished_last() {
     let (dir, job, db) = make_job_with_hooks("lifecycle-single", None, 1, LIFECYCLE_HOOKS);
     let job = Arc::new(job);
 
@@ -1119,7 +1075,7 @@ fn run_one_cycle_single_worker_on_start_first_on_finished_last() {
 }
 
 #[test]
-fn run_one_cycle_multi_worker_on_start_first_on_finished_last() {
+fn run_iteration_multi_worker_on_start_first_on_finished_last() {
     let (dir, job, db) = make_job_with_hooks("lifecycle-multi", None, 3, LIFECYCLE_HOOKS);
     let job = Arc::new(job);
 
@@ -1134,7 +1090,7 @@ fn run_one_cycle_multi_worker_on_start_first_on_finished_last() {
 }
 
 #[test]
-fn run_one_cycle_static_queue_on_start_first_on_finished_last() {
+fn run_iteration_static_queue_on_start_first_on_finished_last() {
     let (dir, job, db) = make_job_with_hooks(
         "lifecycle-static-queue",
         Some(vec!["https://a.com".into(), "https://b.com".into()]),
@@ -1162,7 +1118,7 @@ fn run_one_cycle_static_queue_on_start_first_on_finished_last() {
 }
 
 #[test]
-fn run_one_cycle_zero_work_batch_all_zero_counters() {
+fn run_iteration_zero_work_batch_all_zero_counters() {
     // on_start commits {} → zero workers spawned, counters all zero,
     // on_finished still runs with the table.
     let (dir, job, db) = make_job_with_hooks(
@@ -1211,8 +1167,8 @@ end
 }
 
 #[test]
-fn run_one_cycle_counters_reset_between_cycles() {
-    // Two consecutive run_one_cycle calls: no counter leakage into the next
+fn run_iteration_counters_reset_between_cycles() {
+    // Two consecutive run_iteration calls: no counter leakage into the next
     // iteration (stats dropped/recreated each cycle).
     let (dir, job, db) = make_job_with_hooks("lifecycle-no-leak", None, 1, LIFECYCLE_HOOKS);
     let job = Arc::new(job);
@@ -1231,7 +1187,7 @@ fn run_one_cycle_counters_reset_between_cycles() {
 }
 
 #[test]
-fn run_one_cycle_before_fetch_nil_skip_counts_as_processed() {
+fn run_iteration_before_fetch_nil_skip_counts_as_processed() {
     // Engine-level caveat: a worker whose before_fetch returns nil exits Ok
     // and counts as processed (failed stays 0).
     let (dir, job, db) = make_job_with_hooks(
@@ -1253,7 +1209,9 @@ end
     let runner = Arc::new(Runner::new());
     let (ex, _keep_alive) = single_thread_executor();
     let counts = smol::block_on(async {
-        run_one_cycle(&job, &db, &runner, 1, &ex).await;
+        CycleRunner::new(&job, &db, &runner, &ex, 1)
+            .run_iteration()
+            .await;
         let lua = job.hooks.as_ref().unwrap().lua.lock().await;
         lua.globals().get::<Vec<usize>>("final_counts").unwrap()
     });
@@ -1264,7 +1222,7 @@ end
 }
 
 #[test]
-fn run_one_cycle_failed_run_counts_as_failed() {
+fn run_iteration_failed_run_counts_as_failed() {
     // override_fetch returning an invalid response flows as run_once Err →
     // processed=1, failed=1.
     let (dir, job, db) = make_job_with_hooks(
@@ -1286,7 +1244,9 @@ end
     let runner = Arc::new(Runner::new());
     let (ex, _keep_alive) = single_thread_executor();
     let counts = smol::block_on(async {
-        run_one_cycle(&job, &db, &runner, 1, &ex).await;
+        CycleRunner::new(&job, &db, &runner, &ex, 1)
+            .run_iteration()
+            .await;
         let lua = job.hooks.as_ref().unwrap().lua.lock().await;
         lua.globals().get::<Vec<usize>>("final_counts").unwrap()
     });

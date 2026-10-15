@@ -763,17 +763,11 @@ end
 
     smol::block_on(async {
         // Run Group 3 URL Dispatch
-        crate::scraper::pipeline::run_urls_cycle(
-            Arc::clone(&job),
-            &db,
-            &runner,
-            2,
-            &ex,
-            None,
-            job.config.options.urls.clone().unwrap(),
-            &Arc::new(crate::scraper::pipeline::CycleStats::new()),
-        )
-        .await;
+        crate::scraper::pipeline::CycleRunner::new(&job, &db, &runner, &ex, 2)
+            .dispatch(crate::scraper::pipeline::Work::Queue(
+                job.config.options.urls.clone().unwrap(),
+            ))
+            .await;
 
         let hooks_ref = job.hooks.as_ref().unwrap();
         let lua_guard = hooks_ref.lua.lock().await;
@@ -1236,17 +1230,11 @@ end
 
     smol::block_on(async {
         // Run workers. Panic on https://panic.com should be caught and logged
-        crate::scraper::pipeline::run_urls_cycle(
-            Arc::clone(&job),
-            &db,
-            &runner,
-            2,
-            &ex,
-            None,
-            job.config.options.urls.clone().unwrap(),
-            &Arc::new(crate::scraper::pipeline::CycleStats::new()),
-        )
-        .await;
+        crate::scraper::pipeline::CycleRunner::new(&job, &db, &runner, &ex, 2)
+            .dispatch(crate::scraper::pipeline::Work::Queue(
+                job.config.options.urls.clone().unwrap(),
+            ))
+            .await;
 
         let hooks_ref = job.hooks.as_ref().unwrap();
         let lua = hooks_ref.lua.lock().await;

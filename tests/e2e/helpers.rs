@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use spyweb::config::loader;
 use spyweb::config::types::Job;
-use spyweb::scraper::pipeline::run_once;
+use spyweb::scraper::pipeline::JobCtx;
 use spyweb::scraper::request::RequestConfig;
 use spyweb::scraper::runner::Runner;
 use spyweb::services::db::Db;
@@ -145,7 +145,7 @@ impl TestEnv {
     pub fn run_cycle(&self, job: &Job, worker_id: usize) -> anyhow::Result<()> {
         let runner = Arc::new(Runner::new());
         let req = RequestConfig::from_job(&job.config);
-        smol::block_on(run_once(job, &self.db, &runner, &req, worker_id))
+        smol::block_on(JobCtx::new(job, &self.db, &runner).run_once(&req, worker_id))
     }
 
     pub fn run_on_finished(&self, job: &Job) {
