@@ -5,7 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::types::{Field, Job, JobConfig, JobOptions, Proxy as JobProxy, Rotate};
 use crate::lua::hooks::JobHooks;
-use crate::scraper::pipeline::{run_multi_cycle, run_once, run_once_inner, run_urls_cycle};
+use crate::scraper::pipeline::{
+    CycleStats, compute_cycle_batch, run_multi_cycle, run_once, run_once_inner, run_one_cycle,
+    run_urls_cycle,
+};
 use crate::scraper::request::{
     RequestConfig, RequestHandler, RequestResult, flatten_headers, format_error_chain,
     read_body_bounded,
@@ -255,7 +258,17 @@ end
     let (ex, _keep_alive) = single_thread_executor();
 
     smol::block_on(async {
-        run_urls_cycle(Arc::clone(&job), &db, &runner, 1, &ex, None).await;
+        run_urls_cycle(
+            Arc::clone(&job),
+            &db,
+            &runner,
+            1,
+            &ex,
+            None,
+            job.config.options.urls.clone().unwrap(),
+            &Arc::new(CycleStats::new()),
+        )
+        .await;
 
         let job_ref = &*job;
         let hooks = job_ref.hooks.as_ref().unwrap();
@@ -327,7 +340,17 @@ end
     let (ex, _keep_alive) = single_thread_executor();
 
     smol::block_on(async {
-        run_urls_cycle(Arc::clone(&job), &db, &runner, 2, &ex, None).await;
+        run_urls_cycle(
+            Arc::clone(&job),
+            &db,
+            &runner,
+            2,
+            &ex,
+            None,
+            job.config.options.urls.clone().unwrap(),
+            &Arc::new(CycleStats::new()),
+        )
+        .await;
 
         let job_ref = &*job;
         let hooks = job_ref.hooks.as_ref().unwrap();
@@ -395,7 +418,16 @@ end
     let (ex, _keep_alive) = single_thread_executor();
 
     smol::block_on(async {
-        run_multi_cycle(Arc::clone(&job), &db, &runner, 2, &ex, None).await;
+        run_multi_cycle(
+            Arc::clone(&job),
+            &db,
+            &runner,
+            2,
+            &ex,
+            None,
+            &Arc::new(CycleStats::new()),
+        )
+        .await;
 
         let job_ref = &*job;
         let hooks = job_ref.hooks.as_ref().unwrap();
@@ -473,6 +505,7 @@ end
             16,
             &ex,
             Some(Arc::clone(&probe)),
+            &Arc::new(CycleStats::new()),
         )
         .await;
     });
@@ -721,4 +754,548 @@ fn test_read_body_bounded_exact() {
     let body = vec![b'b'; 64];
     let result = read_body_bounded(std::io::Cursor::new(body), 64).unwrap();
     assert_eq!(result.len(), 64);
+}
+
+// --- on_start batch derivation (Phase 1) ---
+
+fn make_job_with_hooks(
+    name: &str,
+    urls: Option<Vec<String>>,
+    workers: usize,
+    hook_source: &str,
+) -> (PathBuf, Job, Arc<Db>) {
+    let dir = unique_test_dir(name);
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(&hook_path, hook_source).unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, Arc::clone(&db), "test_job").unwrap();
+    let job = Job {
+        config: JobConfig {
+            name: "test_job".into(),
+            url: "https://initial.com".into(),
+            selector: ".item".into(),
+            fields: vec![Field::Shorthand("title".into())],
+            options: JobOptions {
+                workers: Some(workers),
+                urls,
+                interval: 60,
+                ..Default::default()
+            },
+        },
+        hooks: Some(hooks),
+        has_hooks_file: true,
+        dir: Some(dir.clone()),
+    };
+    (dir, job, db)
+}
+
+#[test]
+fn compute_cycle_batch_backcompat_without_on_start() {
+    // Queue job, no on_start → seed passes through.
+    let (dir, job, _db) = make_job_with_hooks(
+        "batch-backcompat-queue",
+        Some(vec!["https://a.com".into(), "https://b.com".into()]),
+        2,
+        "function before_fetch(request) return request end\n",
+    );
+    let batch = smol::block_on(compute_cycle_batch(&job));
+    assert_eq!(
+        batch,
+        Some(vec![
+            "https://a.com".to_string(),
+            "https://b.com".to_string()
+        ])
+    );
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+
+    // Legacy job (no urls), no on_start → None (legacy dispatch).
+    let (dir, job, _db) = make_job_with_hooks(
+        "batch-backcompat-legacy",
+        None,
+        1,
+        "function before_fetch(request) return request end\n",
+    );
+    let batch = smol::block_on(compute_cycle_batch(&job));
+    assert_eq!(batch, None);
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+
+    // urls = [] → has_urls false → seed None → legacy dispatch (today's behavior).
+    let (dir, job, _db) = make_job_with_hooks(
+        "batch-backcompat-empty",
+        Some(vec![]),
+        1,
+        "function before_fetch(request) return request end\n",
+    );
+    let batch = smol::block_on(compute_cycle_batch(&job));
+    assert_eq!(batch, None);
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compute_cycle_batch_on_start_derivation() {
+    // Legacy job + on_start sets a batch → promoted to queue-loop this cycle.
+    let (dir, job, _db) = make_job_with_hooks(
+        "batch-promote",
+        None,
+        2,
+        r#"
+function on_start(queue)
+    queue.urls = { "monitor:1", "monitor:2", "monitor:3" }
+end
+"#,
+    );
+    let batch = smol::block_on(compute_cycle_batch(&job));
+    assert_eq!(
+        batch,
+        Some(vec![
+            "monitor:1".to_string(),
+            "monitor:2".to_string(),
+            "monitor:3".to_string()
+        ])
+    );
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+
+    // Empty batch → Some(vec![]) (explicit zero work; run_job_loop skips spawn).
+    let (dir, job, _db) = make_job_with_hooks(
+        "batch-empty",
+        Some(vec!["https://seed.com".into()]),
+        2,
+        r#"
+function on_start(queue)
+    queue.urls = {}
+end
+"#,
+    );
+    let batch = smol::block_on(compute_cycle_batch(&job));
+    assert_eq!(batch, Some(vec![]));
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+
+    // Queue job + on_start nils urls → no opinion → seed intact.
+    let (dir, job, _db) = make_job_with_hooks(
+        "batch-nil-no-opinion",
+        Some(vec!["https://seed.com".into()]),
+        1,
+        r#"
+function on_start(queue)
+    queue.urls = nil
+end
+"#,
+    );
+    let batch = smol::block_on(compute_cycle_batch(&job));
+    assert_eq!(batch, Some(vec!["https://seed.com".to_string()]));
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn on_start_batch_drains_via_queue_loop_in_order() {
+    // End-to-end Phase 1 shape: legacy job, on_start seeds an opaque batch,
+    // single worker drains it in order through the queue-loop.
+    let (dir, job, db) = make_job_with_hooks(
+        "on-start-queue-loop",
+        None,
+        1,
+        r#"
+fetched = {}
+
+function on_start(queue)
+    queue.urls = { "monitor:1", "monitor:2", "monitor:3" }
+end
+
+function before_fetch(request)
+    table.insert(fetched, request.url)
+    return request
+end
+
+function override_fetch(request)
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+"#,
+    );
+    let job = Arc::new(job);
+    let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
+
+    smol::block_on(async {
+        let batch = compute_cycle_batch(&job).await.unwrap();
+        assert_eq!(batch.len(), 3);
+        run_urls_cycle(
+            Arc::clone(&job),
+            &db,
+            &runner,
+            1,
+            &ex,
+            None,
+            batch,
+            &Arc::new(CycleStats::new()),
+        )
+        .await;
+
+        let hooks = job.hooks.as_ref().unwrap();
+        let lua = hooks.lua.lock().await;
+        let fetched: Vec<String> = lua.globals().get("fetched").unwrap();
+        // Pop order preserved for a single worker.
+        assert_eq!(
+            fetched,
+            vec![
+                "monitor:1".to_string(),
+                "monitor:2".to_string(),
+                "monitor:3".to_string()
+            ]
+        );
+    });
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn on_start_batch_larger_than_workers_drains_fully() {
+    // 6-entry batch, 2 workers → all 6 processed in one cycle.
+    let (dir, job, db) = make_job_with_hooks(
+        "on-start-drain-all",
+        None,
+        2,
+        r#"
+fetched = {}
+
+function on_start(queue)
+    queue.urls = { "u1", "u2", "u3", "u4", "u5", "u6" }
+end
+
+function override_fetch(request)
+    table.insert(fetched, request.url)
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+"#,
+    );
+    let job = Arc::new(job);
+    let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
+
+    smol::block_on(async {
+        let batch = compute_cycle_batch(&job).await.unwrap();
+        run_urls_cycle(
+            Arc::clone(&job),
+            &db,
+            &runner,
+            2,
+            &ex,
+            None,
+            batch,
+            &Arc::new(CycleStats::new()),
+        )
+        .await;
+
+        let hooks = job.hooks.as_ref().unwrap();
+        let lua = hooks.lua.lock().await;
+        let fetched: Vec<String> = lua.globals().get("fetched").unwrap();
+        assert_eq!(fetched.len(), 6);
+        let set: std::collections::HashSet<String> = fetched.into_iter().collect();
+        assert_eq!(set.len(), 6);
+    });
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// --- run_one_cycle scheduler lifecycle (Phase 1+2) ---
+
+const LIFECYCLE_HOOKS: &str = r#"
+_G.lifecycle = {}
+
+function on_start(queue)
+    table.insert(_G.lifecycle, "on_start")
+end
+
+function before_fetch(request)
+    table.insert(_G.lifecycle, "fetch:" .. request.url)
+    return request
+end
+
+function override_fetch(request)
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+
+function on_finished(queue)
+    table.insert(_G.lifecycle, "on_finished")
+    _G.final_counts = { queue.processed, queue.failed, queue.pushed }
+    _G.final_urls_len = #queue.urls
+end
+"#;
+
+struct LifecycleRun {
+    log: Vec<String>,
+    counts: Vec<usize>,
+    urls_len: usize,
+}
+
+fn run_cycle_lifecycle(job: &Arc<Job>, db: &Arc<Db>) -> LifecycleRun {
+    let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
+    let worker_count = job.config.worker_count();
+    smol::block_on(async {
+        run_one_cycle(job, db, &runner, worker_count, &ex).await;
+        let hooks = job.hooks.as_ref().unwrap();
+        let lua = hooks.lua.lock().await;
+        let log = lua.globals().get::<Vec<String>>("lifecycle").unwrap();
+        let counts = lua.globals().get::<Vec<usize>>("final_counts").unwrap();
+        let urls_len = lua.globals().get::<usize>("final_urls_len").unwrap();
+        LifecycleRun {
+            log,
+            counts,
+            urls_len,
+        }
+    })
+}
+
+fn assert_lifecycle_order(log: &[String], expected_fetches: usize) {
+    assert_eq!(
+        log.first().map(String::as_str),
+        Some("on_start"),
+        "on_start must run first"
+    );
+    assert_eq!(
+        log.last().map(String::as_str),
+        Some("on_finished"),
+        "on_finished must run last"
+    );
+    let starts = log.iter().filter(|e| *e == "on_start").count();
+    let finishes = log.iter().filter(|e| *e == "on_finished").count();
+    assert_eq!(starts, 1, "on_start must run exactly once per cycle");
+    assert_eq!(finishes, 1, "on_finished must run exactly once per cycle");
+    let fetches: Vec<&String> = log.iter().filter(|e| e.starts_with("fetch:")).collect();
+    assert_eq!(fetches.len(), expected_fetches, "unexpected fetch count");
+}
+
+#[test]
+fn run_one_cycle_single_worker_on_start_first_on_finished_last() {
+    let (dir, job, db) = make_job_with_hooks("lifecycle-single", None, 1, LIFECYCLE_HOOKS);
+    let job = Arc::new(job);
+
+    let run = run_cycle_lifecycle(&job, &db);
+    assert_lifecycle_order(&run.log, 1);
+    assert_eq!(run.log[1], "fetch:https://initial.com");
+    // One successful run_once: processed=1, failed=0, pushed=0; urls always {}.
+    assert_eq!(run.counts, vec![1, 0, 0]);
+    assert_eq!(run.urls_len, 0);
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn run_one_cycle_multi_worker_on_start_first_on_finished_last() {
+    let (dir, job, db) = make_job_with_hooks("lifecycle-multi", None, 3, LIFECYCLE_HOOKS);
+    let job = Arc::new(job);
+
+    let run = run_cycle_lifecycle(&job, &db);
+    // Legacy multi mode: one run_once per worker, all on the base URL.
+    assert_lifecycle_order(&run.log, 3);
+    assert_eq!(run.counts, vec![3, 0, 0]);
+    assert_eq!(run.urls_len, 0);
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn run_one_cycle_static_queue_on_start_first_on_finished_last() {
+    let (dir, job, db) = make_job_with_hooks(
+        "lifecycle-static-queue",
+        Some(vec!["https://a.com".into(), "https://b.com".into()]),
+        2,
+        LIFECYCLE_HOOKS,
+    );
+    let job = Arc::new(job);
+
+    let run = run_cycle_lifecycle(&job, &db);
+    // Static queue mode: config seed untouched by on_start; both URLs drain.
+    assert_lifecycle_order(&run.log, 2);
+    let set: std::collections::HashSet<&str> = run
+        .log
+        .iter()
+        .filter_map(|e| e.strip_prefix("fetch:"))
+        .collect();
+    assert_eq!(set.len(), 2);
+    assert!(set.contains("https://a.com"));
+    assert!(set.contains("https://b.com"));
+    assert_eq!(run.counts, vec![2, 0, 0]);
+    assert_eq!(run.urls_len, 0);
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn run_one_cycle_zero_work_batch_all_zero_counters() {
+    // on_start commits {} → zero workers spawned, counters all zero,
+    // on_finished still runs with the table.
+    let (dir, job, db) = make_job_with_hooks(
+        "lifecycle-zero-work",
+        None,
+        2,
+        r#"
+_G.lifecycle = {}
+
+function on_start(queue)
+    table.insert(_G.lifecycle, "on_start")
+    queue.urls = {}
+end
+
+function before_fetch(request)
+    table.insert(_G.lifecycle, "fetch")
+    return request
+end
+
+function override_fetch(request)
+    return { status = 200, url = request.url, headers = {}, body = "" }
+end
+
+function override_extract(response)
+    return {}
+end
+
+function on_finished(queue)
+    table.insert(_G.lifecycle, "on_finished")
+    _G.final_counts = { queue.processed, queue.failed, queue.pushed }
+    _G.final_urls_len = #queue.urls
+end
+"#,
+    );
+    let job = Arc::new(job);
+
+    let run = run_cycle_lifecycle(&job, &db);
+    assert_eq!(
+        run.log,
+        vec!["on_start".to_string(), "on_finished".to_string()]
+    );
+    assert_eq!(run.counts, vec![0, 0, 0]);
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn run_one_cycle_counters_reset_between_cycles() {
+    // Two consecutive run_one_cycle calls: no counter leakage into the next
+    // iteration (stats dropped/recreated each cycle).
+    let (dir, job, db) = make_job_with_hooks("lifecycle-no-leak", None, 1, LIFECYCLE_HOOKS);
+    let job = Arc::new(job);
+
+    let run1 = run_cycle_lifecycle(&job, &db);
+    assert_eq!(run1.counts, vec![1, 0, 0]);
+    let run2 = run_cycle_lifecycle(&job, &db);
+    assert_eq!(
+        run2.counts,
+        vec![1, 0, 0],
+        "second cycle must not see first cycle's counters"
+    );
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn run_one_cycle_before_fetch_nil_skip_counts_as_processed() {
+    // Engine-level caveat: a worker whose before_fetch returns nil exits Ok
+    // and counts as processed (failed stays 0).
+    let (dir, job, db) = make_job_with_hooks(
+        "lifecycle-nil-skip",
+        None,
+        1,
+        r#"
+function before_fetch(request)
+    return nil
+end
+
+function on_finished(queue)
+    _G.final_counts = { queue.processed, queue.failed, queue.pushed }
+end
+"#,
+    );
+    let job = Arc::new(job);
+
+    let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
+    let counts = smol::block_on(async {
+        run_one_cycle(&job, &db, &runner, 1, &ex).await;
+        let lua = job.hooks.as_ref().unwrap().lua.lock().await;
+        lua.globals().get::<Vec<usize>>("final_counts").unwrap()
+    });
+    assert_eq!(counts, vec![1, 0, 0], "nil-skip is processed=1, failed=0");
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn run_one_cycle_failed_run_counts_as_failed() {
+    // override_fetch returning an invalid response flows as run_once Err →
+    // processed=1, failed=1.
+    let (dir, job, db) = make_job_with_hooks(
+        "lifecycle-failed",
+        None,
+        1,
+        r#"
+function before_fetch(request)
+    error("boom")
+end
+
+function on_finished(queue)
+    _G.final_counts = { queue.processed, queue.failed, queue.pushed }
+end
+"#,
+    );
+    let job = Arc::new(job);
+
+    let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
+    let counts = smol::block_on(async {
+        run_one_cycle(&job, &db, &runner, 1, &ex).await;
+        let lua = job.hooks.as_ref().unwrap().lua.lock().await;
+        lua.globals().get::<Vec<usize>>("final_counts").unwrap()
+    });
+    assert_eq!(
+        counts,
+        vec![1, 1, 0],
+        "failed run_once: processed=1, failed=1"
+    );
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
 }

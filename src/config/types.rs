@@ -147,6 +147,8 @@ pub fn normalize_job_id(input: &str) -> String {
 //     pub att: String,
 // }
 
+pub(crate) const MAX_BATCH: usize = 10_000;
+
 impl JobConfig {
     pub fn id(&self) -> String {
         normalize_job_id(&self.name)

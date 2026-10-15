@@ -23,6 +23,7 @@ pub(crate) const HOOK_ON_SUCCESS: u16 = 1 << 9;
 pub(crate) const HOOK_ON_ERROR: u16 = 1 << 10;
 pub(crate) const HOOK_ON_FINALLY: u16 = 1 << 11;
 pub(crate) const HOOK_ON_FINISHED: u16 = 1 << 12;
+pub(crate) const HOOK_ON_START: u16 = 1 << 13;
 
 pub(crate) const RESERVED_CTX_KEYS: &[&str] = &[
     "last_fetch",
@@ -32,6 +33,61 @@ pub(crate) const RESERVED_CTX_KEYS: &[&str] = &[
     "filter_error",
     "worker_id",
 ];
+
+// Build the `on_start(queue)` param table: `{ urls = seed }`
+fn build_start_table(lua: &Lua, seed: &Option<Vec<String>>) -> mlua::Result<Table> {
+    let table = lua.create_table()?;
+    table.set("urls", seed.clone())?;
+    Ok(table)
+}
+
+// Strict read-back of `queue.urls` from the same table
+fn commit_urls(table: &Table) -> std::result::Result<Option<Vec<String>>, String> {
+    let urls_tbl = match table.get::<Option<Table>>("urls") {
+        Ok(Some(t)) => t,
+        Ok(None) => return Ok(None),
+        Err(e) => return Err(format!("invalid queue.urls: {e}")),
+    };
+    let mut entries: Vec<(usize, String)> = Vec::new();
+    for pair in urls_tbl.pairs::<Value, Value>() {
+        let Ok((key, value)) = pair else {
+            return Err("queue.urls must be a dense list of strings".into());
+        };
+        let idx = match key {
+            Value::Integer(i) if i >= 1 => i as usize,
+            Value::Number(n) if n >= 1.0 && n.fract() == 0.0 && n <= usize::MAX as f64 => {
+                n as usize
+            }
+            _ => return Err("queue.urls must be a dense list of strings".into()),
+        };
+        // Reject out-of-range keys immediately: bounds both the position
+        // space and allocation before any push.
+        if idx > crate::config::types::MAX_BATCH {
+            return Err(format!(
+                "batch size exceeds MAX_BATCH {}",
+                crate::config::types::MAX_BATCH
+            ));
+        }
+        let Value::String(s) = value else {
+            return Err("queue.urls must be a dense list of strings".into());
+        };
+        let Ok(s) = s.to_str() else {
+            return Err("queue.urls must be a dense list of strings".into());
+        };
+        entries.push((idx, s.to_string()));
+        if entries.len() > crate::config::types::MAX_BATCH {
+            return Err(format!(
+                "batch size exceeds MAX_BATCH {}",
+                crate::config::types::MAX_BATCH
+            ));
+        }
+    }
+    entries.sort_unstable_by_key(|(k, _)| *k);
+    if !entries.iter().enumerate().all(|(i, (k, _))| *k == i + 1) {
+        return Err("queue.urls must be a dense list of strings".into());
+    }
+    Ok(Some(entries.into_iter().map(|(_, s)| s).collect()))
+}
 
 pub(crate) fn source_uses_cdp(source: &str) -> bool {
     source.contains("cdp.")
@@ -169,6 +225,9 @@ impl JobHooks {
         if has("on_finished") {
             hook_mask |= HOOK_ON_FINISHED;
         }
+        if has("on_start") {
+            hook_mask |= HOOK_ON_START;
+        }
 
         Ok(Self {
             job_name: job_name.to_string(),
@@ -188,6 +247,10 @@ impl JobHooks {
 
     pub fn has_cycle_cleanup(&self) -> bool {
         self.hook_mask & (HOOK_ON_SUCCESS | HOOK_ON_ERROR | HOOK_ON_FINALLY) != 0
+    }
+
+    pub fn has_on_start(&self) -> bool {
+        self.hook_mask & HOOK_ON_START != 0
     }
 
     pub async fn new_cycle_context(&self, worker_id: usize) -> Result<Table> {
@@ -364,21 +427,121 @@ impl JobHooks {
         }
     }
 
-    pub async fn run_on_finished(&self) {
+    pub async fn run_on_start(&self, seed: Option<Vec<String>>) -> Option<Vec<String>> {
+        if self.hook_mask & HOOK_ON_START == 0 {
+            return seed;
+        }
+
+        let lua = self.lua.lock().await;
+        if let Err(e) = lua.set_named_registry_value("active_ctx", Value::Nil) {
+            crate::t_eprintln!(
+                "on_start: failed to clear active_ctx for job '{}': {e}",
+                self.job_name
+            );
+            return seed;
+        }
+
+        let func: mlua::Function = match lua.globals().get("on_start") {
+            Ok(f) => f,
+            Err(e) => {
+                crate::t_eprintln!("on_start error for job '{}': {e}", self.job_name);
+                return seed;
+            }
+        };
+
+        let info = func.info();
+        if !info.is_vararg && info.num_params == 0 {
+            // `function on_start()`: generic lifecycle hook, no queue channel.
+            if let Err(e) = func.call_async::<()>(()).await {
+                crate::t_eprintln!("on_start error for job '{}': {e}", self.job_name);
+            }
+            return seed;
+        }
+
+        let table = match build_start_table(&lua, &seed) {
+            Ok(t) => t,
+            Err(e) => {
+                crate::t_eprintln!("on_start error for job '{}': {e}", self.job_name);
+                return seed;
+            }
+        };
+
+        if let Err(e) = func.call_async::<()>((table.clone(),)).await {
+            crate::t_eprintln!("on_start error for job '{}': {e}", self.job_name);
+            return seed;
+        }
+
+        match commit_urls(&table) {
+            Ok(batch) => batch.or(seed),
+            Err(msg) => {
+                crate::t_eprintln!("on_start error for job '{}': {msg}", self.job_name);
+                seed
+            }
+        }
+    }
+
+    pub async fn run_on_finished(&self, stats: &crate::scraper::pipeline::CycleStats) {
         if self.hook_mask & HOOK_ON_FINISHED == 0 {
             return;
         }
 
         let lua = self.lua.lock().await;
-        match lua.globals().get::<mlua::Function>("on_finished") {
-            Ok(f) => {
-                if let Err(e) = f.call_async::<()>(()).await {
-                    crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
-                }
-            }
+        if let Err(e) = lua.set_named_registry_value("active_ctx", Value::Nil) {
+            crate::t_eprintln!(
+                "on_finished: failed to clear active_ctx for job '{}': {e}",
+                self.job_name
+            );
+            return;
+        }
+
+        let func: mlua::Function = match lua.globals().get("on_finished") {
+            Ok(f) => f,
             Err(e) => {
                 crate::t_eprintln!("on_finished not callable for job '{}': {e}", self.job_name);
+                return;
             }
+        };
+
+        let info = func.info();
+        if !info.is_vararg && info.num_params == 0 {
+            if let Err(e) = func.call_async::<()>(()).await {
+                crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
+            }
+            return;
+        }
+
+        let table = match lua.create_table() {
+            Ok(t) => t,
+            Err(e) => {
+                crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
+                return;
+            }
+        };
+        match lua
+            .create_table()
+            .and_then(|inner| table.set("urls", inner))
+        {
+            Ok(()) => {}
+            Err(e) => {
+                crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
+                return;
+            }
+        }
+        if let Err(e) = table.set("processed", stats.processed()) {
+            crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
+            return;
+        }
+        if let Err(e) = table.set("failed", stats.failed()) {
+            crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
+            return;
+        }
+        if let Err(e) = table.set("pushed", 0usize) {
+            crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
+            return;
+        }
+
+        if let Err(e) = func.call_async::<()>((table,)).await {
+            crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
         }
     }
 

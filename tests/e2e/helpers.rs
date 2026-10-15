@@ -150,7 +150,7 @@ impl TestEnv {
 
     pub fn run_on_finished(&self, job: &Job) {
         if let Some(h) = job.hooks.as_ref() {
-            smol::block_on(h.run_on_finished());
+            smol::block_on(h.run_on_finished(&spyweb::scraper::pipeline::CycleStats::new()));
         }
     }
 

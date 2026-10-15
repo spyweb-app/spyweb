@@ -6,6 +6,7 @@ use anyhow::Result;
 use smol::{Executor, Timer};
 use std::collections::{HashSet, VecDeque};
 use std::future::Future;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 use std::time::Duration;
@@ -15,6 +16,41 @@ type UrlQueue = Arc<Mutex<VecDeque<String>>>;
 pub(crate) type ThreadProbe = Option<Arc<Mutex<HashSet<ThreadId>>>>;
 
 const WORKER_STAGGER_MS: u64 = 200;
+
+pub struct CycleStats {
+    processed: AtomicUsize,
+    failed: AtomicUsize,
+}
+
+impl CycleStats {
+    pub fn new() -> Self {
+        Self {
+            processed: AtomicUsize::new(0),
+            failed: AtomicUsize::new(0),
+        }
+    }
+
+    pub(crate) fn record(&self, ok: bool) {
+        self.processed.fetch_add(1, Ordering::Relaxed);
+        if !ok {
+            self.failed.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub fn processed(&self) -> usize {
+        self.processed.load(Ordering::Relaxed)
+    }
+
+    pub fn failed(&self) -> usize {
+        self.failed.load(Ordering::Relaxed)
+    }
+}
+
+impl Default for CycleStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 fn spawn_worker<F>(
     ex: &Arc<Executor<'static>>,
@@ -35,30 +71,75 @@ where
     })
 }
 
+pub(crate) async fn compute_cycle_batch(job: &Job) -> Option<Vec<String>> {
+    let seed = if job.config.has_urls() {
+        job.config.options.urls.clone()
+    } else {
+        None
+    };
+    match job.hooks.as_ref() {
+        Some(hooks) if hooks.has_on_start() => hooks.run_on_start(seed).await,
+        _ => seed,
+    }
+}
+
+// Run exactly one job iteration: resolve batch → dispatch → `on_finished`.
+pub(crate) async fn run_one_cycle(
+    job: &Arc<Job>,
+    db: &Arc<Db>,
+    runner: &Arc<Runner>,
+    worker_count: usize,
+    ex: &Arc<Executor<'static>>,
+) {
+    let stats = Arc::new(CycleStats::new());
+    match compute_cycle_batch(job).await {
+        Some(batch) if !batch.is_empty() => {
+            run_urls_cycle(
+                Arc::clone(job),
+                db,
+                runner,
+                worker_count,
+                ex,
+                None,
+                batch,
+                &stats,
+            )
+            .await;
+        }
+        Some(_) => {
+            // Explicit empty batch from on_start: zero work this cycle.
+        }
+        None => {
+            if worker_count > 1 {
+                run_multi_cycle(Arc::clone(job), db, runner, worker_count, ex, None, &stats).await;
+            } else {
+                let base_request = RequestConfig::from_job(&job.config);
+                match run_once(job, db, runner, &base_request, 1).await {
+                    Ok(()) => stats.record(true),
+                    Err(e) => {
+                        stats.record(false);
+                        crate::t_eprintln!("Job '{}' error: {}", color::c_job(&job.config.name), e);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(hooks) = job.hooks.as_ref() {
+        hooks.run_on_finished(&stats).await;
+    }
+}
+
 pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>, ex: &Arc<Executor<'static>>) {
     let interval = Duration::from_secs(job.config.options.interval as u64);
     let worker_count = job.config.worker_count();
-    let has_urls = job.config.has_urls();
     let job = Arc::new(job);
 
     loop {
         crate::t_println!("Running job: {}", color::c_job(&job.config.name));
         let started = std::time::Instant::now();
 
-        if has_urls {
-            run_urls_cycle(Arc::clone(&job), &db, &runner, worker_count, ex, None).await;
-        } else if worker_count > 1 {
-            run_multi_cycle(Arc::clone(&job), &db, &runner, worker_count, ex, None).await;
-        } else {
-            let base_request = RequestConfig::from_job(&job.config);
-            if let Err(e) = run_once(&job, &db, &runner, &base_request, 1).await {
-                crate::t_eprintln!("Job '{}' error: {}", color::c_job(&job.config.name), e);
-            }
-        }
-
-        if let Some(hooks) = job.hooks.as_ref() {
-            hooks.run_on_finished().await;
-        }
+        run_one_cycle(&job, &db, &runner, worker_count, ex).await;
 
         let pipeline_elapsed = started.elapsed();
         crate::t_println!(
@@ -71,6 +152,7 @@ pub async fn run_job_loop(job: Job, db: Arc<Db>, runner: Arc<Runner>, ex: &Arc<E
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_urls_cycle(
     job: Arc<Job>,
     db: &Arc<Db>,
@@ -78,16 +160,10 @@ pub(crate) async fn run_urls_cycle(
     worker_count: usize,
     ex: &Arc<Executor<'static>>,
     thread_probe: ThreadProbe,
+    batch: Vec<String>,
+    stats: &Arc<CycleStats>,
 ) {
-    let queue: UrlQueue = Arc::new(Mutex::new(
-        job.config
-            .options
-            .urls
-            .clone()
-            .unwrap()
-            .into_iter()
-            .collect(),
-    ));
+    let queue: UrlQueue = Arc::new(Mutex::new(batch.into()));
 
     let mut handles = Vec::with_capacity(worker_count);
     for i in 1..=worker_count {
@@ -99,6 +175,7 @@ pub(crate) async fn run_urls_cycle(
         let db = Arc::clone(db);
         let runner = Arc::clone(runner);
         let queue = Arc::clone(&queue);
+        let stats = Arc::clone(stats);
         handles.push(spawn_worker(
             ex,
             async move {
@@ -112,8 +189,12 @@ pub(crate) async fn run_urls_cycle(
                         url,
                         ..RequestConfig::from_job(&job.config)
                     };
-                    if let Err(e) = run_once(&job, &db, &runner, &request, worker_id).await {
-                        crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
+                    match run_once(&job, &db, &runner, &request, worker_id).await {
+                        Ok(()) => stats.record(true),
+                        Err(e) => {
+                            stats.record(false);
+                            crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
+                        }
                     }
                 }
             },
@@ -133,6 +214,7 @@ pub(crate) async fn run_multi_cycle(
     worker_count: usize,
     ex: &Arc<Executor<'static>>,
     thread_probe: ThreadProbe,
+    stats: &Arc<CycleStats>,
 ) {
     let base_request = RequestConfig::from_job(&job.config);
 
@@ -146,11 +228,16 @@ pub(crate) async fn run_multi_cycle(
         let db = Arc::clone(db);
         let runner = Arc::clone(runner);
         let request = base_request.clone();
+        let stats = Arc::clone(stats);
         handles.push(spawn_worker(
             ex,
             async move {
-                if let Err(e) = run_once(&job, &db, &runner, &request, worker_id).await {
-                    crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
+                match run_once(&job, &db, &runner, &request, worker_id).await {
+                    Ok(()) => stats.record(true),
+                    Err(e) => {
+                        stats.record(false);
+                        crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
+                    }
                 }
             },
             &thread_probe,

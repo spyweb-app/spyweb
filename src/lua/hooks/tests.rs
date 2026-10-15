@@ -763,8 +763,17 @@ end
 
     smol::block_on(async {
         // Run Group 3 URL Dispatch
-        crate::scraper::pipeline::run_urls_cycle(Arc::clone(&job), &db, &runner, 2, &ex, None)
-            .await;
+        crate::scraper::pipeline::run_urls_cycle(
+            Arc::clone(&job),
+            &db,
+            &runner,
+            2,
+            &ex,
+            None,
+            job.config.options.urls.clone().unwrap(),
+            &Arc::new(crate::scraper::pipeline::CycleStats::new()),
+        )
+        .await;
 
         let hooks_ref = job.hooks.as_ref().unwrap();
         let lua_guard = hooks_ref.lua.lock().await;
@@ -831,7 +840,9 @@ end
     );
 
     smol::block_on(async {
-        hooks.run_on_finished().await;
+        hooks
+            .run_on_finished(&crate::scraper::pipeline::CycleStats::new())
+            .await;
 
         let lua = hooks.lua.lock().await;
         let log: Vec<String> = lua
@@ -849,7 +860,9 @@ end
 }
 
 #[test]
-fn test_on_finished_no_args_passed() {
+fn test_on_finished_zero_param_no_table() {
+    // `function on_finished()`: arity gate — no table constructed, hook runs
+    // with zero arguments (existing back-compat path).
     let dir = unique_test_dir("on-finished-no-args");
     fs::create_dir_all(&dir).unwrap();
     let hook_path = dir.join("hooks.lua");
@@ -857,12 +870,10 @@ fn test_on_finished_no_args_passed() {
     fs::write(
         &hook_path,
         r#"
-_G.arg_count = nil
+_G.ran = false
 
-function on_finished(...)
-    local n = 0
-    for _ in ipairs({...}) do n = n + 1 end
-    _G.arg_count = n
+function on_finished()
+    _G.ran = true
 end
 "#,
     )
@@ -873,16 +884,141 @@ end
     assert!(hooks.hook_mask & HOOK_ON_FINISHED != 0);
 
     smol::block_on(async {
-        hooks.run_on_finished().await;
+        hooks
+            .run_on_finished(&crate::scraper::pipeline::CycleStats::new())
+            .await;
 
         let lua = hooks.lua.lock().await;
-        let arg_count: usize = lua
-            .globals()
-            .get::<mlua::Table>("_G")
-            .unwrap()
-            .get("arg_count")
-            .unwrap();
-        assert_eq!(arg_count, 0, "on_finished should receive zero arguments");
+        let ran: bool = lua.globals().get("ran").unwrap();
+        assert!(ran, "zero-param on_finished should have run");
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_on_finished_vararg_receives_table() {
+    // `function on_finished(...)`: arity gate treats vararg as wanting the
+    // table — receives the full stats table.
+    let dir = unique_test_dir("on-finished-vararg");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+
+    fs::write(
+        &hook_path,
+        r#"
+function on_finished(...)
+    local queue = ...
+    _G.saw_urls = type(queue.urls) == "table"
+    _G.saw_processed = queue.processed
+    _G.saw_failed = queue.failed
+    _G.saw_pushed = queue.pushed
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+    smol::block_on(async {
+        let stats = crate::scraper::pipeline::CycleStats::new();
+        stats.record(true);
+        stats.record(true);
+        stats.record(false);
+        hooks.run_on_finished(&stats).await;
+
+        let lua = hooks.lua.lock().await;
+        let g = lua.globals();
+        let saw_urls: bool = g.get("saw_urls").unwrap();
+        let processed: usize = g.get("saw_processed").unwrap();
+        let failed: usize = g.get("saw_failed").unwrap();
+        let pushed: usize = g.get("saw_pushed").unwrap();
+        assert!(saw_urls, "queue.urls should be a table");
+        assert_eq!(processed, 3);
+        assert_eq!(failed, 1);
+        assert_eq!(pushed, 0, "pushed is always 0 until Phase 3");
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_on_finished_param_receives_final_stats() {
+    // One-param hook receives the finalized table after dispatch.
+    let dir = unique_test_dir("on-finished-stats");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+
+    fs::write(
+        &hook_path,
+        r#"
+function on_finished(queue)
+    _G.counts = { queue.processed, queue.failed, queue.pushed }
+    _G.urls_len = #queue.urls
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+    smol::block_on(async {
+        let stats = crate::scraper::pipeline::CycleStats::new();
+        stats.record(true);
+        hooks.run_on_finished(&stats).await;
+
+        let lua = hooks.lua.lock().await;
+        let g = lua.globals();
+        let counts: Vec<usize> = g.get("counts").unwrap();
+        assert_eq!(counts, vec![1, 0, 0]);
+        let urls_len: usize = g.get("urls_len").unwrap();
+        assert_eq!(urls_len, 0, "urls is always empty in on_finished");
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_on_finished_defer_raises() {
+    // defer() has no active ctx in on_finished (active_ctx = Nil) →
+    // deterministic error, hook fails, log-only (counters already final).
+    let dir = unique_test_dir("on-finished-defer");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+
+    fs::write(
+        &hook_path,
+        r#"
+_G.ran_before_defer = false
+
+function on_finished()
+    _G.ran_before_defer = true
+    defer(function() end)
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+
+    smol::block_on(async {
+        // Must not panic; defer raises inside the hook, error is log-only.
+        hooks
+            .run_on_finished(&crate::scraper::pipeline::CycleStats::new())
+            .await;
+
+        let lua = hooks.lua.lock().await;
+        let ran: bool = lua.globals().get("ran_before_defer").unwrap();
+        assert!(ran, "hook body should run before defer raises");
     });
 
     let _ = fs::remove_file(dir.join("test.redb"));
@@ -917,7 +1053,9 @@ end
     );
 
     smol::block_on(async {
-        hooks.run_on_finished().await;
+        hooks
+            .run_on_finished(&crate::scraper::pipeline::CycleStats::new())
+            .await;
 
         let lua = hooks.lua.lock().await;
         let ran: bool = lua
@@ -956,7 +1094,9 @@ end
 
     smol::block_on(async {
         // Should not panic
-        hooks.run_on_finished().await;
+        hooks
+            .run_on_finished(&crate::scraper::pipeline::CycleStats::new())
+            .await;
     });
 
     let _ = fs::remove_file(dir.join("test.redb"));
@@ -986,7 +1126,9 @@ _G.ran = false
     );
 
     smol::block_on(async {
-        hooks.run_on_finished().await;
+        hooks
+            .run_on_finished(&crate::scraper::pipeline::CycleStats::new())
+            .await;
 
         let lua = hooks.lua.lock().await;
         let ran: bool = lua
@@ -1094,8 +1236,17 @@ end
 
     smol::block_on(async {
         // Run workers. Panic on https://panic.com should be caught and logged
-        crate::scraper::pipeline::run_urls_cycle(Arc::clone(&job), &db, &runner, 2, &ex, None)
-            .await;
+        crate::scraper::pipeline::run_urls_cycle(
+            Arc::clone(&job),
+            &db,
+            &runner,
+            2,
+            &ex,
+            None,
+            job.config.options.urls.clone().unwrap(),
+            &Arc::new(crate::scraper::pipeline::CycleStats::new()),
+        )
+        .await;
 
         let hooks_ref = job.hooks.as_ref().unwrap();
         let lua = hooks_ref.lua.lock().await;
@@ -1158,6 +1309,418 @@ end
         );
         assert_eq!(overridden.max_body_size, Some(5 * 1024 * 1024));
     });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+// --- on_start (Phase 1) ---
+
+/// Load a hooks.lua with the given source, run `run_on_start` with the given
+/// seed, return the read-back batch. Cleans up temp files.
+fn on_start_result(source: &str, seed: Option<Vec<&str>>) -> Option<Vec<String>> {
+    let dir = unique_test_dir("on-start");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(&hook_path, source).unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+    let seed = seed.map(|v| v.into_iter().map(String::from).collect());
+    let result = smol::block_on(hooks.run_on_start(seed));
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+    result
+}
+
+#[test]
+fn test_on_start_append_commits() {
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    table.insert(queue.urls, "b")
+end
+"#,
+        Some(vec!["a"]),
+    );
+    assert_eq!(result, Some(vec!["a".to_string(), "b".to_string()]));
+}
+
+#[test]
+fn test_on_start_reset_commits() {
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = { "x", "y" }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["x".to_string(), "y".to_string()]));
+}
+
+#[test]
+fn test_on_start_return_value_ignored() {
+    // Mutating the param commits; a returned fresh table with different urls
+    // is discarded (return value is not a commit channel).
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    table.insert(queue.urls, "from-param")
+    return { urls = { "hijack-1", "hijack-2" } }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(
+        result,
+        Some(vec!["seed".to_string(), "from-param".to_string()])
+    );
+}
+
+#[test]
+fn test_on_start_rebind_local_is_noop() {
+    // Rebinding the local does not touch the object the engine holds.
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue = { urls = { "hijack" } }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+}
+
+#[test]
+fn test_on_start_junk_returns_are_noops() {
+    for ret in ["return 42", "return 'junk'", "return true", "return nil"] {
+        let source = format!(
+            "function on_start(queue)\n    table.insert(queue.urls, \"b\")\n    {ret}\nend\n"
+        );
+        let result = on_start_result(&source, Some(vec!["a"]));
+        assert_eq!(
+            result,
+            Some(vec!["a".to_string(), "b".to_string()]),
+            "return value `{ret}` must not affect commit"
+        );
+    }
+}
+
+#[test]
+fn test_on_start_nil_urls_is_no_opinion() {
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = nil
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+}
+
+#[test]
+fn test_on_start_legacy_seed_nil_stays_nil() {
+    // Legacy job: seed is nil; untouched/nil urls → None → legacy dispatch.
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+end
+"#,
+        None,
+    );
+    assert_eq!(result, None);
+}
+
+#[test]
+fn test_on_start_empty_table_is_zero_work() {
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = {}
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec![]));
+}
+
+#[test]
+fn test_on_start_promotes_legacy_job() {
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = { "monitor:1", "monitor:2" }
+end
+"#,
+        None,
+    );
+    assert_eq!(
+        result,
+        Some(vec!["monitor:1".to_string(), "monitor:2".to_string()])
+    );
+}
+
+#[test]
+fn test_on_start_invalid_urls_seed_intact() {
+    // Non-list value.
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = "junk"
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+
+    // Non-string members.
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = { 1, 2 }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+}
+
+#[test]
+fn test_on_start_sparse_and_keyed_urls_seed_intact() {
+    // Sparse: hole at 2. Previously raw_len-based validation could silently
+    // commit a prefix or an empty list.
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = { [1] = "a", [3] = "c" }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+
+    // Starts at 2, missing 1.
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = { [2] = "b" }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+
+    // Hash-only table: must be hook failure, NOT a zero-work batch.
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = { foo = "bar" }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+
+    // Huge key: rejected before any allocation proportional to the key.
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = { [1000000] = "x" }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+
+    // Mixed: valid prefix + extra hash key.
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = { "a", "b", extra = "nope" }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+}
+
+#[test]
+fn test_on_start_hash_position_string_commits() {
+    // Positive control for pairs-based validation: a single-element list
+    // written with an explicit integer key is still a dense list of strings.
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = { [1] = "solo" }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["solo".to_string()]));
+}
+
+#[test]
+fn test_on_start_zero_param_no_table() {
+    // `function on_start()`: pure generic hook. No table constructed, no
+    // read-back. Side effects run; seed passes through untouched.
+    let result = on_start_result(
+        r#"
+_G.on_start_ran = true
+function on_start()
+    _G.on_start_ran = true
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+
+    // Referencing `queue` inside a zero-param hook indexes nil — loud error,
+    // seed intact. Proves no table argument is passed.
+    let result = on_start_result(
+        r#"
+function on_start()
+    queue.urls = { "x" }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+}
+
+#[test]
+fn test_on_start_vararg_receives_table() {
+    // `function on_start(...)`: vararg is treated as wanting the table.
+    let result = on_start_result(
+        r#"
+function on_start(...)
+    local queue = ...
+    queue.urls = { "vararg-a", "vararg-b" }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(
+        result,
+        Some(vec!["vararg-a".to_string(), "vararg-b".to_string()])
+    );
+}
+
+#[test]
+fn test_on_start_param_name_irrelevant() {
+    // Arity counts, not the parameter name.
+    let result = on_start_result(
+        r#"
+function on_start(q)
+    q.urls = { "renamed" }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["renamed".to_string()]));
+}
+
+#[test]
+fn test_on_start_over_cap_seed_intact() {
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.urls = {}
+    for i = 1, 10001 do
+        queue.urls[i] = "u" .. i
+    end
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+}
+
+#[test]
+fn test_on_start_lua_error_seed_intact() {
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    error("boom")
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+}
+
+#[test]
+fn test_on_start_defer_raises_seed_intact() {
+    // defer() has no active ctx in on_start (active_ctx = Nil) → deterministic
+    // error → hook fails → seed intact.
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    defer(function() end)
+    queue.urls = { "should-not-commit" }
+end
+"#,
+        Some(vec!["seed"]),
+    );
+    assert_eq!(result, Some(vec!["seed".to_string()]));
+}
+
+#[test]
+fn test_on_start_extra_fields_ignored() {
+    let result = on_start_result(
+        r#"
+function on_start(queue)
+    queue.processed = 99
+    queue.failed = 42
+    queue.pushed = 7
+    queue.junk = "whatever"
+    table.insert(queue.urls, "b")
+end
+"#,
+        Some(vec!["a"]),
+    );
+    assert_eq!(result, Some(vec!["a".to_string(), "b".to_string()]));
+}
+
+#[test]
+fn test_on_start_mask_gate_without_hook() {
+    let dir = unique_test_dir("on-start-mask");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(
+        &hook_path,
+        "function before_fetch(request) return request end\n",
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+    assert!(!hooks.has_on_start());
+
+    let seed = Some(vec!["seed".to_string()]);
+    let result = smol::block_on(hooks.run_on_start(seed.clone()));
+    assert_eq!(result, seed);
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_on_start_mask_detect() {
+    let dir = unique_test_dir("on-start-detect");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(&hook_path, "function on_start(queue) end\n").unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = JobHooks::load(&hook_path, db, "test_job").unwrap();
+    assert!(hooks.has_on_start());
+    assert!(hooks.hook_mask & HOOK_ON_START != 0);
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_file(&hook_path);
