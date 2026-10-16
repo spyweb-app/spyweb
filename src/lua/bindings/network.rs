@@ -72,7 +72,7 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
         let url: String = args
             .get::<Option<String>>("url")?
             .ok_or_else(|| mlua::Error::runtime("http_request: 'url' is required"))?;
-        let body: Option<mlua::String> = args.get("body").ok().flatten();
+        let body: Option<mlua::LuaString> = args.get("body").ok().flatten();
         let body_bytes = body.as_ref().map(|s| s.as_bytes().to_vec());
         let headers: Option<HashMap<String, String>> = args.get("headers").ok().flatten();
         let proxy: Option<String> = args.get("proxy").ok().flatten();
@@ -150,7 +150,7 @@ pub fn register(lua: &Lua) -> LuaResult<()> {
                         field_list.push((name, MultipartField::Text(text)));
                     }
                     mlua::Value::Table(t) => {
-                        let content: mlua::String = t.get("content").map_err(|_| {
+                        let content: mlua::LuaString = t.get("content").map_err(|_| {
                             mlua::Error::runtime("http_multipart: file field must have 'content' key")
                         })?;
                         let content_bytes = content.as_bytes().to_vec();
