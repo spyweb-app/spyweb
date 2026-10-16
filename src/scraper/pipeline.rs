@@ -1,8 +1,10 @@
+use crate::scraper::coordinator::{Message, QueueState};
 use crate::{
     color, config::types::Job, lua::hooks::TelemetryHandle, scraper::request::RequestConfig,
     scraper::runner::Runner, services::db::Db, services::notifier, services::webhook,
 };
 use anyhow::Result;
+use smol::channel::{Receiver, Sender, unbounded};
 use smol::{Executor, Timer};
 use std::collections::{HashSet, VecDeque};
 use std::future::Future;
@@ -11,8 +13,6 @@ use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 use std::time::Duration;
 
-type UrlQueue = Arc<Mutex<VecDeque<String>>>;
-
 pub(crate) type ThreadProbe = Option<Arc<Mutex<HashSet<ThreadId>>>>;
 
 const WORKER_STAGGER_MS: u64 = 200;
@@ -20,6 +20,8 @@ const WORKER_STAGGER_MS: u64 = 200;
 pub struct CycleStats {
     processed: AtomicUsize,
     failed: AtomicUsize,
+    pushed: AtomicUsize,
+    duplicates: AtomicUsize,
 }
 
 impl CycleStats {
@@ -27,6 +29,8 @@ impl CycleStats {
         Self {
             processed: AtomicUsize::new(0),
             failed: AtomicUsize::new(0),
+            pushed: AtomicUsize::new(0),
+            duplicates: AtomicUsize::new(0),
         }
     }
 
@@ -37,12 +41,28 @@ impl CycleStats {
         }
     }
 
+    fn record_pushed(&self) {
+        self.pushed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_duplicate(&self) {
+        self.duplicates.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn processed(&self) -> usize {
         self.processed.load(Ordering::Relaxed)
     }
 
     pub fn failed(&self) -> usize {
         self.failed.load(Ordering::Relaxed)
+    }
+
+    pub fn pushed(&self) -> usize {
+        self.pushed.load(Ordering::Relaxed)
+    }
+
+    pub fn duplicates(&self) -> usize {
+        self.duplicates.load(Ordering::Relaxed)
     }
 }
 
@@ -386,10 +406,13 @@ async fn run_recorded(
     worker_id: usize,
     stats: &CycleStats,
     style: ErrStyle,
-) {
+) -> bool {
     let ctx = JobCtx::new(job, db, runner);
     match ctx.run_once(&request, worker_id).await {
-        Ok(()) => stats.record(true),
+        Ok(()) => {
+            stats.record(true);
+            true
+        }
         Err(e) => {
             stats.record(false);
             match style {
@@ -400,11 +423,12 @@ async fn run_recorded(
                     crate::t_eprintln!("Job '{}' worker error: {}", job.config.name, e);
                 }
             }
+            false
         }
     }
 }
 
-// One cycle's dispatch mechanics: plan → workers → stats. 
+// One cycle's dispatch mechanics: plan → workers → stats.
 pub(crate) struct CycleRunner<'a> {
     job: &'a Arc<Job>,
     db: &'a Arc<Db>,
@@ -432,15 +456,21 @@ impl<'a> CycleRunner<'a> {
         }
     }
 
-    /// Test seam: record which executor threads workers run on.
+    // Test seam: record which executor threads workers run on.
     #[cfg(test)]
     pub(crate) fn with_probe(mut self, probe: ThreadProbe) -> Self {
         self.thread_probe = probe;
         self
     }
 
-    /// Run exactly one job iteration: plan → dispatch → `on_finished`.
+    // Run exactly one job iteration: plan → dispatch → `on_finished`.
     pub(crate) async fn run_iteration(&self) -> Arc<CycleStats> {
+        // Every cycle starts with no active queue cycle — covers all modes
+        // and makes a cancelled (dropped) previous cycle safe: its leftover
+        // state is cleared before anything user-visible runs.
+        if let Some(hooks) = self.job.hooks.as_ref() {
+            hooks.queue.deactivate();
+        }
         let work = Work::plan(self.job, self.worker_count).await;
         let stats = self.dispatch(work).await;
 
@@ -451,7 +481,7 @@ impl<'a> CycleRunner<'a> {
         stats
     }
 
-    // Total match on `Work`; stats always created here so `run_on_finished` fires (with zeros) on every path, including Idle.
+    // Total match on `Work`; stats always created here so `on_finished` fires (with zeros) on every path, including Idle.
     pub(crate) async fn dispatch(&self, work: Work) -> Arc<CycleStats> {
         let stats = Arc::new(CycleStats::new());
         match work {
@@ -469,18 +499,18 @@ impl<'a> CycleRunner<'a> {
                 .await;
             }
             Work::Queue(batch) => {
-                let queue: UrlQueue = Arc::new(Mutex::new(batch.into()));
-                self.spawn_workers(Some(queue), &stats).await;
+                let queue = self.job.hooks.as_ref().map(|h| Arc::clone(&h.queue));
+                self.run_queue_cycle(batch, stats.clone(), queue).await;
             }
             Work::Multi => {
-                self.spawn_workers(None, &stats).await;
+                self.spawn_multi_workers(&stats).await;
             }
         }
         stats
     }
 
-    // Shared stagger → spawn → join body for `Queue` and `Multi`.
-    async fn spawn_workers(&self, queue: Option<UrlQueue>, stats: &Arc<CycleStats>) {
+    // Stagger → spawn → join for `Multi`: each worker runs the base request once.
+    async fn spawn_multi_workers(&self, stats: &Arc<CycleStats>) {
         let mut handles = Vec::with_capacity(self.worker_count);
         for i in 1..=self.worker_count {
             if i > 1 {
@@ -490,45 +520,21 @@ impl<'a> CycleRunner<'a> {
             let job = Arc::clone(self.job);
             let db = Arc::clone(self.db);
             let runner = Arc::clone(self.runner);
-            let queue = queue.clone();
             let stats = Arc::clone(stats);
             handles.push(spawn_worker(
                 self.ex,
                 async move {
-                    match queue {
-                        Some(queue) => loop {
-                            let url =
-                                { queue.lock().unwrap_or_else(|e| e.into_inner()).pop_front() };
-                            let Some(url) = url else { return };
-                            let request = RequestConfig {
-                                url,
-                                ..RequestConfig::from_job(&job.config)
-                            };
-                            run_recorded(
-                                &job,
-                                &db,
-                                &runner,
-                                request,
-                                worker_id,
-                                &stats,
-                                ErrStyle::Worker,
-                            )
-                            .await;
-                        },
-                        None => {
-                            let request = RequestConfig::from_job(&job.config);
-                            run_recorded(
-                                &job,
-                                &db,
-                                &runner,
-                                request,
-                                worker_id,
-                                &stats,
-                                ErrStyle::Worker,
-                            )
-                            .await;
-                        }
-                    }
+                    let request = RequestConfig::from_job(&job.config);
+                    run_recorded(
+                        &job,
+                        &db,
+                        &runner,
+                        request,
+                        worker_id,
+                        &stats,
+                        ErrStyle::Worker,
+                    )
+                    .await;
                 },
                 &self.thread_probe,
             ));
@@ -536,6 +542,158 @@ impl<'a> CycleRunner<'a> {
 
         for handle in handles {
             handle.await;
+        }
+    }
+
+    // Queue-cycle engine: pending deque, visited set, in-flight count, worker
+    // handles. Inline in the cycle future — dropping it cancels workers.
+    async fn run_queue_cycle(
+        &self,
+        batch: Vec<String>,
+        stats: Arc<CycleStats>,
+        queue: Option<Arc<QueueState>>,
+    ) {
+        if self.worker_count == 0 {
+            return;
+        }
+
+        let (event_tx, event_rx) = unbounded::<Message>();
+        let mut pending: VecDeque<String> = batch.clone().into();
+        // Seed visited with the initial batch: re-pushing an initial URL is a
+        // duplicate; duplicates *within* the initial batch keep processing
+        // twice (today's behavior — the visited set gates pushes only).
+        let mut visited: HashSet<String> = batch.iter().cloned().collect();
+        if let Some(q) = &queue {
+            q.begin_cycle(event_tx.clone(), visited.len());
+        }
+
+        let mut replies: Vec<Sender<Reply>> = Vec::with_capacity(self.worker_count);
+        let mut parked: VecDeque<usize> = VecDeque::new();
+        let mut in_flight: usize = 0;
+        let mut handles = Vec::with_capacity(self.worker_count);
+
+        for i in 1..=self.worker_count {
+            if i > 1 {
+                Timer::after(Duration::from_millis(WORKER_STAGGER_MS)).await;
+            }
+            let (reply_tx, reply_rx) = unbounded::<Reply>();
+            replies.push(reply_tx);
+            handles.push(spawn_worker(
+                self.ex,
+                worker_loop(
+                    Arc::clone(self.job),
+                    Arc::clone(self.db),
+                    Arc::clone(self.runner),
+                    Arc::clone(&stats),
+                    event_tx.clone(),
+                    reply_rx,
+                    i,
+                ),
+                &self.thread_probe,
+            ));
+        }
+
+        while let Ok(msg) = event_rx.recv().await {
+            match msg {
+                Message::RequestWork { worker_id } => {
+                    if let Some(url) = pending.pop_front() {
+                        in_flight += 1;
+                        let _ = replies[worker_id - 1].try_send(Reply::Work(url));
+                    } else if in_flight == 0 {
+                        // Quiescence: nothing pending, nothing running.
+                        break;
+                    } else {
+                        // No work now, but requests are in flight — the
+                        // worker waits; a Push will assign directly, or the
+                        // last Completed re-checks quiescence.
+                        parked.push_back(worker_id);
+                    }
+                }
+                Message::Push { url } => {
+                    if !visited.insert(url.clone()) {
+                        stats.record_duplicate();
+                        if let Some(q) = &queue {
+                            q.release_reservation();
+                        }
+                        continue;
+                    }
+                    stats.record_pushed();
+                    if let Some(worker_id) = parked.pop_front() {
+                        in_flight += 1;
+                        let _ = replies[worker_id - 1].try_send(Reply::Work(url));
+                    } else {
+                        pending.push_back(url);
+                    }
+                }
+                Message::Completed | Message::Failed => {
+                    in_flight -= 1;
+                    if pending.is_empty() && in_flight == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+
+        for tx in &replies {
+            let _ = tx.try_send(Reply::Shutdown);
+        }
+        for handle in handles {
+            handle.await;
+        }
+        if let Some(q) = &queue {
+            q.deactivate();
+        }
+    }
+}
+
+// Queue-cycle→worker replies, one unbounded channel per worker.
+enum Reply {
+    Work(String),
+    Shutdown,
+}
+
+async fn worker_loop(
+    job: Arc<Job>,
+    db: Arc<Db>,
+    runner: Arc<Runner>,
+    stats: Arc<CycleStats>,
+    event_tx: Sender<Message>,
+    reply_rx: Receiver<Reply>,
+    worker_id: usize,
+) {
+    loop {
+        if event_tx
+            .try_send(Message::RequestWork { worker_id })
+            .is_err()
+        {
+            return;
+        }
+        match reply_rx.recv().await {
+            Ok(Reply::Work(url)) => {
+                let request = RequestConfig {
+                    url,
+                    ..RequestConfig::from_job(&job.config)
+                };
+                let ok = run_recorded(
+                    &job,
+                    &db,
+                    &runner,
+                    request,
+                    worker_id,
+                    &stats,
+                    ErrStyle::Worker,
+                )
+                .await;
+                let msg = if ok {
+                    Message::Completed
+                } else {
+                    Message::Failed
+                };
+                if event_tx.try_send(msg).is_err() {
+                    return;
+                }
+            }
+            Ok(Reply::Shutdown) | Err(_) => return,
         }
     }
 }

@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::types::{Field, Job, JobConfig, JobOptions, Proxy as JobProxy, Rotate};
 use crate::lua::hooks::JobHooks;
-use crate::scraper::pipeline::{CycleRunner, JobCtx, Work, compute_cycle_batch};
+use crate::scraper::pipeline::{CycleRunner, CycleStats, JobCtx, Work, compute_cycle_batch};
 use crate::scraper::request::{
     RequestConfig, RequestHandler, RequestResult, flatten_headers, format_error_chain,
     read_body_bounded,
@@ -1255,6 +1255,464 @@ end
         vec![1, 1, 0],
         "failed run_once: processed=1, failed=1"
     );
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// --- Phase 3: queue_push + coordinator ---
+
+#[test]
+fn queue_push_grows_cycle_single_worker() {
+    let (dir, job, db) = make_job_with_hooks(
+        "queue-push-grow",
+        None,
+        1,
+        r#"
+fetched = {}
+
+function on_start(queue)
+    local ok, err = pcall(queue_push, "too-early")
+    _G.start_err = err
+    queue.urls = { "u1", "u2" }
+end
+
+function override_fetch(request)
+    table.insert(fetched, request.url)
+    if request.url == "u1" then
+        queue_push("u3")
+    end
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+
+function on_finished(queue)
+    _G.final_counts = { queue.processed, queue.failed, queue.pushed, queue.duplicates }
+end
+"#,
+    );
+    let job = Arc::new(job);
+    let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
+
+    smol::block_on(async {
+        let stats = CycleRunner::new(&job, &db, &runner, &ex, 1)
+            .run_iteration()
+            .await;
+        assert_eq!(stats.processed(), 3);
+        assert_eq!(stats.failed(), 0);
+        assert_eq!(stats.pushed(), 1);
+        assert_eq!(stats.duplicates(), 0);
+
+        let lua = job.hooks.as_ref().unwrap().lua.lock().await;
+        let fetched: Vec<String> = lua.globals().get("fetched").unwrap();
+        assert_eq!(fetched, ["u1", "u2", "u3"]);
+        let start_err: mlua::Error = lua.globals().get("start_err").unwrap();
+        assert!(
+            start_err
+                .to_string()
+                .starts_with("queue_push requires an active queue cycle"),
+            "unexpected gate error: {start_err}"
+        );
+        let counts: Vec<usize> = lua.globals().get("final_counts").unwrap();
+        assert_eq!(counts, vec![3, 0, 1, 0]);
+    });
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn queue_push_dedup_rejects_repeats_and_seed_repush() {
+    let (dir, job, db) = make_job_with_hooks(
+        "queue-push-dedup",
+        None,
+        1,
+        r#"
+fetched = {}
+
+function on_start(queue)
+    queue.urls = { "u1" }
+end
+
+function override_fetch(request)
+    table.insert(fetched, request.url)
+    if request.url == "u1" then
+        queue_push("dup")
+        queue_push("dup")
+        queue_push("u1")
+    end
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+
+function on_finished(queue)
+    _G.final_counts = { queue.processed, queue.failed, queue.pushed, queue.duplicates }
+end
+"#,
+    );
+    let job = Arc::new(job);
+    let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
+
+    smol::block_on(async {
+        let stats = CycleRunner::new(&job, &db, &runner, &ex, 1)
+            .run_iteration()
+            .await;
+        assert_eq!(stats.processed(), 2);
+        assert_eq!(stats.pushed(), 1, "only the first dup is admitted");
+        assert_eq!(stats.duplicates(), 2, "repeat push + seed re-push rejected");
+
+        let lua = job.hooks.as_ref().unwrap().lua.lock().await;
+        let fetched: Vec<String> = lua.globals().get("fetched").unwrap();
+        assert_eq!(fetched, ["u1", "dup"]);
+        let counts: Vec<usize> = lua.globals().get("final_counts").unwrap();
+        assert_eq!(counts, vec![2, 0, 1, 2]);
+    });
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn queue_push_dedup_identity_exact_strings() {
+    let (dir, job, db) = make_job_with_hooks(
+        "queue-push-identity",
+        None,
+        1,
+        r#"
+fetched = {}
+
+function on_start(queue)
+    queue.urls = { "u1" }
+end
+
+function override_fetch(request)
+    table.insert(fetched, request.url)
+    if request.url == "u1" then
+        queue_push("monitor:5")
+        queue_push("monitor:05")
+    end
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+
+function on_finished(queue)
+    _G.final_counts = { queue.processed, queue.failed, queue.pushed, queue.duplicates }
+end
+"#,
+    );
+    let job = Arc::new(job);
+    let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
+
+    smol::block_on(async {
+        let stats = CycleRunner::new(&job, &db, &runner, &ex, 1)
+            .run_iteration()
+            .await;
+        assert_eq!(stats.processed(), 3);
+        assert_eq!(stats.pushed(), 2, "leading-zero variant is a distinct key");
+        assert_eq!(stats.duplicates(), 0);
+
+        let lua = job.hooks.as_ref().unwrap().lua.lock().await;
+        let fetched: Vec<String> = lua.globals().get("fetched").unwrap();
+        assert_eq!(fetched, ["u1", "monitor:5", "monitor:05"]);
+        let counts: Vec<usize> = lua.globals().get("final_counts").unwrap();
+        assert_eq!(counts, vec![3, 0, 2, 0]);
+    });
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn queue_push_gate_error_outside_active_cycle() {
+    let (dir, job, db) = make_job_with_hooks(
+        "queue-push-gate",
+        None,
+        1,
+        r#"
+function override_fetch(request)
+    local ok, err = pcall(queue_push, "x")
+    _G.gate_err = err
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+
+function on_finished(queue)
+    _G.final_counts = { queue.processed, queue.failed, queue.pushed, queue.duplicates }
+end
+"#,
+    );
+    let job = Arc::new(job);
+    let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
+
+    smol::block_on(async {
+        let stats = CycleRunner::new(&job, &db, &runner, &ex, 1)
+            .run_iteration()
+            .await;
+        assert_eq!(stats.processed(), 1);
+        assert_eq!(stats.failed(), 0, "pcall absorbs the gate error");
+
+        let lua = job.hooks.as_ref().unwrap().lua.lock().await;
+        let gate_err: mlua::Error = lua.globals().get("gate_err").unwrap();
+        assert!(
+            gate_err
+                .to_string()
+                .starts_with("queue_push requires an active queue cycle"),
+            "unexpected gate error: {gate_err}"
+        );
+        let counts: Vec<usize> = lua.globals().get("final_counts").unwrap();
+        assert_eq!(counts, vec![1, 0, 0, 0]);
+    });
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn queue_push_over_cap_rejects_combined_initial_and_pushed() {
+    let (dir, job, _db) = make_job_with_hooks("queue-push-cap", None, 1, "");
+    let job = Arc::new(job);
+    let hooks = job.hooks.as_ref().unwrap();
+    let (tx, _rx) = smol::channel::unbounded::<crate::scraper::coordinator::Message>();
+    hooks
+        .queue
+        .begin_cycle(tx, crate::config::types::MAX_BATCH - 1);
+
+    smol::block_on(async {
+        let lua = hooks.lua.lock().await;
+        lua.load(
+            r#"
+local ok1, _ = pcall(queue_push, "a")
+local ok2, err2 = pcall(queue_push, "b")
+_G.cap_first_ok = ok1
+_G.cap_second_err = err2
+"#,
+        )
+        .exec_async()
+        .await
+        .unwrap();
+        let first_ok: bool = lua.globals().get("cap_first_ok").unwrap();
+        let second_err: mlua::Error = lua.globals().get("cap_second_err").unwrap();
+        assert!(
+            first_ok,
+            "push filling the last slot of the combined budget is admitted"
+        );
+        assert!(
+            second_err
+                .to_string()
+                .starts_with("queue_push rejected: cycle queue is full"),
+            "unexpected over-cap error: {second_err}"
+        );
+    });
+
+    hooks.queue.deactivate();
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Drop the first cycle future mid-flight (cancellation), then run a full
+/// second cycle on the same job and assert it is unaffected.
+fn run_cancel_then_next_cycle(job: &Arc<Job>, db: &Arc<Db>, drop_ms: u64) -> Arc<CycleStats> {
+    let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
+    let workers = job.config.worker_count();
+    smol::block_on(async {
+        let first = CycleRunner::new(job, db, &runner, &ex, workers);
+        let _cancelled = smol::future::or(async { Some(first.run_iteration().await) }, async {
+            smol::Timer::after(std::time::Duration::from_millis(drop_ms)).await;
+            None
+        })
+        .await;
+        let second = CycleRunner::new(job, db, &runner, &ex, workers);
+        second.run_iteration().await
+    })
+}
+
+#[test]
+fn cancel_during_hook_with_queued_work_next_cycle_clean() {
+    let (dir, job, db) = make_job_with_hooks(
+        "queue-cancel-hook",
+        Some(vec!["u1".to_string(), "u2".to_string()]),
+        1,
+        r#"
+fetch_count = 0
+fetched = {}
+
+function override_fetch(request)
+    fetch_count = fetch_count + 1
+    if fetch_count == 1 then
+        sleep(3000)
+    end
+    table.insert(fetched, request.url)
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+
+function on_finished(queue)
+    _G.final_counts = { queue.processed, queue.failed, queue.pushed, queue.duplicates }
+end
+"#,
+    );
+    let job = Arc::new(job);
+    // Worker 1 is asleep in override_fetch with u2 still queued; drop at
+    // 250ms hits mid-hook. Cycle 1's sleep is interrupted before any insert.
+    let stats = run_cancel_then_next_cycle(&job, &db, 250);
+    assert_eq!(stats.processed(), 2, "next cycle must drain both urls");
+    assert_eq!(stats.failed(), 0);
+
+    smol::block_on(async {
+        let lua = job.hooks.as_ref().unwrap().lua.lock().await;
+        let fetched: Vec<String> = lua.globals().get("fetched").unwrap();
+        assert_eq!(fetched, ["u1", "u2"], "only cycle 2 recorded fetches");
+        let counts: Vec<usize> = lua.globals().get("final_counts").unwrap();
+        assert_eq!(counts, vec![2, 0, 0, 0]);
+    });
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cancel_with_parked_worker_next_cycle_clean() {
+    let (dir, job, db) = make_job_with_hooks(
+        "queue-cancel-parked",
+        Some(vec!["u1".to_string()]),
+        2,
+        r#"
+fetch_count = 0
+fetched = {}
+
+function override_fetch(request)
+    fetch_count = fetch_count + 1
+    if fetch_count == 1 then
+        sleep(3000)
+    end
+    table.insert(fetched, request.url)
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+
+function on_finished(queue)
+    _G.final_counts = { queue.processed, queue.failed, queue.pushed, queue.duplicates }
+end
+"#,
+    );
+    let job = Arc::new(job);
+    // Worker 1 sleeps on u1; worker 2 spawns after the 200ms stagger, finds
+    // no pending work, and parks — the coordinator sits in recv() awaiting
+    // events when the drop lands at 400ms.
+    let stats = run_cancel_then_next_cycle(&job, &db, 400);
+    assert_eq!(stats.processed(), 1);
+    assert_eq!(stats.failed(), 0);
+
+    smol::block_on(async {
+        let lua = job.hooks.as_ref().unwrap().lua.lock().await;
+        let fetched: Vec<String> = lua.globals().get("fetched").unwrap();
+        assert_eq!(fetched, ["u1"], "only cycle 2 recorded a fetch");
+        let counts: Vec<usize> = lua.globals().get("final_counts").unwrap();
+        assert_eq!(counts, vec![1, 0, 0, 0]);
+    });
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cancel_during_inflight_fetch_next_cycle_clean() {
+    let (dir, job, db) = make_job_with_hooks(
+        "queue-cancel-fetch",
+        None,
+        1,
+        r#"
+_G.cycle = 0
+
+function on_start(queue)
+    _G.cycle = _G.cycle + 1
+    if _G.cycle == 1 then
+        queue.urls = { "http://10.255.255.1:81/" }
+    else
+        queue.urls = { "u2" }
+    end
+end
+
+function before_fetch(request)
+    if _G.cycle > 1 then
+        return nil
+    end
+    return request
+end
+
+function on_finished(queue)
+    _G.final_counts = { queue.processed, queue.failed, queue.pushed, queue.duplicates }
+end
+"#,
+    );
+    let job = Arc::new(job);
+    // Cycle 1's real fetch runs via smol::unblock against a blackhole address;
+    // dropping the cycle future abandons the fetch future (the blocking
+    // closure completes on the pool harmlessly). Cycle 2 nil-skips instead.
+    let stats = run_cancel_then_next_cycle(&job, &db, 400);
+    assert_eq!(stats.processed(), 1, "cycle 2 nil-skip counts as processed");
+    assert_eq!(stats.failed(), 0);
+
+    smol::block_on(async {
+        let lua = job.hooks.as_ref().unwrap().lua.lock().await;
+        let cycle: usize = lua.globals().get("cycle").unwrap();
+        assert_eq!(cycle, 2, "both cycles started");
+        let counts: Vec<usize> = lua.globals().get("final_counts").unwrap();
+        assert_eq!(counts, vec![1, 0, 0, 0]);
+    });
 
     drop(job);
     let _ = fs::remove_dir_all(&dir);

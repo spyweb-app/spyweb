@@ -229,6 +229,7 @@ pub async fn run_single_test(job_dir: &Path, job_name: &str, test_name: &str) ->
         job_name: job_name.to_string(),
         hook_path: job_dir.join("hooks.lua"),
         hook_mask: 0,
+        queue: crate::scraper::coordinator::QueueState::new(),
     };
 
     let ctx = hooks.new_cycle_context(0).await?;

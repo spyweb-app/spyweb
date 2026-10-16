@@ -1,4 +1,5 @@
 use crate::lua::engine;
+use crate::scraper::coordinator::{PushError, QueueState};
 use crate::services::db::Db;
 use anyhow::Result;
 use mlua::{Lua, Table, Value};
@@ -98,6 +99,10 @@ pub struct JobHooks {
     pub(crate) job_name: String,
     pub(crate) hook_path: PathBuf,
     pub(crate) hook_mask: u16,
+    /// Per-job queue-cycle state for the `queue_push` global. Stable across
+    /// cycles (the binding captures it at registration); cycle state inside
+    /// is reset by the coordinator, never by hook code.
+    pub(crate) queue: Arc<QueueState>,
 }
 
 impl std::fmt::Debug for JobHooks {
@@ -157,6 +162,25 @@ impl JobHooks {
                 .unwrap_or(false);
 
         let lua = engine::create_engine(job_dir, db, job_name, uses_cdp)?;
+
+        let queue = QueueState::new();
+        {
+            let q = Arc::clone(&queue);
+            lua.globals().set(
+                "queue_push",
+                lua.create_function(move |_lua, url: String| {
+                    q.push_url(url).map_err(|e| match e {
+                        PushError::Inactive => {
+                            mlua::Error::external("queue_push requires an active queue cycle")
+                        }
+                        PushError::Full => {
+                            mlua::Error::external("queue_push rejected: cycle queue is full")
+                        }
+                    })
+                })?,
+            )?;
+        }
+
         let chunk_name = path.to_string_lossy();
         smol::block_on(async {
             lua.load(&source)
@@ -234,6 +258,7 @@ impl JobHooks {
             hook_path: path.to_path_buf(),
             hook_mask,
             lua: Mutex::new(lua),
+            queue,
         })
     }
 
@@ -535,7 +560,11 @@ impl JobHooks {
             crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
             return;
         }
-        if let Err(e) = table.set("pushed", 0usize) {
+        if let Err(e) = table.set("pushed", stats.pushed()) {
+            crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
+            return;
+        }
+        if let Err(e) = table.set("duplicates", stats.duplicates()) {
             crate::t_eprintln!("on_finished error for job '{}': {e}", self.job_name);
             return;
         }
