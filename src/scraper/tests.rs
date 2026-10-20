@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::config::types::{Field, Job, JobConfig, JobOptions, Proxy as JobProxy, Rotate};
 use crate::lua::hooks::JobHooks;
@@ -415,6 +415,64 @@ end
 
     let _ = fs::remove_file(dir.join("test.redb"));
     let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn workers_interleave_override_fetch_hooks() {
+    let (dir, job, db) = make_job_with_hooks(
+        "interleave-overlap",
+        None,
+        4,
+        r#"
+seen = 0
+
+function override_fetch(request)
+    seen = seen + 1
+    if seen == 1 then
+        _G.w1_active = true
+        sleep(600)
+        _G.w1_active = false
+    elseif _G.w1_active == true then
+        _G.saw_overlap = true
+    end
+    return { status = 200, url = request.url, headers = {}, body = "<html></html>" }
+end
+
+function override_extract(response)
+    return {}
+end
+"#,
+    );
+    let job = Arc::new(job);
+    let runner = Arc::new(Runner::new());
+    let (ex, _keep_alive) = single_thread_executor();
+
+    let start = Instant::now();
+    smol::block_on(async {
+        CycleRunner::new(&job, &db, &runner, &ex, 4)
+            .dispatch(Work::Multi)
+            .await;
+    });
+    let elapsed = start.elapsed();
+
+    smol::block_on(async {
+        let hooks = job.hooks.as_ref().unwrap();
+        let lua = hooks.lua.lock().await;
+        let saw: Option<bool> = lua.globals().get("saw_overlap").unwrap();
+        assert_eq!(
+            saw,
+            Some(true),
+            "a worker's override_fetch ran while another's was still in flight — hooks did not interleave"
+        );
+    });
+    assert!(
+        elapsed < Duration::from_millis(1600),
+        "hooks serialized on the Lua lock: took {elapsed:?} (interleaved ~1200ms, serial ~2400ms)"
+    );
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(dir.join("hooks.lua"));
     let _ = fs::remove_dir(&dir);
 }
 

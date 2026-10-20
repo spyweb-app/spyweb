@@ -6,9 +6,11 @@ use mlua::{Lua, Table, Value};
 use smol::lock::Mutex;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+pub(crate) mod call;
 pub mod stages;
 pub(crate) mod telemetry;
 
+use call::HookCall;
 pub(crate) use telemetry::TelemetryHandle;
 
 pub(crate) const HOOK_BEFORE_FETCH: u16 = 1 << 0;
@@ -99,9 +101,6 @@ pub struct JobHooks {
     pub(crate) job_name: String,
     pub(crate) hook_path: PathBuf,
     pub(crate) hook_mask: u16,
-    /// Per-job queue-cycle state for the `queue_push` global. Stable across
-    /// cycles (the binding captures it at registration); cycle state inside
-    /// is reset by the coordinator, never by hook code.
     pub(crate) queue: Arc<QueueState>,
 }
 
@@ -363,6 +362,30 @@ impl JobHooks {
             return;
         }
 
+        let ret = {
+            let lua = self.lua.lock().await;
+            if let Err(e) = lua.set_named_registry_value("active_ctx", ctx.clone()) {
+                crate::t_eprintln!(
+                    "defer.lua on_success: failed to set active_ctx for job '{}': {e}",
+                    self.job_name
+                );
+                return;
+            }
+            let f: mlua::Function = match lua.globals().get("on_success") {
+                Ok(f) => f,
+                Err(e) => {
+                    crate::t_eprintln!(
+                        "defer.lua: on_success not callable for job '{}': {e}",
+                        self.job_name
+                    );
+                    return;
+                }
+            };
+            let inner = f.call_async::<mlua::Value>((ctx.clone(),));
+            drop(lua);
+            HookCall::new(&self.lua, ctx.clone(), inner).await
+        };
+
         let lua = self.lua.lock().await;
         if let Err(e) = lua.set_named_registry_value("active_ctx", ctx.clone()) {
             crate::t_eprintln!(
@@ -371,23 +394,13 @@ impl JobHooks {
             );
             return;
         }
-        match lua.globals().get::<mlua::Function>("on_success") {
-            Ok(f) => {
-                if let Err(e) = f.call_async::<()>((ctx.clone(),)).await {
-                    crate::t_eprintln!(
-                        "defer.lua on_success error for job '{}': {e}",
-                        self.job_name
-                    );
-                }
-                stages::run_deferred(&lua, ctx, "on_success");
-            }
-            Err(e) => {
-                crate::t_eprintln!(
-                    "defer.lua: on_success not callable for job '{}': {e}",
-                    self.job_name
-                );
-            }
+        if let Err(e) = ret {
+            crate::t_eprintln!(
+                "defer.lua on_success error for job '{}': {e}",
+                self.job_name
+            );
         }
+        stages::run_deferred(&lua, ctx, "on_success");
     }
 
     pub async fn run_on_error(&self, ctx: &Table, err: &anyhow::Error) {
@@ -395,8 +408,32 @@ impl JobHooks {
             return;
         }
 
+        let ret = {
+            let lua = self.lua.lock().await;
+            let err = err.to_string();
+            if let Err(e) = lua.set_named_registry_value("active_ctx", ctx.clone()) {
+                crate::t_eprintln!(
+                    "defer.lua on_error: failed to set active_ctx for job '{}': {e}",
+                    self.job_name
+                );
+                return;
+            }
+            let f: mlua::Function = match lua.globals().get("on_error") {
+                Ok(f) => f,
+                Err(e) => {
+                    crate::t_eprintln!(
+                        "defer.lua: on_error not callable for job '{}': {e}",
+                        self.job_name
+                    );
+                    return;
+                }
+            };
+            let inner = f.call_async::<mlua::Value>((err, ctx.clone()));
+            drop(lua);
+            HookCall::new(&self.lua, ctx.clone(), inner).await
+        };
+
         let lua = self.lua.lock().await;
-        let err = err.to_string();
         if let Err(e) = lua.set_named_registry_value("active_ctx", ctx.clone()) {
             crate::t_eprintln!(
                 "defer.lua on_error: failed to set active_ctx for job '{}': {e}",
@@ -404,26 +441,40 @@ impl JobHooks {
             );
             return;
         }
-        match lua.globals().get::<mlua::Function>("on_error") {
-            Ok(f) => {
-                if let Err(e) = f.call_async::<()>((err, ctx.clone())).await {
-                    crate::t_eprintln!("defer.lua on_error error for job '{}': {e}", self.job_name);
-                }
-                stages::run_deferred(&lua, ctx, "on_error");
-            }
-            Err(e) => {
-                crate::t_eprintln!(
-                    "defer.lua: on_error not callable for job '{}': {e}",
-                    self.job_name
-                );
-            }
+        if let Err(e) = ret {
+            crate::t_eprintln!("defer.lua on_error error for job '{}': {e}", self.job_name);
         }
+        stages::run_deferred(&lua, ctx, "on_error");
     }
 
     pub async fn run_on_finally(&self, ctx: &Table) {
         if self.hook_mask & HOOK_ON_FINALLY == 0 {
             return;
         }
+
+        let ret = {
+            let lua = self.lua.lock().await;
+            if let Err(e) = lua.set_named_registry_value("active_ctx", ctx.clone()) {
+                crate::t_eprintln!(
+                    "defer.lua on_finally: failed to set active_ctx for job '{}': {e}",
+                    self.job_name
+                );
+                return;
+            }
+            let f: mlua::Function = match lua.globals().get("on_finally") {
+                Ok(f) => f,
+                Err(e) => {
+                    crate::t_eprintln!(
+                        "defer.lua: on_finally not callable for job '{}': {e}",
+                        self.job_name
+                    );
+                    return;
+                }
+            };
+            let inner = f.call_async::<mlua::Value>((ctx.clone(),));
+            drop(lua);
+            HookCall::new(&self.lua, ctx.clone(), inner).await
+        };
 
         let lua = self.lua.lock().await;
         if let Err(e) = lua.set_named_registry_value("active_ctx", ctx.clone()) {
@@ -433,23 +484,13 @@ impl JobHooks {
             );
             return;
         }
-        match lua.globals().get::<mlua::Function>("on_finally") {
-            Ok(f) => {
-                if let Err(e) = f.call_async::<()>((ctx.clone(),)).await {
-                    crate::t_eprintln!(
-                        "defer.lua on_finally error for job '{}': {e}",
-                        self.job_name
-                    );
-                }
-                stages::run_deferred(&lua, ctx, "on_finally");
-            }
-            Err(e) => {
-                crate::t_eprintln!(
-                    "defer.lua: on_finally not callable for job '{}': {e}",
-                    self.job_name
-                );
-            }
+        if let Err(e) = ret {
+            crate::t_eprintln!(
+                "defer.lua on_finally error for job '{}': {e}",
+                self.job_name
+            );
         }
+        stages::run_deferred(&lua, ctx, "on_finally");
     }
 
     pub async fn run_on_start(&self, seed: Option<Vec<String>>) -> Option<Vec<String>> {

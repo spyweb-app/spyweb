@@ -476,6 +476,7 @@ impl<'a> CycleRunner<'a> {
 
         if let Some(hooks) = self.job.hooks.as_ref() {
             hooks.run_on_finished(&stats).await;
+            let _ = hooks.lua.lock().await.gc_collect();
         }
 
         stats

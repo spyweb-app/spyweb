@@ -1,3 +1,5 @@
+use super::call::HookCall;
+use super::stages::run_deferred;
 use super::*;
 use crate::config::types::{Job, JobConfig, JobOptions};
 use crate::scraper::extractor::ExtractedItem;
@@ -9,7 +11,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn unique_test_dir(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -27,6 +29,210 @@ fn single_thread_executor() -> (Arc<smol::Executor<'static>>, smol::channel::Sen
         let _ = smol::block_on(executor.run(rx.recv()));
     });
     (ex, tx)
+}
+
+async fn prepare_test_hook<'a>(hooks: &'a JobHooks, name: &str, ctx: &mlua::Table) -> HookCall<'a> {
+    let lua = hooks.lua.lock().await;
+    lua.set_named_registry_value("active_ctx", ctx.clone())
+        .unwrap();
+    let func: mlua::Function = lua.globals().get(name).unwrap();
+    let inner = func.call_async::<mlua::Value>(());
+    drop(lua);
+    HookCall::new(&hooks.lua, ctx.clone(), inner)
+}
+
+#[test]
+fn defer_routes_to_the_calling_workers_ctx() {
+    let dir = unique_test_dir("defer-isolation");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(
+        &hook_path,
+        r#"
+function chunk1()
+    defer(function() _G.w1_defer_phase = _G.phase end)
+    _G.w1_registered = true
+    sleep(300)
+    _G.phase = "after_sleep"
+    return 1
+end
+
+function chunk2()
+    while not _G.w1_registered do sleep(5) end
+    return 2
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = Arc::new(JobHooks::load(&hook_path, db, "test_job").unwrap());
+
+    let phase = smol::block_on(async {
+        let ctx1 = hooks.new_cycle_context(1).await.unwrap();
+        let ctx2 = hooks.new_cycle_context(2).await.unwrap();
+
+        let work = async {
+            let h1 = prepare_test_hook(&hooks, "chunk1", &ctx1).await;
+            let h2 = prepare_test_hook(&hooks, "chunk2", &ctx2).await;
+
+            let t1 = async {
+                let r = h1.await;
+                let lua = hooks.lua.lock().await;
+                lua.set_named_registry_value("active_ctx", ctx1.clone())
+                    .unwrap();
+                run_deferred(&lua, &ctx1, "chunk1");
+                drop(lua);
+                r
+            };
+            let t2 = async {
+                let r = h2.await;
+                let lua = hooks.lua.lock().await;
+                lua.set_named_registry_value("active_ctx", ctx2.clone())
+                    .unwrap();
+                run_deferred(&lua, &ctx2, "chunk2");
+                drop(lua);
+                r
+            };
+            let (r1, r2) = smol::future::zip(t1, t2).await;
+            assert_eq!(r1.unwrap().as_integer(), Some(1));
+            assert_eq!(r2.unwrap().as_integer(), Some(2));
+        };
+
+        smol::future::or(work, async {
+            smol::Timer::after(Duration::from_secs(5)).await;
+            panic!("defer-isolation: HookCall deadlock or hang (5s watchdog)");
+        })
+        .await;
+
+        let lua = hooks.lua.lock().await;
+        lua.globals()
+            .get::<Option<String>>("w1_defer_phase")
+            .unwrap()
+    });
+
+    assert_eq!(
+        phase.as_deref(),
+        Some("after_sleep"),
+        "deferred fn ran in another worker's post-block (or before w1 set phase)"
+    );
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn lifecycle_on_success_hooks_interleave() {
+    let dir = unique_test_dir("lifecycle-interleave");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    let defer_path = dir.join("defer.lua");
+    fs::write(&hook_path, "").unwrap();
+    fs::write(
+        &defer_path,
+        r#"
+function on_success(ctx)
+    if ctx.worker_id == 1 then
+        _G.w1_started = true
+        sleep(600)
+    else
+        while not _G.w1_started do sleep(5) end
+    end
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = Arc::new(JobHooks::load(&hook_path, db, "test_job").unwrap());
+    assert!(hooks.hook_mask & HOOK_ON_SUCCESS != 0);
+
+    let w2_elapsed = smol::block_on(async {
+        let ctx1 = hooks.new_cycle_context(1).await.unwrap();
+        let ctx2 = hooks.new_cycle_context(2).await.unwrap();
+
+        let work = async {
+            let start = Instant::now();
+            let t1 = hooks.run_on_success(&ctx1);
+            let t2 = async {
+                hooks.run_on_success(&ctx2).await;
+                start.elapsed()
+            };
+            let (_, w2_elapsed) = smol::future::zip(t1, t2).await;
+            w2_elapsed
+        };
+
+        smol::future::or(work, async {
+            smol::Timer::after(Duration::from_secs(5)).await;
+            panic!("lifecycle interleave: on_success hooks deadlock or hang (5s watchdog)");
+        })
+        .await
+    });
+
+    assert!(
+        w2_elapsed < Duration::from_millis(400),
+        "worker 2's on_success waited out worker 1's sleep ({w2_elapsed:?}) — guard not released across the hook"
+    );
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_file(&defer_path);
+    let _ = fs::remove_dir(&dir);
+}
+
+#[test]
+fn cancelling_a_pending_hook_call_releases_the_vm() {
+    let dir = unique_test_dir("hook-cancel");
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("hooks.lua");
+    fs::write(
+        &hook_path,
+        r#"
+function slow()
+    sleep(5000)
+    return 1
+end
+
+function quick()
+    return 2
+end
+"#,
+    )
+    .unwrap();
+
+    let db = Arc::new(Db::open(dir.join("test.redb").to_str().unwrap()).unwrap());
+    let hooks = Arc::new(JobHooks::load(&hook_path, db, "test_job").unwrap());
+    let (ex, _keep_alive) = single_thread_executor();
+
+    let ctx1 = smol::block_on(hooks.new_cycle_context(1)).unwrap();
+    let task_hooks = Arc::clone(&hooks);
+    let task = ex.spawn(async move {
+        let h = prepare_test_hook(&task_hooks, "slow", &ctx1).await;
+        h.await
+    });
+
+    smol::block_on(async {
+        smol::Timer::after(Duration::from_millis(50)).await;
+        drop(task);
+        smol::Timer::after(Duration::from_millis(50)).await;
+
+        let done = async {
+            let ctx2 = hooks.new_cycle_context(2).await.unwrap();
+            let h = prepare_test_hook(&hooks, "quick", &ctx2).await;
+            h.await
+        };
+        let r = smol::future::or(done, async {
+            smol::Timer::after(Duration::from_secs(5)).await;
+            panic!("cancellation: VM stuck after dropping a pending hook call (5s watchdog)");
+        })
+        .await;
+        assert_eq!(r.unwrap().as_integer(), Some(2));
+    });
+
+    let _ = fs::remove_file(dir.join("test.redb"));
+    let _ = fs::remove_file(&hook_path);
+    let _ = fs::remove_dir(&dir);
 }
 
 #[test]
