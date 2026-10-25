@@ -47,6 +47,9 @@ fn main() -> Result<()> {
     use tray_icon::{Icon, TrayIconBuilder};
     use winit::event_loop::EventLoop;
 
+    #[cfg(windows)]
+    spyweb::cli::update::clean_old_exe();
+
     thread::spawn(|| {
         if let Err(e) = entry::start_app() {
             spyweb::t_eprintln!("SpyWeb Background Engine Error: {}", e);

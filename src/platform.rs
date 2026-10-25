@@ -56,4 +56,84 @@ impl PlatformInfo {
             "redb"
         }
     }
+
+    pub fn platform() -> String {
+        let env = if cfg!(target_env = "musl") {
+            "musl"
+        } else if cfg!(target_env = "gnu") {
+            "gnu"
+        } else {
+            ""
+        };
+        platform_for(Self::os(), Self::arch(), env)
+    }
+}
+
+fn platform_for(os: &str, arch: &str, env: &str) -> String {
+    if os == "unknown" || arch == "unknown" {
+        return "unknown".to_string();
+    }
+
+    match os {
+        "linux" => {
+            let libc = match env {
+                "gnu" => "glibc",
+                "musl" => "musl",
+                other => other,
+            };
+            if libc.is_empty() {
+                "unknown".to_string()
+            } else {
+                format!("linux-{}-{}", libc, arch)
+            }
+        }
+        "macos" | "windows" => format!("{}-{}", os, arch),
+        _ => "unknown".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::platform_for;
+
+    #[test]
+    fn linux_gnu() {
+        assert_eq!(platform_for("linux", "x86_64", "gnu"), "linux-glibc-x86_64");
+        assert_eq!(
+            platform_for("linux", "aarch64", "gnu"),
+            "linux-glibc-aarch64"
+        );
+    }
+
+    #[test]
+    fn linux_musl() {
+        assert_eq!(platform_for("linux", "x86_64", "musl"), "linux-musl-x86_64");
+        assert_eq!(
+            platform_for("linux", "aarch64", "musl"),
+            "linux-musl-aarch64"
+        );
+    }
+
+    #[test]
+    fn apple_and_windows() {
+        assert_eq!(platform_for("macos", "aarch64", ""), "macos-aarch64");
+        assert_eq!(platform_for("macos", "x86_64", ""), "macos-x86_64");
+        assert_eq!(platform_for("windows", "x86_64", "msvc"), "windows-x86_64");
+    }
+
+    #[test]
+    fn unknown_components() {
+        assert_eq!(platform_for("unknown", "x86_64", "gnu"), "unknown");
+        assert_eq!(platform_for("linux", "unknown", "gnu"), "unknown");
+        assert_eq!(platform_for("freebsd", "x86_64", ""), "unknown");
+        assert_eq!(platform_for("linux", "x86_64", ""), "unknown");
+    }
+
+    #[test]
+    fn other_libc_is_reported() {
+        assert_eq!(
+            platform_for("linux", "x86_64", "uclibc"),
+            "linux-uclibc-x86_64"
+        );
+    }
 }

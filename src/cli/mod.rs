@@ -182,6 +182,8 @@ enum Commands {
 
 pub fn listen_command() -> anyhow::Result<()> {
     spawn_terminal_if_needed();
+    #[cfg(windows)]
+    update::clean_old_exe();
     crate::macros::init_log_level_from_env();
 
     let cli = Cli::parse();

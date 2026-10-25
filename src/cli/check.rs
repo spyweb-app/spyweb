@@ -26,11 +26,12 @@ pub fn print_version() {
         "redb"
     };
     println!(
-        "{} {} (Engine: {}, DB: {})",
+        "{} {} (Engine: {}, DB: {}, Platform: {})",
         crate::color::c_bold("SpyWeb"),
         crate::color::c_ok(&format!("v{}", env!("CARGO_PKG_VERSION"))),
         crate::color::c_info(engine),
         crate::color::c_info(db),
+        crate::color::c_info(&crate::platform::PlatformInfo::platform()),
     );
 }
 

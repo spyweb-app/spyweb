@@ -38,6 +38,7 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
     let engine = lua.create_table()?;
     engine.set("os", PlatformInfo::os())?;
     engine.set("arch", PlatformInfo::arch())?;
+    engine.set("platform", PlatformInfo::platform())?;
     engine.set("headless", PlatformInfo::is_headless())?;
     engine.set("version", PlatformInfo::version())?;
     engine.set("lua_version", PlatformInfo::lua_version())?;
