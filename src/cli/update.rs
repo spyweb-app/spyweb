@@ -109,12 +109,11 @@ pub fn run_update(
     let current_tray = install_dir.join(binary_name("spyweb-tray"));
     match tray_action(new_tray.as_deref(), &current_tray) {
         TrayAction::Replace => {
-            if let Some(new_tray) = new_tray.as_deref() {
-                if let Err(e) =
+            if let Some(new_tray) = new_tray.as_deref()
+                && let Err(e) =
                     swap_binary(&current_tray, new_tray, retain, suffix.as_deref(), local)
-                {
-                    crate::t_warnln!("Warning: failed to update spyweb-tray: {}", e);
-                }
+            {
+                crate::t_warnln!("Warning: failed to update spyweb-tray: {}", e);
             }
         }
         TrayAction::SkipMissing => {}
@@ -243,15 +242,15 @@ fn swap_binary(
         current.with_file_name(format!("{}.old", file_name))
     };
 
-    if let Err(e) = fs::remove_file(&aside) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            bail!(
-                "Cannot replace {}: {} is still in use ({}). Stop the other spyweb process running the old version and retry.",
-                file_name,
-                aside.display(),
-                e
-            );
-        }
+    if let Err(e) = fs::remove_file(&aside)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        bail!(
+            "Cannot replace {}: {} is still in use ({}). Stop the other spyweb process running the old version and retry.",
+            file_name,
+            aside.display(),
+            e
+        );
     }
 
     if retain {
@@ -281,14 +280,13 @@ fn swap_binary(
         };
     }
 
-    if !retain {
-        if let Err(e) = fs::remove_file(&aside) {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                crate::t_warnln!(
-                    "Old binary is still in use; cleanup will be retried on the next start."
-                );
-            }
-        }
+    if !retain
+        && let Err(e) = fs::remove_file(&aside)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        crate::t_warnln!(
+            "Old binary is still in use; cleanup will be retried on the next start."
+        );
     }
 
     Ok(())

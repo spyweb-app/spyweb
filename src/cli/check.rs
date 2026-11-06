@@ -321,6 +321,11 @@ fn config_check() -> anyhow::Result<()> {
         );
     }
 
+    // startup.lua
+    if check_lua_file(&lua, Path::new("."), "startup.lua", &mut errors).is_some() {
+        println!("  {} startup.lua", crate::color::c_ok("✓"));
+    }
+
     if errors > 0 {
         crate::t_eprintln!("Config has errors (see above)");
         return Err(anyhow::anyhow!("config check failed"));

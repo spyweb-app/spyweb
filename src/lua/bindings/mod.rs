@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 pub mod cdp;
 pub mod network;
+mod startup_stubs;
 pub mod storage;
 pub mod system;
 pub mod testing;
@@ -32,6 +33,19 @@ pub fn register(lua: &Lua, db: Arc<Db>, job_name: &str) -> anyhow::Result<()> {
     sql::register(lua, db)?;
     #[cfg(not(feature = "sqlite"))]
     register_sql_stubs(lua)?;
+    Ok(())
+}
+
+pub fn register_startup(lua: &Lua, job_dir: Option<PathBuf>, db: Arc<Db>) -> anyhow::Result<()> {
+    network::register(lua)?;
+    system::register_common(lua, job_dir, "__startup")?;
+    storage::register_global(lua, Arc::clone(&db))?;
+    testing::register(lua)?;
+    #[cfg(feature = "sqlite")]
+    sql::register(lua, db)?;
+    #[cfg(not(feature = "sqlite"))]
+    register_sql_stubs(lua)?;
+    startup_stubs::register(lua)?;
     Ok(())
 }
 

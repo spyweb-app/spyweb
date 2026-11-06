@@ -53,6 +53,7 @@ fn main() -> Result<()> {
     thread::spawn(|| {
         if let Err(e) = entry::start_app() {
             spyweb::t_eprintln!("SpyWeb Background Engine Error: {}", e);
+            std::process::exit(1);
         }
     });
 

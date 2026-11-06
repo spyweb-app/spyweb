@@ -27,6 +27,7 @@ pub fn start_app_with_port(port_override: Option<u16>, disable_server: bool) -> 
     }
 
     let db = Arc::new(Db::open("data")?);
+    crate::lua::startup::run(Arc::clone(&db))?;
     let jobs = loader::load_all_jobs("jobs.toml", "jobs", Arc::clone(&db))?;
 
     register_shutdown_hook(Phase::Post, {

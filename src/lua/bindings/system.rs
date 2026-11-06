@@ -25,7 +25,21 @@ fn resolve_path_write(path_str: &str, job_dir: &Path) -> PathBuf {
     job_dir.join(path_str)
 }
 
+pub(crate) fn log_file_name(job_name: &str) -> &'static str {
+    match job_name {
+        "__server" => "server.log",
+        "__startup" => "startup.log",
+        _ => "hooks.log",
+    }
+}
+
 pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResult<()> {
+    register_common(lua, job_dir, job_name)?;
+    register_defer(lua)?;
+    Ok(())
+}
+
+pub fn register_common(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResult<()> {
     lua.load("math.randomseed(os.time())").exec()?;
 
     // helpers.lua
@@ -68,11 +82,11 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
 
     if let Some(dir) = job_dir {
         let log_dir = dir.clone();
-        let is_server = job_name == "__server";
+        let log_name = log_file_name(job_name);
         lua.globals().set(
             "log",
             lua.create_async_function(move |_, msg: String| {
-                let path = log_dir.join(if is_server { "server.log" } else { "hooks.log" });
+                let path = log_dir.join(log_name);
                 async move {
                     let task = crate::services::io::IoTask {
                         path,
@@ -305,6 +319,10 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
         })?,
     )?;
 
+    Ok(())
+}
+
+pub fn register_defer(lua: &Lua) -> LuaResult<()> {
     lua.globals().set(
         "defer",
         lua.create_function(|lua, f: mlua::Function| {
@@ -319,4 +337,16 @@ pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResul
     )?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::log_file_name;
+
+    #[test]
+    fn test_log_file_names() {
+        assert_eq!(log_file_name("__startup"), "startup.log");
+        assert_eq!(log_file_name("__server"), "server.log");
+        assert_eq!(log_file_name("demo_job"), "hooks.log");
+    }
 }

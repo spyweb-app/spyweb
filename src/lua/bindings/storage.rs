@@ -3,14 +3,24 @@ use mlua::Lua;
 use std::sync::Arc;
 
 pub fn register(lua: &Lua, db: Arc<Db>, job_name: &str) -> anyhow::Result<()> {
+    register_job(lua, Arc::clone(&db), job_name)?;
+    register_global(lua, db)?;
+    Ok(())
+}
+
+pub fn register_job(lua: &Lua, db: Arc<Db>, job_name: &str) -> anyhow::Result<()> {
     let prefix = format!("{}:", job_name);
     register_store_set(lua, Arc::clone(&db), prefix.clone())?;
     register_store_get(lua, Arc::clone(&db), prefix.clone())?;
-    register_store_delete(lua, Arc::clone(&db), prefix)?;
+    register_store_delete(lua, db, prefix)?;
+    Ok(())
+}
+
+pub fn register_global(lua: &Lua, db: Arc<Db>) -> anyhow::Result<()> {
     register_global_store_set(lua, Arc::clone(&db))?;
     register_global_store_get(lua, Arc::clone(&db))?;
     register_global_store_incr(lua, Arc::clone(&db))?;
-    register_global_store_delete(lua, Arc::clone(&db))?;
+    register_global_store_delete(lua, db)?;
     Ok(())
 }
 

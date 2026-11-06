@@ -2,7 +2,6 @@ use anyhow::Result;
 use notify::event::{AccessKind, AccessMode, EventKind, ModifyKind};
 use notify::{RecursiveMode, Watcher};
 use smol::channel::Sender;
-use std::path::Path;
 
 fn is_write_event(kind: &EventKind) -> bool {
     matches!(
@@ -29,18 +28,27 @@ pub fn watch_configs(tx: Sender<()>) -> Result<()> {
         }
     } */
 
-    watcher.watch(Path::new("."), RecursiveMode::Recursive)?;
+    let root = std::env::current_dir()?;
+    watcher.watch(&root, RecursiveMode::Recursive)?;
+
+    let root_startup = root.join("startup.lua");
 
     for event in notify_rx {
         match event {
             Ok(event) => {
                 let mut should_reload = false;
-                for path in &event.paths {
-                    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
 
-                    if (ext == "toml" || ext == "lua") && is_write_event(&event.kind) {
-                        should_reload = true;
-                        break;
+                if is_write_event(&event.kind) {
+                    for path in &event.paths {
+                        if path == &root_startup {
+                            continue;
+                        }
+
+                        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                        if ext == "toml" || ext == "lua" {
+                            should_reload = true;
+                            break;
+                        }
                     }
                 }
 
