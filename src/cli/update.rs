@@ -358,11 +358,11 @@ fn update_url(base: &str, latest: &str, platform: &str, sql: bool) -> Result<Str
     let url = match platform {
         "linux-glibc-x86_64" => format!("{}/linux{}", base, suffix),
         "linux-musl-x86_64" => format!(
-            "{}/spyweb-{}/spyweb-linux-musl-x86_64{}.tar.gz",
+            "{}/v{}/spyweb-linux-musl-x86_64{}.tar.gz",
             deploy, version, suffix
         ),
         "linux-musl-aarch64" | "linux-glibc-aarch64" => format!(
-            "{}/spyweb-{}/spyweb-linux-musl-aarch64{}.tar.gz",
+            "{}/v{}/spyweb-linux-musl-aarch64{}.tar.gz",
             deploy, version, suffix
         ),
         "macos-aarch64" => format!("{}/mac-arm{}", base, suffix),
@@ -445,15 +445,15 @@ mod tests {
     fn musl_platforms() {
         assert_eq!(
             update_url(STABLE_BASE, "1.5.6", "linux-musl-x86_64", false).unwrap(),
-            "https://github.com/spyweb-app/deploy/releases/download/spyweb-1.5.6/spyweb-linux-musl-x86_64.tar.gz"
+            "https://github.com/spyweb-app/deploy/releases/download/v1.5.6/spyweb-linux-musl-x86_64.tar.gz"
         );
         assert_eq!(
             update_url(BETA_BASE, "v1.6.0-beta", "linux-musl-aarch64", true).unwrap(),
-            "https://github.com/spyweb-app/deploy/releases/download/spyweb-1.6.0-beta/spyweb-linux-musl-aarch64-sql.tar.gz"
+            "https://github.com/spyweb-app/deploy/releases/download/v1.6.0-beta/spyweb-linux-musl-aarch64-sql.tar.gz"
         );
         assert_eq!(
             update_url(STABLE_BASE, "1.5.6", "linux-glibc-aarch64", true).unwrap(),
-            "https://github.com/spyweb-app/deploy/releases/download/spyweb-1.5.6/spyweb-linux-musl-aarch64-sql.tar.gz"
+            "https://github.com/spyweb-app/deploy/releases/download/v1.5.6/spyweb-linux-musl-aarch64-sql.tar.gz"
         );
     }
 
