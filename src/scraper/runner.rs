@@ -2,8 +2,9 @@ use anyhow::Result;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::config::types::{JobConfig, Jobs};
-use crate::scraper::extractor::{ExtractedItem, Extractor};
+use crate::config::types::{Job, JobConfig, Jobs};
+use crate::scraper::extractor::{ExtractedItem, Extractor, write_debug_artifacts};
+use crate::scraper::pipeline::compute_cycle_batch;
 use crate::scraper::request::{FetchAttempt, RequestConfig, RequestHandler, RequestResult};
 use crate::services::db::Db;
 
@@ -107,6 +108,19 @@ pub fn run_jobs(jobs: &Jobs) -> Vec<Result<JobRunResult>> {
     Runner::new().run_jobs(jobs)
 }
 
+pub(crate) enum DebugTarget {
+    ZeroWork,
+    Url(String),
+}
+
+async fn resolve_debug_target(job: &Job) -> DebugTarget {
+    match compute_cycle_batch(job).await {
+        Some(batch) if batch.is_empty() => DebugTarget::ZeroWork,
+        Some(batch) => DebugTarget::Url(batch[0].clone()),
+        None => DebugTarget::Url(job.config.url.clone()),
+    }
+}
+
 pub async fn debug_job(job_name: &str) -> Result<()> {
     let db = Arc::new(Db::open("data")?);
     let mut jobs = crate::config::loader::load_all_jobs("jobs.toml", "jobs", db)?;
@@ -134,9 +148,28 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
             )
         })?;
 
-    job.config.options.debug = true;
+    debug_job_for(job).await
+}
 
-    println!("Debug run for job: {}", crate::color::c_job(job_name));
+pub(crate) async fn debug_job_for(job: &mut Job) -> Result<()> {
+    println!(
+        "Debug run for job: {}",
+        crate::color::c_job(&job.config.name)
+    );
+
+    let target = match resolve_debug_target(job).await {
+        DebugTarget::ZeroWork => {
+            println!(
+                "{}",
+                crate::color::c_warn("on_start produced zero work; nothing to debug.")
+            );
+            return Ok(());
+        }
+        DebugTarget::Url(url) => url,
+    };
+
+    job.config.options.debug = true;
+    println!("Debug URL: {}", crate::color::c_info(&target));
 
     let (ctx, _keep) = match job.hooks.as_ref() {
         Some(h) => {
@@ -151,7 +184,8 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
 
     let result = async {
         let runner = Runner::new();
-        let request = RequestConfig::from_job(&job.config);
+        let mut request = RequestConfig::from_job(&job.config);
+        request.url = target.clone();
 
         // 1. before_fetch
         let request = match job.hooks.as_ref() {
@@ -247,6 +281,7 @@ pub async fn debug_job(job_name: &str) -> Result<()> {
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("Hook context not initialized"))?;
                 let items = h.override_extract(&response, ctx).await?;
+                write_debug_artifacts(&response.body, &items, &job.config, job.dir.as_deref())?;
                 let count = items.len();
                 crate::scraper::extractor::ExtractionResult {
                     items,

@@ -284,9 +284,7 @@ fn swap_binary(
         && let Err(e) = fs::remove_file(&aside)
         && e.kind() != std::io::ErrorKind::NotFound
     {
-        crate::t_warnln!(
-            "Old binary is still in use; cleanup will be retried on the next start."
-        );
+        crate::t_warnln!("Old binary is still in use; cleanup will be retried on the next start.");
     }
 
     Ok(())

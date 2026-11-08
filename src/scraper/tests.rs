@@ -10,7 +10,7 @@ use crate::scraper::request::{
     RequestConfig, RequestHandler, RequestResult, flatten_headers, format_error_chain,
     read_body_bounded,
 };
-use crate::scraper::runner::Runner;
+use crate::scraper::runner::{Runner, debug_job_for};
 use crate::services::db::Db;
 
 fn unique_test_dir(name: &str) -> PathBuf {
@@ -918,6 +918,240 @@ end
     );
     let batch = smol::block_on(compute_cycle_batch(&job));
     assert_eq!(batch, Some(vec!["https://seed.com".to_string()]));
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+fn read_global_strings(job: &Job, key: &str) -> Vec<String> {
+    let Some(hooks) = job.hooks.as_ref() else {
+        return Vec::new();
+    };
+    smol::block_on(async {
+        let lua = hooks.lua.lock().await;
+        lua.globals().get::<Vec<String>>(key).unwrap_or_default()
+    })
+}
+
+#[test]
+fn debug_uses_first_url_from_urls() {
+    let (dir, mut job, _db) = make_job_with_hooks(
+        "debug-first-url",
+        Some(vec![
+            "https://first.example".into(),
+            "https://second.example".into(),
+        ]),
+        2,
+        r#"
+fetched_urls = {}
+
+function override_fetch(request)
+    table.insert(fetched_urls, request.url)
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+"#,
+    );
+
+    smol::block_on(debug_job_for(&mut job)).unwrap();
+
+    assert_eq!(
+        read_global_strings(&job, "fetched_urls"),
+        vec!["https://first.example".to_string()]
+    );
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn debug_uses_first_on_start_batch_entry() {
+    let (dir, mut job, _db) = make_job_with_hooks(
+        "debug-on-start-first",
+        None,
+        2,
+        r#"
+fetched_urls = {}
+lifecycle = {}
+
+function on_start(queue)
+    table.insert(lifecycle, "on_start")
+    queue.urls = { "monitor:1", "monitor:2" }
+end
+
+function override_fetch(request)
+    table.insert(fetched_urls, request.url)
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+"#,
+    );
+
+    smol::block_on(debug_job_for(&mut job)).unwrap();
+
+    assert_eq!(
+        read_global_strings(&job, "fetched_urls"),
+        vec!["monitor:1".to_string()]
+    );
+    assert_eq!(
+        read_global_strings(&job, "lifecycle"),
+        vec!["on_start".to_string()]
+    );
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn debug_zero_work_does_not_fetch() {
+    let (dir, mut job, _db) = make_job_with_hooks(
+        "debug-zero-work",
+        Some(vec!["https://seed.example".into()]),
+        2,
+        r#"
+fetched_urls = {}
+
+function on_start(queue)
+    queue.urls = {}
+end
+
+function override_fetch(request)
+    table.insert(fetched_urls, request.url)
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return {}
+end
+"#,
+    );
+
+    let id = job.config.id();
+    smol::block_on(debug_job_for(&mut job)).unwrap();
+
+    assert!(read_global_strings(&job, "fetched_urls").is_empty());
+    assert!(!dir.join(format!("{id}-response.html")).exists());
+    assert!(!dir.join(format!("{id}-fields.json")).exists());
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn debug_override_extract_writes_artifacts() {
+    let (dir, mut job, _db) = make_job_with_hooks(
+        "debug-override-artifacts",
+        None,
+        1,
+        r#"
+function override_fetch(request)
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html>custom body</html>",
+    }
+end
+
+function override_extract(response)
+    return {
+        { fields = { title = "Custom Item", body = response.body } }
+    }
+end
+"#,
+    );
+
+    let id = job.config.id();
+    smol::block_on(debug_job_for(&mut job)).unwrap();
+
+    let html_path = dir.join(format!("{id}-response.html"));
+    let fields_path = dir.join(format!("{id}-fields.json"));
+    assert!(html_path.exists(), "missing {:?}", html_path);
+    assert!(fields_path.exists(), "missing {:?}", fields_path);
+    assert!(
+        fs::read_to_string(&html_path)
+            .unwrap()
+            .contains("custom body")
+    );
+    let fields = fs::read_to_string(&fields_path).unwrap();
+    assert!(fields.contains("Custom Item"));
+    assert!(fields.contains("custom body"));
+
+    drop(job);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn debug_stops_before_notify_webhook_and_on_finished() {
+    let (dir, mut job, _db) = make_job_with_hooks(
+        "debug-stage-boundary",
+        None,
+        1,
+        r#"
+log = {}
+
+function override_fetch(request)
+    return {
+        status = 200,
+        url = request.url,
+        headers = {},
+        body = "<html></html>",
+    }
+end
+
+function override_extract(response)
+    return { { title = "item" } }
+end
+
+function before_store(items)
+    table.insert(log, "before_store")
+    return items
+end
+
+function before_notify(items)
+    table.insert(log, "before_notify")
+    return items
+end
+
+function before_webhook(payload)
+    table.insert(log, "before_webhook")
+    return payload
+end
+
+function on_finished(stats)
+    table.insert(log, "on_finished")
+end
+"#,
+    );
+
+    smol::block_on(debug_job_for(&mut job)).unwrap();
+
+    let log = read_global_strings(&job, "log");
+    assert!(log.contains(&"before_store".to_string()));
+    assert!(!log.contains(&"before_notify".to_string()));
+    assert!(!log.contains(&"before_webhook".to_string()));
+    assert!(!log.contains(&"on_finished".to_string()));
+
     drop(job);
     let _ = fs::remove_dir_all(&dir);
 }

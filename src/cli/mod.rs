@@ -122,11 +122,13 @@ enum Commands {
         #[arg(short = 'q', long, action = clap::ArgAction::Count)]
         quiet: u8,
     },
-    /// Run a single job once with debug output.
+    /// Run one URL through the pre-store pipeline with debug output.
     ///
-    /// Runs the job even if `enabled = false`, prints extracted items and pipeline
-    /// stages to the terminal, and saves response HTML + JSON artifacts in the job
-    /// directory. Skips store, notification, and webhook phases.
+    /// Runs `on_start` once and inspects the first URL from `on_start`/`urls`
+    /// (falling back to `url`). Runs the job even if `enabled = false`, prints
+    /// extracted items and pipeline stages to the terminal, and saves response
+    /// HTML + JSON artifacts in the job directory. Does not run workers,
+    /// `on_finished`, store, notification, or webhook phases.
     #[command(after_help = "Example:\n  spyweb debug \"My Job\"")]
     Debug {
         /// Job name or id to debug

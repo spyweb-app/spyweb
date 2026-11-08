@@ -273,6 +273,16 @@ fn safe_element_html(element: ElementRef<'_>) -> String {
     })
 }
 
+pub(crate) fn write_debug_artifacts(
+    html: &str,
+    items: &[ExtractedItem],
+    config: &JobConfig,
+    dir: Option<&Path>,
+) -> Result<()> {
+    save_response_body(html, config, dir)?;
+    save_extracted_items(items, config, dir)
+}
+
 fn save_response_body(html: &str, config: &JobConfig, dir: Option<&Path>) -> Result<()> {
     let mut path = dir
         .map(|p| p.to_path_buf())
