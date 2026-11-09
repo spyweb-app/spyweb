@@ -42,6 +42,18 @@ pub fn shutdown_all() {
     }
 }
 
+pub(crate) fn resolve_user_data_dir(dir: std::path::PathBuf) -> Result<std::path::PathBuf> {
+    if dir.is_absolute() {
+        return Ok(dir);
+    }
+    std::path::absolute(&dir).with_context(|| {
+        format!(
+            "Failed to resolve relative user_data_dir: {}",
+            dir.display()
+        )
+    })
+}
+
 pub struct Browser {
     pub(crate) transport: Arc<CdpTransport>,
     process: Option<Arc<Mutex<Option<Child>>>>,
@@ -82,10 +94,15 @@ impl Browser {
         })
     }
 
-    pub async fn launch(options: LaunchOptions) -> Result<Self> {
+    pub async fn launch(mut options: LaunchOptions) -> Result<Self> {
         use async_process::{Command, Stdio};
         use futures_lite::AsyncBufReadExt;
         use futures_lite::io::BufReader;
+
+        // Step 0: Always hand the browser an absolute profile path.
+        if let Some(dir) = options.user_data_dir.take() {
+            options.user_data_dir = Some(resolve_user_data_dir(dir)?);
+        }
 
         let mut lock_file = None;
 
@@ -160,6 +177,8 @@ impl Browser {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
 
             let mut found_url = None;
+            let mut stderr_tail: Vec<String> = Vec::new();
+            let mut exit_status: Option<std::process::ExitStatus> = None;
 
             loop {
                 let remaining = deadline.saturating_duration_since(std::time::Instant::now());
@@ -167,10 +186,13 @@ impl Browser {
                     break;
                 }
 
+                // Short tick so we notice an early process exit instead of
+                // waiting out the full deadline.
+                let tick = remaining.min(std::time::Duration::from_millis(100));
                 let line_future = lines.next();
                 let result: Option<Option<std::io::Result<String>>> =
                     smol::future::or(async { Some(line_future.await) }, async {
-                        smol::Timer::after(remaining).await;
+                        smol::Timer::after(tick).await;
                         None
                     })
                     .await;
@@ -192,17 +214,44 @@ impl Browser {
                             found_url = Some(url.trim().to_string());
                             break;
                         }
+                        stderr_tail.push(line);
+                        if stderr_tail.len() > 50 {
+                            stderr_tail.remove(0);
+                        }
                     }
-                    Some(Some(Err(_))) => continue,
-                    _ => break, // timeout or EOF
+                    Some(Some(Err(_))) => break, // broken pipe: stop waiting
+                    Some(None) => break,         // EOF
+                    None => {
+                        // Tick: check if the process already died.
+                        if exit_status.is_none()
+                            && let Some(status) = child.try_status().ok().flatten()
+                        {
+                            exit_status = Some(status);
+                        }
+                    }
                 }
             }
 
             match found_url {
                 Some(url) => url,
                 None => {
-                    let _ = child.kill();
-                    bail!("Browser failed to start within 5s timeout");
+                    if exit_status.is_none() {
+                        exit_status = child.try_status().ok().flatten();
+                    }
+                    let mut msg = match exit_status {
+                        Some(status) => format!(
+                            "Browser process exited ({}) before DevTools was ready",
+                            status
+                        ),
+                        None => {
+                            let _ = child.kill();
+                            "Browser failed to start: no DevTools URL within 5s timeout".to_string()
+                        }
+                    };
+                    if !stderr_tail.is_empty() {
+                        msg.push_str(&format!("; stderr: {}", stderr_tail.join(" | ")));
+                    }
+                    bail!(msg);
                 }
             }
         };

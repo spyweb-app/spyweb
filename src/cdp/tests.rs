@@ -53,6 +53,76 @@ fn test_find_browser_executable_not_empty() {
 }
 
 #[test]
+fn test_resolve_user_data_dir() {
+    use crate::cdp::browser::resolve_user_data_dir;
+
+    // Relative input becomes absolute (resolved against CWD).
+    let cwd = std::env::current_dir().unwrap();
+    let resolved = resolve_user_data_dir(std::path::PathBuf::from("rel-profile-dir")).unwrap();
+    assert!(resolved.is_absolute(), "relative path must become absolute");
+    assert!(
+        resolved.starts_with(&cwd),
+        "resolved path should be under CWD: {}",
+        resolved.display()
+    );
+
+    // Absolute input is returned untouched.
+    let abs = std::env::temp_dir().join("spyweb-abs-profile");
+    let resolved = resolve_user_data_dir(abs.clone()).unwrap();
+    assert_eq!(resolved, abs);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_launch_failure_captures_stderr() {
+    use crate::cdp::browser::Browser;
+    use crate::cdp::types::LaunchOptions;
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("spyweb-launch-fail-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Stub "browser": prints a real error to stderr and exits non-zero.
+    let script = dir.join("stub-browser.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\necho 'boom: profile in use' >&2\nexit 3\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let opts = LaunchOptions {
+        executable: script.to_string_lossy().to_string(),
+        headless: true,
+        keep_alive: false,
+        user_data_dir: Some(dir.join("profile")),
+        args: vec![],
+    };
+
+    let err = match smol::block_on(Browser::launch(opts)) {
+        Err(e) => e,
+        Ok(_) => panic!("launch unexpectedly succeeded"),
+    };
+    let msg = format!("{err:#}");
+
+    assert!(
+        msg.contains("boom: profile in use"),
+        "stderr not captured: {msg}"
+    );
+    assert!(
+        msg.contains("exit status: 3"),
+        "exit status not captured: {msg}"
+    );
+    assert!(
+        !msg.contains("within 5s timeout"),
+        "generic timeout message leaked: {msg}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn test_flat_session_routing() {
     smol::block_on(async {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

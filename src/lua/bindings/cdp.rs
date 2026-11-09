@@ -783,8 +783,8 @@ pub fn register(lua: &mlua::Lua, job_dir: Option<PathBuf>) -> mlua::Result<()> {
                 match Browser::launch(options).await {
                     Ok(browser) => Ok(browser),
                     Err(e) => {
-                        crate::t_eprintln!("Browser launch failed: {}", e);
-                        Err(mlua::Error::external(anyhow::anyhow!("{e}")))
+                        crate::t_eprintln!("Browser launch failed: {e:#}");
+                        Err(mlua::Error::external(anyhow::anyhow!("{e:#}")))
                     }
                 }
             }
