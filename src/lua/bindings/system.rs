@@ -33,6 +33,19 @@ pub(crate) fn log_file_name(job_name: &str) -> &'static str {
     }
 }
 
+const RANDOM_MAX_BYTES: i64 = 65536;
+
+fn random_buf(name: &str, n: i64) -> LuaResult<Vec<u8>> {
+    if !(1..=RANDOM_MAX_BYTES).contains(&n) {
+        return Err(mlua::Error::runtime(format!(
+            "random.{name}: n must be in 1..={RANDOM_MAX_BYTES}, got {n}"
+        )));
+    }
+    let mut buf = vec![0u8; n as usize];
+    getrandom::fill(&mut buf).map_err(|e| mlua::Error::runtime(format!("random.{name}: {e}")))?;
+    Ok(buf)
+}
+
 pub fn register(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> LuaResult<()> {
     register_common(lua, job_dir, job_name)?;
     register_defer(lua)?;
@@ -318,6 +331,47 @@ pub fn register_common(lua: &Lua, job_dir: Option<PathBuf>, job_name: &str) -> L
             Ok(std::env::var(prefixed).ok())
         })?,
     )?;
+
+    let random = lua.create_table()?;
+
+    random.set(
+        "bytes",
+        lua.create_function(|lua, n: i64| lua.create_string(&random_buf("bytes", n)?))?,
+    )?;
+
+    random.set(
+        "hex",
+        lua.create_function(|lua, n: i64| {
+            let buf = random_buf("hex", n)?;
+            let hex: String = buf.iter().map(|b| format!("{b:02x}")).collect();
+            lua.create_string(&hex)
+        })?,
+    )?;
+
+    random.set(
+        "int",
+        lua.create_function(|_, (min, max): (i64, i64)| {
+            if min > max {
+                return Err(mlua::Error::runtime(format!(
+                    "random.int: min ({min}) must be <= max ({max})"
+                )));
+            }
+
+            let range = max as i128 - min as i128 + 1; // 1..=2^64
+            let threshold = (1i128 << 64) - ((1i128 << 64) % range);
+            loop {
+                let mut buf = [0u8; 8];
+                getrandom::fill(&mut buf)
+                    .map_err(|e| mlua::Error::runtime(format!("random.int: {e}")))?;
+                let x = u64::from_le_bytes(buf) as i128;
+                if x < threshold {
+                    return Ok((min as i128 + (x % range)) as i64);
+                }
+            }
+        })?,
+    )?;
+
+    lua.globals().set("random", random)?;
 
     Ok(())
 }

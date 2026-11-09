@@ -336,6 +336,72 @@ fn test_env_get_binding() {
 }
 
 #[test]
+fn test_random_hex_and_bytes() {
+    let lua = Lua::new();
+    register_http_and_fs(&lua, None, "test").unwrap();
+
+    // random.hex(n) -> 2n lowercase hex chars
+    let hex: String = lua.load(r#"return random.hex(16)"#).eval().unwrap();
+    assert_eq!(hex.len(), 32);
+    assert!(
+        hex.chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+        "expected lowercase hex: {hex}"
+    );
+
+    // random.bytes(n) -> n raw bytes, different on every call
+    let b1: mlua::LuaString = lua.load(r#"return random.bytes(32)"#).eval().unwrap();
+    let b2: mlua::LuaString = lua.load(r#"return random.bytes(32)"#).eval().unwrap();
+    assert_eq!(b1.as_bytes().len(), 32);
+    assert_eq!(b2.as_bytes().len(), 32);
+    assert_ne!(b1.as_bytes(), b2.as_bytes(), "two CSPRNG draws must differ");
+
+    // random table shape
+    let random: mlua::Table = lua.globals().get("random").unwrap();
+    assert!(random.contains_key("bytes").unwrap());
+    assert!(random.contains_key("hex").unwrap());
+    assert!(random.contains_key("int").unwrap());
+}
+
+#[test]
+fn test_random_int_range_and_validation() {
+    let lua = Lua::new();
+    register_http_and_fs(&lua, None, "test").unwrap();
+
+    let fixed: i64 = lua.load(r#"return random.int(5, 5)"#).eval().unwrap();
+    assert_eq!(fixed, 5);
+
+    for _ in 0..200 {
+        let v: i64 = lua.load(r#"return random.int(1, 10)"#).eval().unwrap();
+        assert!((1..=10).contains(&v), "out of range: {v}");
+        let v: i64 = lua
+            .load(r#"return random.int(-1000, 1000)"#)
+            .eval()
+            .unwrap();
+        assert!((-1000..=1000).contains(&v), "out of range: {v}");
+    }
+
+    // Validation errors
+    let err = lua
+        .load(r#"return random.int(10, 1)"#)
+        .eval::<i64>()
+        .unwrap_err();
+    assert!(err.to_string().contains("must be <="), "unexpected: {err}");
+
+    let err = lua
+        .load(r#"return random.bytes(0)"#)
+        .eval::<mlua::LuaString>()
+        .unwrap_err();
+    assert!(err.to_string().contains("must be in"), "unexpected: {err}");
+
+    let err = lua
+        .load(r#"return random.hex(65537)"#)
+        .eval::<mlua::LuaString>()
+        .unwrap_err();
+    assert!(err.to_string().contains("must be in"), "unexpected: {err}");
+}
+
+#[test]
 fn test_dump_binding_formats_nested_tables_and_cycles() {
     let lua = Lua::new();
     register_http_and_fs(&lua, None, "test").unwrap();
