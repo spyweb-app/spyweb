@@ -68,6 +68,20 @@ assemble_package() {
         cp -r docs "$DIST_DIR/$PACKAGE_DIR/"
         cp LICENSE-MIT "$DIST_DIR/$PACKAGE_DIR/docs/" 2>/dev/null || true
         cp LICENSE-APACHE "$DIST_DIR/$PACKAGE_DIR/docs/" 2>/dev/null || true
+
+        # The user-project instructions apply to the extracted project root,
+        # not to SpyWeb's offline documentation directory.
+        if [ ! -f "docs/user-project-AGENTS.md" ]; then
+            echo "[!] Missing docs/user-project-AGENTS.md"
+            exit 1
+        fi
+        cp "docs/user-project-AGENTS.md" "$DIST_DIR/$PACKAGE_DIR/AGENTS.md"
+        rm "$DIST_DIR/$PACKAGE_DIR/docs/user-project-AGENTS.md"
+        cat > "$DIST_DIR/$PACKAGE_DIR/CLAUDE.md" <<'EOF'
+# Project instructions
+
+@AGENTS.md
+EOF
     fi
 
     if [ -d "examples" ]; then cp -r examples "$DIST_DIR/$PACKAGE_DIR/"; fi
