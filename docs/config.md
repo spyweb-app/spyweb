@@ -69,9 +69,11 @@ While the `debug = true` flag saves files during normal scheduled runs, you can 
 
 This command is ideal for iterative development because:
 - **Ignores `enabled` flag:** It will run the job even if it is set to `enabled = false` in your config.
+- **One URL only:** It runs `on_start` once and inspects the first URL from `on_start`/`urls`, falling back to `url`. It does not spawn workers or run the whole queue.
 - **Instant Feedback:** It prints the final extracted items and their fields directly to your terminal.
 - **Pipeline Transparency:** It explicitly shows the core stages of the pipeline (Fetch → Extract → Hook filtering, up to `before_store`) so you can see exactly where an item might be getting dropped, while safely bypassing the store, notification, and webhook phases.
 - **Saves Artifacts:** Just like the config flag, it generates the response HTML and JSON fields in the job's directory for deep inspection.
+- **No `on_finished`:** The job-loop completion hook does not run in debug mode.
 
 
 ## Validation Rules
@@ -216,6 +218,9 @@ All globals listed below are available inside any hook function.
 | `json_encode(val, array?)` | ❌ | Encode a Lua value to JSON string |
 | `json_decode(str)` | ❌ | Decode a JSON string to Lua value (10MB input limit) |
 | `env_get(key)` | ❌ | Read an environment variable |
+| `random.bytes(n)` | ❌ | `n` cryptographically secure random bytes (binary string, 1–65536) |
+| `random.hex(n)` | ❌ | `n` secure random bytes as `2n` lowercase hex chars (1–65536) |
+| `random.int(min, max)` | ❌ | Uniform secure random integer in `[min, max]`, inclusive |
 | `defer(fn)` | ❌ | Register hook-scoped cleanup callback |
 | `require(name)` | ❌ | Load a Lua module from the job directory or project root, with `init.lua` fallback (Luau only) |
 | `dump(value)` | ❌ | Pretty-print a Lua value (debugging) |

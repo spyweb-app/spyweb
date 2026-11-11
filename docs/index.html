@@ -110,6 +110,7 @@
                                 <li><a href="#fs_read">fs_read</a></li>
                                 <li><a href="#fs_read_binary">fs_read_binary</a></li>
                                 <li><a href="#env_get">env_get</a></li>
+                                <li><a href="#random">random</a></li>
                                 <li><a href="#selector_matches"><code>ctx.selector_matches</code></a></li>
                                 <li><a href="#last_fetch"><code>ctx.last_fetch</code></a></li>
                                 <li><a href="#spyweb_telemetry"><code>ctx.telemetry</code></a></li>
@@ -947,11 +948,13 @@ end</code></pre>
 
                             <div class="notification is-info">
                                 <strong>💡 Race Condition Note:</strong> Both <strong>Runtime Memory</strong> and
-                                <strong>Job-Local Storage</strong> are safe by default. Hooks for a single job are
-                                execution-locked (sequential), so race conditions are impossible within a single
-                                job.
-                                Use <code>global_store_incr</code> strictly when you need to mutate state shared
-                                across
+                                <strong>Job-Local Storage</strong> are safe by default. Worker tasks run
+                                concurrently, but Lua execution is serialized by the job's Lua lock. A hook
+                                that awaits (<code>sleep</code>, <code>http_get</code>, CDP) releases the lock
+                                while it waits, so workers interleave at await points. Synchronous Lua
+                                segments are atomic — a read -> await -> write on a shared global is a
+                                cross-worker race. Keep worker-local state in <code>ctx</code>, batch state in
+                                <code>_G</code>, and use <code>global_store_incr</code> for state shared across
                                 <strong>multiple concurrent jobs</strong>.
                             </div>
 
@@ -1540,6 +1543,26 @@ local resp = http_multipart("https://api.example.com/upload", {
     end
     return request
 end</code></pre>
+
+                            <h3 class="title is-4" id="random"><code>random.bytes(n)</code> · <code>random.hex(n)</code> · <code>random.int(min, max)</code> <span class="tag is-small is-dark">sync</span></h3>
+                            <p>Cryptographically secure random numbers backed by the operating system CSPRNG
+                                (<code>getrandom(2)</code> on Linux, <code>BCryptGenRandom</code> on Windows,
+                                <code>SecRandomCopyBytes</code> on macOS). Use these for tokens, nonces, and IDs
+                                instead of <code>math.random</code>, which is only seeded with the clock and is
+                                predictable.</p>
+                            <ul>
+                                <li><code>random.bytes(n)</code>: returns <code>n</code> raw random bytes as a
+                                    binary string. <code>n</code> must be between 1 and 65536.</li>
+                                <li><code>random.hex(n)</code>: returns <code>n</code> random bytes encoded as
+                                    <code>2n</code> lowercase hex characters (e.g. <code>random.hex(16)</code>
+                                    gives a 32-char string).</li>
+                                <li><code>random.int(min, max)</code>: returns a uniform random integer in
+                                    <code>[min, max]</code>, inclusive, with no modulo bias. <code>min</code> must
+                                    be ≤ <code>max</code>.</li>
+                            </ul>
+                            <pre><code class="language-lua">local nonce = random.hex(16)          -- "a3f9c2..." (32 chars)
+local token = random.bytes(32)       -- 32 raw bytes
+local delay = random.int(500, 1500)  -- unbiased integer, inclusive</code></pre>
 
                             <h3 class="title is-4" id="selector_matches"><code>ctx.selector_matches</code> (Context)</h3>
                             <p>A read-only number representing how many elements on the page matched the main

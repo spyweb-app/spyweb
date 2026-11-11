@@ -166,6 +166,15 @@ local browser = cdp.connect(ws_url, {
                             <p>CDP is available globally via the <code>cdp</code> table. While it can be used in any
                                 hook, it is most commonly used in <code>override_fetch</code> to replace the default
                                 HTTP client with a real browser.</p>
+                            <div class="notification is-warning">
+                                <strong>CDP is lazy-loaded.</strong> SpyWeb only registers the
+                                <code>cdp</code> table when <code>hooks.lua</code>, <code>defer.lua</code>,
+                                or <code>tests.lua</code> contains the literal text <code>cdp.</code>.
+                                If your hooks only call a required module that uses CDP internally, add a
+                                comment such as <code>-- cdp.</code> to <code>hooks.lua</code>; otherwise
+                                <code>cdp</code> will be <code>nil</code> inside that module. The check is a
+                                plain substring match, so the comment is enough.
+                            </div>
                             <pre><code class="language-lua">function override_fetch(request, ctx)
     -- 1. Launch a temporary browser
     local browser = cdp.launch({})

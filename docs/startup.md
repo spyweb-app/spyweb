@@ -57,12 +57,13 @@ Persist state with:
 |---|---|
 | `engine` | Runtime information table |
 | `env_get` | Reads `SPYWEB_*` environment variables |
+| `random.bytes`, `random.hex`, `random.int` | Cryptographically secure random (OS CSPRNG; `int` is inclusive and unbiased) |
 | `log` | Writes to `startup.log` |
-| `fs_append`, `fs_overwrite`, `fs_read`, `fs_read_binary` | Project-root relative; existing path and extension restrictions apply |
+| `fs_append`, `fs_overwrite`, `fs_read`, `fs_read_binary` | Project-root relative; missing files return `nil`; path and extension restrictions apply |
 | `http_request`, `http_get`, `http_post`, `http_multipart` | Full network access |
 | `tls_probe` | TLS certificate inspection |
 | `json_encode`, `json_decode` | JSON helpers |
-| `require` | Luau builds only; resolves from the project root |
+| `require` | Luau only; resolves from the project root |
 | `db_query`, `db_exec` | Real on SQLite builds; KV builds return the usual variant error |
 | `global_store_set`, `global_store_get`, `global_store_incr`, `global_store_delete` | Shared storage across jobs |
 | `sleep` | Async delay |
@@ -70,17 +71,15 @@ Persist state with:
 | `spyweb.assert_eq`, `spyweb.assert_ne` | Assertions |
 | `dump`, `copy`, `deep_copy` | Lua helpers |
 
-The base Lua/Luau standard library is not restricted. `startup.lua` is trusted project code with the same trust model as `hooks.lua` and `server/init.lua`.
-
 ## Unavailable bindings
 
 These names are present as explicit error stubs:
 
-| Binding | Error |
+| Binding | Error / note |
 |---|---|
 | `store_set`, `store_get`, `store_delete` | `store_* is job-scoped and unavailable in startup.lua; use global_store_* or db_*` |
-| `defer` | `defer is only available inside cycle hooks; not available in startup.lua` |
-| `queue_push` | `queue_push is only available inside on_start; not available in startup.lua` |
+| `defer` | `defer is only available inside cycle hooks and server; not available in startup.lua` |
+| `queue_push` | Not available in `startup.lua`; `queue_push` requires an active queue cycle |
 | `cdp` | `cdp is not available in startup.lua` |
 
 Use `global_store_*` or `db_*` instead of job-scoped `store_*`. CDP/browser automation belongs in job hooks.

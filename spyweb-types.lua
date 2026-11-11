@@ -101,6 +101,7 @@ function deep_copy(t, seen) end
 ---@class spyweb_engine
 ---@field os           string  "linux" | "macos" | "windows" | "unknown"
 ---@field arch         string  "x86_64" | "aarch64" | "unknown"
+---@field platform     string  "os[-libc]-arch", e.g. "linux-musl-aarch64"
 ---@field headless     boolean  True when no display server is available
 ---@field version      string  SpyWeb version (from Cargo.toml)
 ---@field lua_version  string  "luau" | "lua54"
@@ -114,7 +115,7 @@ engine = {}
 -- Async system functions
 --=============================================================================
 
----Sleep for N milliseconds. Fully async (does not block other fibers).
+---Sleep for N milliseconds. Fully async (does not block other fibers or other workers of the same job).
 ---@param ms integer
 function sleep(ms) end
 
@@ -188,9 +189,20 @@ function json_decode(string) end
 ---@return string|nil
 function env_get(key) end
 
----Register a deferred (cleanup) function. In the scraper pipeline, deferred
----functions run after on_success/on_error/on_finally. In the API server,
----they run after the response is sent and support async bindings.
+---Cryptographically secure random helpers (OS CSPRNG, not math.random).
+---@class spyweb_random
+---@field bytes fun(n: integer): string  n raw random bytes as a binary string (1..65536)
+---@field hex fun(n: integer): string    n random bytes as 2n lowercase hex chars (1..65536)
+---@field int fun(min: integer, max: integer): integer  Uniform integer in [min, max], inclusive
+random = {} ---@type spyweb_random
+
+---Register a deferred (cleanup) function. Runs immediately after the top-level
+---pipeline stage hook (e.g. before_fetch) exits, LIFO order, even on error.
+---Async bindings (http_post, sleep, cdp.* yields) are NOT supported inside —
+---only sync resource closes (browser:close(), page:close(), context:close()).
+---Not supported in the job-loop hooks on_start/on_finished (raises there).
+---In the API server, deferred functions run after the response is sent and
+---support async bindings.
 ---@param fn function
 function defer(fn) end
 
@@ -360,6 +372,11 @@ function spyweb.assert_ne(left, right, msg) end
 ---@field wait_session_event fun(self: spyweb_browser, session_id: string, event: string, timeout_ms?: integer, predicate?: fun(params: table): boolean): table
 ---@field new_context fun(self: spyweb_browser): spyweb_browser_context
 
+-- CDP is lazily registered: SpyWeb scans hooks.lua, defer.lua, and tests.lua
+-- for the literal text "cdp.". If CDP is only used inside a required module,
+-- add a comment such as `-- cdp.` to hooks.lua; otherwise `cdp` will be nil
+-- inside that module. The check is a plain substring match, so the comment
+-- is enough.
 ---@type table<string, fun(...):...>
 cdp = {}
 
@@ -466,8 +483,43 @@ function on_error(err, ctx) end
 ---@param ctx spyweb_context
 function on_finally(ctx) end
 
----Called when the job is finished (all cycles complete).
-function on_finished() end
+---Push a URL into the current cycle's live queue. Callable only from a hook
+---running in an active queue cycle (worker pipeline/cycle hooks); calls from
+---on_start, on_finished, or outside a queue cycle raise. Dedup identity is the
+---exact string: a repeat of a seed or already-pushed URL is dropped and
+---increments `duplicates`; initial + pushed entries are capped at MAX_BATCH
+---(10,000), and an over-cap push raises.
+---@param url string
+function queue_push(url) end
+
+---@class spyweb_queue_table
+---@field urls string[]|nil  on_start: this cycle's batch (mutate to commit; dense list of opaque strings ≤ 10000, or {} for zero work; nil = no opinion); on_finished: always {} (mutations inert)
+---@field processed number  on_finished only: run_once invocations that returned this cycle (Ok + Err, including internal nil-skips)
+---@field failed number  on_finished only: subset of processed where run_once returned Err (hook/DB/infra errors; HTTP failures recovered via after_fetch are not failed)
+---@field pushed number  on_finished only: accepted queue_push calls this cycle
+---@field duplicates number  on_finished only: rejected queue_push calls this cycle (repeat URL or seed re-push)
+
+---Job-loop hook: fires once per job iteration, BEFORE any worker starts, in all
+---three modes (single, multi-worker, URL queue). The queue table is OPT-IN BY
+---SIGNATURE: declare a parameter (any name) or use vararg to receive it;
+---zero-param `function on_start() end` runs with no table, no read-back.
+---Commit contract: mutate queue.urls on the PROVIDED table (append, replace,
+---or leave alone). Rebinding the local does nothing. Return value discarded.
+---After the hook, Rust reads back queue.urls via the same table handle:
+---  nil    = no opinion (config seed / legacy dispatch unchanged)
+---  {}     = explicit zero-work cycle (on_finished still runs)
+---  list   = this cycle's batch, replaces the seed entirely
+---  invalid = hook failure, logged, seed intact (dense string list required)
+---Errors are logged, never crash the cycle. defer() raises here.
+---@param queue spyweb_queue_table|nil
+function on_start(queue) end
+
+---Job-loop hook: fires once per job iteration, AFTER all workers complete,
+---before the interval sleep. Same arity gate as on_start: the stats table is
+---opt-in by signature; zero-param runs with no table. The table is FINAL when
+---called — there is no commit path, mutations are inert. Errors are log-only.
+---@param queue spyweb_queue_table|nil
+function on_finished(queue) end
 
 --=============================================================================
 -- Server API route tables (injected by the API server)

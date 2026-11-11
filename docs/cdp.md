@@ -6,7 +6,7 @@
 
 If you need JS rendering in a hook (to scrape a React site, bypass a Cloudflare challenge, click buttons, wait for DOM elements), you use the `cdp` module. That's it.
 
-For detailed documentation with examples, see <a href="https://docs.spyweb.app/cdp.html" target="_blank">SpyWeb CDP Docs</a>.
+For detailed documentation with examples, see <a href="https://docs.spyweb.app/browser-automation/" target="_blank">SpyWeb Browser Automation Docs</a>.
 
 ### How It Works
 
@@ -30,6 +30,8 @@ By default, closing the browser kills the process and cleans up the profile. You
 ## Hook Integration
 
 CDP is available globally via the `cdp` table. While it can be used in any hook, it is most commonly used in `override_fetch` to replace the default HTTP client.
+
+> **CDP is lazy-loaded.** SpyWeb only registers the `cdp` table when `hooks.lua`, `defer.lua`, or `tests.lua` contains the literal text `cdp.`. If your hooks only call a required module that uses CDP internally, add a comment such as `-- cdp.` to `hooks.lua`; otherwise `cdp` will be `nil` inside that module. The check is a plain substring match, so the comment is enough.
 
 ### Basic Usage in `override_fetch`
 
@@ -73,6 +75,8 @@ end
 ## Browser Persistence & Performance
 
 Launching a new browser for every fetch is slow. Because Spyweb **persists the Lua state** for each job, you can keep a browser instance "warm" across multiple scraper runs.
+
+> **Multi-worker jobs:** Worker tasks run concurrently, but Lua execution is serialized by the job's Lua lock, which a hook releases while it awaits, so two workers can have CDP calls in flight at once. The browser profile is exclusive: a `user_data_dir` is guarded by `.spyweb.lock` (`try_lock_exclusive`), so concurrent `cdp.launch()` calls against the same profile fail with "User data directory already in use". Launch the browser once (in `on_start` or at load time), keep it in a global, and share it across workers - see [Shared State Semantics](multi-worker.md#shared-state-semantics).
 
 ### Persistent Browser Pattern
 

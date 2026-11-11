@@ -1,5 +1,16 @@
 # ⚙️ Execution Lifecycle & Orchestration
 
+> Global once-per-process setup belongs in the optional root `startup.lua`. It runs after the database opens and before job hooks load, and it is not hot-reloaded. See [startup.md](startup.md).
+
+## Job-Loop Hooks (bracket the entire iteration)
+
+Two hooks wrap the whole worker phase, both opt in to a queue table **by signature** (declare a parameter or use vararg; zero-param runs with no table):
+
+| Hook | Fires | Table |
+|---|---|---|
+| `on_start(queue)` | once per job iteration, **before any worker** | `{ urls = seed }` - mutate `queue.urls` to commit this cycle's batch (dense string list ≤ 10,000, or `{}` for zero work); untouched = config seed intact |
+| `on_finished(queue)` | once per job iteration, **after all workers complete** | `{ urls = {}, processed, failed, pushed, duplicates }` - final when called, mutations inert |
+
 ## Pipeline Stages
 
 Every scraping cycle runs through these stages in order. "Automatic" stages are built-in; the rest can be customized via Lua hooks in `hooks.lua`.
@@ -29,53 +40,46 @@ After the pipeline stages finish (or exit via nil), the following fire from `def
 | `on_finally(ctx)` | always after on_success or on_error | `ctx` |
 
 ---
-After all workers complete their cycles, this fires from `hooks.lua` or `defer.lua`:
-| Hook | Fires |
-|---|---|
-| `on_finished()` | once per job iteration, before sleep |
+After all workers complete their cycles, `on_finished(queue)` fires (see job-loop hooks above) before sleep. In a single-worker job, it fires immediately after `on_finally` with no workers in between.
 
 ### Flow (clockwise)
 
 ```
-    before_fetch ──→ override_fetch ──→ fetch ──→ after_fetch
-        ▲            nil→fetch fail       auto       nil→skip
-        │                                              │
-        │                                              ▼
-   sleep(interval)                             override_extract
-        │                                        nil→empty
-        ▲                                              │
-        │                                              ▼
-    on_finished                                     extract
-        │                                            auto
-        ▲                                              │
-        │                                              ▼
-      on_finally                                  after_extract
-         │                                        nil→skip rst
-        ▲                                              │
-        │                                              ▼
-   on_success/error                               filter_item
-        │                                         nil→skip item
-        ▲                                              │
-        │                                              ▼
-    notify+webhook                               before_store
-        │                                        nil→skip s/n
-        ▲                                              │
-        │                                              ▼
-   before_webhook  nil→skip                      dedup+insert
-        │                                            auto
-        ▲                                              │
-        │                                              │
-   before_notify ←─────────────────────────────────────┘
-   nil→skip notif
+    on_start ──→ before_fetch ──→ override_fetch ──→ fetch ──→ after_fetch
+        │            nil→skip         nil→fetch fail   auto       nil→skip
+        │                ▲                                        │
+        │                │                                        ▼
+        │           sleep(interval)                       override_extract
+        │                │                                  nil→empty
+        │                ▼                                        │
+        │           on_finished ←──── (workers drain batch) ◄── extract
+        │                │                                        auto
+        │                ▼                                        │
+        │           on_finally                                after_extract
+        │               ▲                                    nil→skip rst
+        │               │                                        │
+        │          on_success/error                             ▼
+        │               ▲                                   filter_item
+        │               │                                  nil→skip item
+        │               │                                        ▼
+        │          notify+webhook                              before_store
+        │               ▲                                  nil→skip s/n
+        │               │                                        ▼
+        │          before_webhook  nil→skip                 dedup+insert
+        │               ▲                                      auto
+        │               │                                        │
+        │          before_notify ◄─────────────────────────────────┘
+        │          nil→skip notif
+        └── (loop: on_finished → sleep → on_start)
 ```
 
-All lifecycle hooks (`on_success`/`on_error` → `on_finally` → `on_finished` → `sleep`) fire every cycle regardless of nil skips. `sleep` then loops back to `before_fetch`.
+All per-cycle lifecycle hooks (`on_success`/`on_error` → `on_finally`) fire on every worker cycle regardless of nil skips. `on_start` and `on_finished` fire exactly once per job iteration, before/after all workers respectively. `sleep` then loops back to `on_start`.
 
 ---
 
 ## 1. Hook-Scoped Cleanup: `defer(fn)`
 
-`defer(fn)` is a global function available inside any hook. It registers a callback to be executed **immediately after the current hook finishes**, regardless of whether it returned successfully or raised an error.
+`defer(fn)` is a global function available inside pipeline stage hooks (`before_fetch`, `override_fetch`, etc.). It registers a callback to be executed **immediately after the current hook finishes**, regardless of whether it returned successfully or raised an error. It is **not supported** in the job-loop hooks (`on_start`, `on_finished`) — calling it there raises deterministically and the hook fails (seed intact for `on_start`).
 
 ### Key Characteristics
 - **Scope:** Hook-Level Scoping. It is tied to the top-level hook (like `before_fetch`), not the local Lua function.
@@ -152,13 +156,6 @@ end
 - Releasing resources shared across hooks
 - Persistence, snapshots, or writing audit logs
 
-### Lifecycle Hooks
-| Function | When it fires | Use Case |
-|----------|---------------|----------|
-| `on_success(ctx)` | Cycle completed without any fatal errors | Post-run telemetry, aggregate success APIs |
-| `on_error(err, ctx)` | Cycle failed with a fatal error | Critical failure alerts (Discord/Slack/PagerDuty) |
-| `on_finally(ctx)` | **Always** fires at the end of every cycle | State reset, writing audit logs |
-
 ### Shared State & Async Support
 `defer.lua` shares the **same Lua VM** as `hooks.lua`. Every lifecycle hook receives the same per-cycle `ctx` as the pipeline hooks, so you can pass data between them through `ctx.shared`. Unlike the `defer()` binding, all functions in `defer.lua` **fully support async bindings** (like `http_post`).
 
@@ -184,26 +181,49 @@ Standard **Lua globals** are also visible across both files, but `ctx.shared` is
 
 ---
 
-## 3. Job-Loop Hook: `on_finished()` (multi-worker setup)
+## 3. Job-Loop Hooks: `on_start()` / `on_finished()`
 
-> **Single-worker jobs:** If `workers = 1`, `on_finished` fires immediately after `on_finally` with no workers in between. There's no meaningful gap, use `on_finally` in `defer.lua` instead.
+> **Arity gate:** Both hooks opt in to their queue table **by signature** - declare a parameter (any name) or use vararg to receive it. A zero-param function (`function on_finished() end`) runs with no table.
 
-`on_finished()` is a global function defined in `hooks.lua` or `defer.lua` that fires **after every complete job iteration** - after all workers finish their cycles, just before the job goes to sleep until the next interval.
+> **Single-worker jobs:** If `workers = 1`, both hooks still fire (once, around the one inline cycle). Use `on_finally` in `defer.lua` for per-cycle cleanup.
+
+### `on_start(queue)` — before any worker
+
+Fires **once per job iteration, before any worker starts**, in all three modes. Mutate `queue.urls` to commit this cycle's batch (dense string list, entries opaque, ≤ 10,000 items, or `{}` for explicit zero work). Untouched = config seed intact. Zero-param `on_start()` runs with no table for pure lifecycle work (auth token fetch, global reset). There is no `dynamic_queue` config key — mode is derived per cycle from batch presence.
+
+### `on_finished(queue)` — after all workers
+
+Fires **after all workers complete their cycles**, just before the job sleeps. The table is final when the hook fires. mutations are inert (no commit path).
+
+| Field | Meaning |
+|---|---|
+| `urls` | Always `{}`; `on_finished` is not a commit point |
+| `processed` | `run_once` invocations that returned this cycle (Ok + Err, including internal nil-skips) |
+| `failed` | Subset of `processed` where `run_once` returned `Err` (hook/DB/infra errors; HTTP failures recovered via `after_fetch` are not failed) |
+| `pushed` | Accepted `queue_push` calls this cycle |
+| `duplicates` | Rejected `queue_push` calls this cycle (repeat URL or seed re-push) |
+
+Errors inside `on_finished` are log-only: counters are already final and unaffected. No counter state leaks across cycles. `defer()` is not supported here either.
 
 ### Key Differences from `on_finally()`
 
-| Aspect | `on_finished()` | `on_finally(ctx)` |
-|--------|-----------------|-------------------|
-| Scope | Across all workers in a job iteration | Per-cycle (per-worker) |
-| When it fires | After all workers complete, before sleep | After each individual cycle ends |
-| `ctx` parameter | **None** - receives no arguments | Receives per-cycle `ctx` |
+| Aspect | `on_start` / `on_finished` | `on_finally(ctx)` |
+|--------|---------------------------|-------------------|
+| Scope | Once per job iteration (pre/post all workers) | Per-cycle (per-worker) |
+| When it fires | Before workers start / after all complete | After each individual cycle ends |
+| Table | `on_start`: may commit batch; `on_finished`: read-only stats | Receives per-cycle `ctx` |
 | Where defined | `hooks.lua` or `defer.lua` | `defer.lua` |
 
 ### Example
 
 ```lua
-function on_finished()
-    log("Job iteration complete, sleeping until next interval")
+function on_start(queue)
+    -- commit nothing: config seed / legacy dispatch unchanged
+end
+
+function on_finished(queue)
+    log(string.format("done: %d processed, %d failed",
+        queue.processed, queue.failed))
 end
 ```
 
@@ -211,6 +231,7 @@ end
 - Logging job-level completion metrics
 - Releasing global resources shared across workers
 - Running cleanup that should happen after all workers finish, not after each one
+- Reading the final per-iteration `processed`/`failed` counters
 
 ---
 
@@ -236,11 +257,13 @@ end
 | Goal | Mechanism |
 |------|-----------|
 | Close a browser/page opened in a single hook | `defer()` |
+| Commit a dynamic batch before workers start | `on_start(queue)` |
 | Push aggregate metrics after a cycle finishes | `defer.lua` + `on_success` / `on_finally` |
 | Alert on job failure via HTTP API | `defer.lua` + `on_error` |
 | Clean up shared state at the end of a run | `defer.lua` + `on_finally` |
 | Handle nested resources in a specific order | `defer()` multiple times (LIFO) |
-| Log/track job-level completion across all workers | `on_finished()` in `hooks.lua` |
+| Read per-iteration processed/failed counters | `on_finished(queue)` |
+| Log/track job-level completion across all workers | `on_finished(queue)` |
 
 ## Memory Hygiene
 

@@ -276,6 +276,9 @@ The server VM has access to the same globals as scraper hooks:
 | `json_encode(value, array?)` | Encode Lua value to JSON string. Pass `array=true` to treat empty tables as `[]`. |
 | `json_decode(string)` | Decode JSON string to Lua value, returns (value, err) (10MB input limit) |
 | `env_get(key)` | Read an environment variable |
+| `random.bytes(n)` | `n` cryptographically secure random bytes (binary string, 1–65536) |
+| `random.hex(n)` | `n` secure random bytes as `2n` lowercase hex chars (1–65536) |
+| `random.int(min, max)` | Uniform secure random integer in `[min, max]`, inclusive |
 | `defer(fn)` | Register an async cleanup function (runs after response) |
 | `sleep(ms)` | Sleep for N milliseconds |
 | `notify(title, body, [timeout])` | Send desktop notification |
@@ -336,6 +339,7 @@ end
 | `SPYWEB_API_KEY` | *none* | API authentication key |
 | `SPYWEB_DISABLE_SERVER` | *none* | Set to any value to skip starting the web server |
 | `SPYWEB_LOG` | `info` | Log verbosity: `info` (all), `warn` (warnings+errors), `error` (errors only) |
+| `SPYWEB_BLOCK_PRIVATE_NETWORKS` | *none* | Set to `1`/`true`/`yes`/`on` to block loopback, private, link-local, and reserved addresses |
 
 ## Data Directory
 
