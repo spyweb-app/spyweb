@@ -1,6 +1,6 @@
 [package]
 name = "spyweb"
-version = "1.5.5"
+version = "1.6.0"
 edition = "2024"
 authors = ["SpyWeb <support@spyweb.app>"]
 description = "A lightweight, self-contained monitoring & scraping engine with Lua customization support"
@@ -46,6 +46,7 @@ futures-lite = "2.6.1"
 clap = { version = "4.6.1", default-features = false, features = ["derive", "std", "help", "usage"] }
 ctrlc = { version = "3.4", features = ["termination"] }
 fastrand = "2.4.1"
+getrandom = "0.3"
 tempfile = "3.17"
 x509-cert = "0.2"
 der = "0.7"

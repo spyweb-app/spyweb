@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-11-11
+
+### Added
+- **Startup:** Optional root `startup.lua` runs once per process after the database opens and before job hooks load. It is not hot-reloaded; edits require a restart.
+- **Multi-Worker:** Jobs now support a **dynamic queue**: instead of a static `urls` array in config, an `on_start(queue)` hook can compute the batch each cycle (e.g. from a database) by mutating `queue.urls`.
+- **Multi-Worker:** `queue_push(url)` lets any worker push new URLs into the live cycle queue mid-run. Re-pushes of already-visited URLs count to `duplicates` instead of re-queueing; pushes beyond `MAX_BATCH` are rejected. Pushed URLs are picked up by the same worker or a parked one until the queue drains.
+- **Lua Hooks:** `on_finished(queue)` now receives a final stats table `{ urls = {}, processed, failed, pushed, duplicates }` when declared with a parameter. `defer()` now raises in `on_start`/`on_finished` instead of silently dropping cleanup.
+- **Lua:** `engine.platform` exposes the build target (OS, libc on Linux, architecture), and `spyweb version`/`check` print it.
+- **Lua:** New `random` table with cryptographically secure randomness backed by the OS CSPRNG (`getrandom`): `random.bytes(n)` (raw bytes), `random.hex(n)` (lowercase hex), and `random.int(min, max)` (unbiased, inclusive).
+- **Security:** Added opt-in `SPYWEB_BLOCK_PRIVATE_NETWORKS` to block HTTP requests, redirects, `http_multipart`, `tls_probe`, webhooks, and scraper fetches to loopback, private, link-local, and reserved addresses. Disabled by default; incompatible with proxies when enabled.
+
+### Changed
+- **Multi-Worker:** Hooks release the job's Lua lock while awaiting, workers now interleave at await; sync Lua stays exclusive.
+- **Dependencies:** Upgrade mlua from 0.11.6 to 0.12.2 (bundled Luau 0.709 → 0.740), rename deprecated `mlua::String` to `LuaString`.
+- **Pipeline:** Refactor scraper pipeline from free functions into `JobCtx`/`CycleRunner` structs and a `Work` enum. No behavior change.
+- **Pipeline:** Fold coordinator execution into `pipeline.rs` (private queue cycle + worker loop); `coordinator` module reduced to the Lua-facing queue gate (`Message`/`PushError`/`QueueState`). No behavior change.
+- **Configuration:** Group optional job settings under the defaultable `JobOptions` struct while preserving the existing flat TOML configuration format reducing files needs to be touch when new config field is added. 
+- **Updater:** now supports musl/aarch64 from deploy repo assets matching artifact per platform (OS, libc, arch).
+
+### Fixed
+- **CLI:** `spyweb debug` runs `on_start` once and inspects only the first URL from `on_start`/`urls` instead of always using `url`. It also writes response/fields artifacts when `override_extract` is used.
+- **Updater (Windows):** `-o` no longer fails when the running executable cannot be deleted; `.old` files are cleaned on the next startup, warning if another process still holds the old version.
+- **CDP:** `cdp.launch` now resolves `user_data_dir` to an absolute path before handing it to the browser, fixing Chrome profile errors when a relative path is passed (e.g. `.browser-profile` on Windows).
+- **CDP:** `cdp.launch` failures now report the browser's exit status and captured stderr instead of the generic "failed to start within 5s timeout" message.
+
 ## [1.5.5] - 2026-09-28
 
 ### Added

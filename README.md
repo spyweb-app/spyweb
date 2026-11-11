@@ -90,6 +90,11 @@ Invoke-WebRequest -Uri https://dl.spyweb.app/windows -OutFile spyweb.tar.gz; tar
 
 ```
 
+> **Linux VPS, aarch64, musl, older glibc, or container deployments:** use the
+> [SpyWeb deployment repo](https://github.com/spyweb-app/deploy). It includes
+> architecture-aware package fetching, systemd and Caddy setup, Docker images,
+> and source-build instructions.
+
 ### Release Structure
 ```text
 spyweb/
@@ -155,7 +160,7 @@ Other useful flags:
 ./spyweb profile clear <target>      # Wipe a profile (cookies/cache, keeps directory)
 ./spyweb profile delete <target>     # Delete a profile directory entirely
 ./spyweb test [<job> [<pattern>]]    # Run Lua tests (`spyweb test server` for the API suite)
-./spyweb debug "<job>"               # Run a single job with debug output
+./spyweb debug "<job>"               # Debug the first URL through the pre-store pipeline
 ```
 
 See [CLI & Operations](https://docs.spyweb.app/cli-and-operations/) for the full reference.
