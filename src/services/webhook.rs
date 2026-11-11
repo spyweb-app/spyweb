@@ -1,4 +1,5 @@
 use crate::scraper::extractor::ExtractedItem;
+use crate::services::http;
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -66,7 +67,12 @@ fn send_webhook(
     headers: Option<&HashMap<String, String>>,
     payload: serde_json::Value,
 ) -> Result<()> {
-    let mut request = ureq::post(url);
+    let agent = http::build_agent(
+        None,
+        std::time::Duration::from_secs(http::DEFAULT_TIMEOUT_SECS),
+    )
+    .map_err(|e| anyhow::anyhow!("webhook failed: {e}"))?;
+    let mut request = agent.post(url);
 
     if let Some(header_map) = headers {
         for (key, value) in header_map {

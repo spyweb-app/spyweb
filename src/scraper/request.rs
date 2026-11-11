@@ -11,6 +11,7 @@ use ureq::http::HeaderMap;
 use ureq::{Agent, Proxy};
 
 use crate::config::types::{JobConfig, Rotate};
+use crate::services::net_guard;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
@@ -324,7 +325,7 @@ impl RequestHandler {
                 .build();
         }
 
-        Ok(config.into())
+        net_guard::agent_with_guard(config).map_err(|e| anyhow::anyhow!(e))
     }
 
     pub(crate) fn select_proxy(&self, job: &JobConfig) -> Option<String> {

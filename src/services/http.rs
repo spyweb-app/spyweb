@@ -3,6 +3,8 @@ use std::io::Read;
 use std::time::{Duration, Instant};
 use ureq::{Agent, Proxy};
 
+use crate::services::net_guard;
+
 pub const MAX_RESPONSE_BODY: u64 = 10 * 1024 * 1024;
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
@@ -67,7 +69,7 @@ pub fn build_agent(proxy_url: Option<&str>, timeout: Duration) -> Result<Agent, 
             .build();
     }
 
-    Ok(config.into())
+    net_guard::agent_with_guard(config)
 }
 
 pub fn do_http(

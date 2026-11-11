@@ -2,6 +2,8 @@ use std::io::Write;
 use std::net::TcpStream;
 use std::time::Duration;
 
+use crate::services::net_guard;
+
 pub struct TlsInfo {
     pub subject: String,
     pub issuer: String,
@@ -19,9 +21,24 @@ pub fn do_tls_probe(host: &str, port: u16) -> Result<TlsInfo, String> {
     // Install crypto provider if not already installed
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let addr = format!("{}:{}", host, port);
-    let mut tcp =
-        TcpStream::connect(&addr).map_err(|e| format!("tls_probe: connection failed: {e}"))?;
+    let addrs = net_guard::resolve_validated(host, port, net_guard::block_private())?;
+    let mut tcp = None;
+    let mut last_error = None;
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, Duration::from_secs(10)) {
+            Ok(stream) => {
+                tcp = Some(stream);
+                break;
+            }
+            Err(err) => last_error = Some(err),
+        }
+    }
+    let mut tcp = tcp.ok_or_else(|| {
+        let error = last_error
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "no addresses".to_string());
+        format!("tls_probe: connection failed: {error}")
+    })?;
     tcp.set_read_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| format!("tls_probe: {e}"))?;
 

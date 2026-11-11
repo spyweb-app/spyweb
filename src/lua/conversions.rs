@@ -96,7 +96,10 @@ pub fn response_to_lua(lua: &Lua, res: &RequestResult) -> Result<Table> {
 
 pub(crate) fn error_kind(message: &str) -> &'static str {
     let lower = message.to_ascii_lowercase();
-    if lower.contains("http status:") {
+    if lower.contains("blocked private network address") || lower.contains("private-network guard")
+    {
+        "blocked"
+    } else if lower.contains("http status:") {
         "http"
     } else if lower.contains("dns") || lower.contains("resolve") {
         "dns"
