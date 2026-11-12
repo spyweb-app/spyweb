@@ -25,7 +25,7 @@ spyweb watches `jobs.toml` and all `jobs/*/config.toml` files. Edit a config or 
 If you prefer to compile spyweb from source instead of using the pre-compiled binary, ensure you have Rust installed:
 
 ```bash
-git clone https://github.com/spyweb-rs/spyweb.git
+git clone https://github.com/spyweb-app/spyweb.git
 cd spyweb
 
 # Build CLI binary only
